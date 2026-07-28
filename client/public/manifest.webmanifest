@@ -1,0 +1,25 @@
+{
+  "name": "LedgerWatch — Receivables & Market Watch",
+  "short_name": "LedgerWatch",
+  "description": "Chase the money you are owed and watch the markets you cannot, so nothing slips while you run your business.",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0A1428",
+  "theme_color": "#0A1428",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "maskable"
+    }
+  ]
+}

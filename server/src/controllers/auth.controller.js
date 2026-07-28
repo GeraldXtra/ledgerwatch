@@ -1,0 +1,150 @@
+const bcrypt = require("bcryptjs");
+const User = require("../models/User");
+const Portfolio = require("../models/Portfolio");
+const signToken = require("../utils/token");
+const publicUser = require("../utils/publicUser");
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SALT_ROUNDS = 10;
+
+/**
+ * POST /api/auth/register
+ * Body: { name, email, password, bankDetails? }
+ * Creates the user (hashed password) and auto-creates their sim Portfolio.
+ * Returns { token, user }.
+ */
+async function register(req, res) {
+  try {
+    const { name, email, password, bankDetails } = req.body || {};
+
+    // Validation
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: "name, email and password are required" });
+    }
+    if (!EMAIL_REGEX.test(email)) {
+      return res.status(400).json({ error: "Invalid email format" });
+    }
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    }
+
+    const normalizedEmail = String(email).toLowerCase().trim();
+
+    // Duplicate email pre-check
+    const existing = await User.findOne({ email: normalizedEmail });
+    if (existing) {
+      return res.status(409).json({ error: "Email already registered" });
+    }
+
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+
+    const user = await User.create({
+      name,
+      email: normalizedEmail,
+      passwordHash,
+      bankDetails: bankDetails || {},
+    });
+
+    // Auto-create the user's sim Portfolio (cashBalance default 1,000,000).
+    await Portfolio.create({ userId: user._id });
+
+    const token = signToken(user._id);
+    return res.status(201).json({ token, user: publicUser(user) });
+  } catch (err) {
+    // Safety net for the unique index race.
+    if (err && err.code === 11000) {
+      return res.status(409).json({ error: "Email already registered" });
+    }
+    console.error("register error:", err.message);
+    return res.status(500).json({ error: "Registration failed" });
+  }
+}
+
+/**
+ * POST /api/auth/login
+ * Body: { email, password }
+ * Returns { token, user }.
+ */
+async function login(req, res) {
+  try {
+    const { email, password } = req.body || {};
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "email and password are required" });
+    }
+
+    const normalizedEmail = String(email).toLowerCase().trim();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    // Same generic message whether the user is missing or the password is wrong.
+    if (!user) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    const match = await bcrypt.compare(password, user.passwordHash);
+    if (!match) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    const token = signToken(user._id);
+    return res.status(200).json({ token, user: publicUser(user) });
+  } catch (err) {
+    console.error("login error:", err.message);
+    return res.status(500).json({ error: "Login failed" });
+  }
+}
+
+/**
+ * GET /api/auth/me  (protected)
+ * Returns { user }.
+ */
+async function me(req, res) {
+  return res.status(200).json({ user: publicUser(req.user) });
+}
+
+/**
+ * PATCH /api/auth/me  (protected)
+ * Updates the logged-in user's name and/or bankDetails. Returns { user }.
+ */
+async function updateMe(req, res) {
+  try {
+    const { name, bankDetails, autoSend } = req.body || {};
+    const updates = {};
+
+    if (typeof name === "string" && name.trim()) {
+      updates.name = name.trim();
+    }
+    if (bankDetails && typeof bankDetails === "object") {
+      updates.bankDetails = {
+        accountName: bankDetails.accountName,
+        accountNumber: bankDetails.accountNumber,
+        bankName: bankDetails.bankName,
+      };
+    }
+    // Opt-in automatic reminder delivery. Coerced to booleans so a stray value can't
+    // enable a channel unexpectedly.
+    if (autoSend && typeof autoSend === "object") {
+      updates.autoSend = {
+        enabled: Boolean(autoSend.enabled),
+        whatsapp: Boolean(autoSend.whatsapp),
+        email: Boolean(autoSend.email),
+      };
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "Nothing to update (provide name, bankDetails, and/or autoSend)" });
+    }
+
+    const user = await User.findByIdAndUpdate(req.user._id, updates, {
+      new: true,
+      runValidators: true,
+    }).select("-passwordHash");
+
+    return res.status(200).json({ user: publicUser(user) });
+  } catch (err) {
+    console.error("updateMe error:", err.message);
+    return res.status(500).json({ error: "Update failed" });
+  }
+}
+
+module.exports = { register, login, me, updateMe };

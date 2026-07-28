@@ -1,0 +1,220 @@
+import { useState } from "react";
+import { ethers } from "ethers";
+import { ShieldCheck } from "lucide-react";
+import { Button, Field, Input, Select, useToast } from "../../components/ui";
+import { getProvider, ERC20_ABI } from "./provider";
+import { unlockWallet } from "./keystore";
+import { recordTx, updateTxStatus } from "./walletApi";
+
+/**
+ * Send flow with a hard human-in-the-loop gate:
+ *   form → estimate gas → REVIEW summary → password → sign LOCALLY → broadcast.
+ * The key is decrypted only for the signing call and is discarded immediately. The
+ * agent can pre-fill this form but never signs — only the user's password does.
+ */
+export default function SendForm({ address, chain, onSent, onConfirmed }) {
+  const toast = useToast();
+  const [step, setStep] = useState("form"); // form → review
+  const [to, setTo] = useState("");
+  const [amount, setAmount] = useState("");
+  const [asset, setAsset] = useState("native"); // "native" | token address
+  const [estimate, setEstimate] = useState(null); // { gasLimit, feeEth }
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const tokens = chain.tokens || [];
+  const selectedToken = asset === "native" ? null : tokens.find((t) => t.address === asset);
+  const symbol = selectedToken ? selectedToken.symbol : chain.nativeSymbol;
+  const decimals = selectedToken ? selectedToken.decimals : chain.decimals;
+
+  async function review(e) {
+    e.preventDefault();
+    setError("");
+    if (!ethers.isAddress(to)) return setError("Enter a valid recipient address.");
+    let value;
+    try {
+      value = ethers.parseUnits(String(amount), decimals);
+    } catch {
+      return setError("Enter a valid amount.");
+    }
+    if (value <= 0n) return setError("Amount must be greater than zero.");
+
+    setBusy(true);
+    try {
+      const provider = getProvider(chain.chainId);
+      let gasLimit;
+      if (selectedToken) {
+        const iface = new ethers.Interface(ERC20_ABI);
+        const data = iface.encodeFunctionData("transfer", [to, value]);
+        gasLimit = await provider.estimateGas({ from: address, to: selectedToken.address, data });
+      } else {
+        gasLimit = await provider.estimateGas({ from: address, to, value });
+      }
+      const fee = await provider.getFeeData();
+      const price = fee.maxFeePerGas || fee.gasPrice || 0n;
+      const feeWei = gasLimit * price;
+      setEstimate({
+        gasLimit: gasLimit.toString(),
+        feeEth: ethers.formatEther(feeWei),
+      });
+      setStep("review");
+    } catch (err) {
+      setError(friendly(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmSend(e) {
+    e.preventDefault();
+    setError("");
+    if (!password) return setError("Enter your wallet password to sign.");
+    setBusy(true);
+    try {
+      const provider = getProvider(chain.chainId);
+      // Decrypt on demand; the plaintext key lives only for this signing call.
+      const unlocked = await unlockWallet(password);
+      const signer = unlocked.connect(provider);
+
+      const value = ethers.parseUnits(String(amount), decimals);
+      let txResp;
+      if (selectedToken) {
+        const contract = new ethers.Contract(selectedToken.address, ERC20_ABI, signer);
+        txResp = await contract.transfer(to, value);
+      } else {
+        txResp = await signer.sendTransaction({ to, value });
+      }
+
+      // Record PUBLIC data only.
+      const recorded = await recordTx({
+        chainId: chain.chainId,
+        hash: txResp.hash,
+        from: address,
+        to,
+        value: String(amount),
+        symbol,
+        tokenAddress: selectedToken ? selectedToken.address : null,
+        direction: "out",
+      }).catch(() => null);
+
+      // Settle the status in the background — a testnet confirmation takes 10-30s and
+      // must never block the UI. WalletPage also reconciles stragglers on load, so a
+      // tx that confirms after a reload still resolves.
+      if (recorded && recorded._id) {
+        txResp
+          .wait()
+          .then((receipt) =>
+            updateTxStatus(recorded._id, receipt && receipt.status === 1 ? "confirmed" : "failed")
+          )
+          .then(() => onConfirmed && onConfirmed())
+          .catch(() => {});
+      }
+
+      toast(`Sent ${amount} ${symbol}. Track it in history.`, { type: "success" });
+      onSent(txResp);
+    } catch (err) {
+      setError(friendly(err));
+      setBusy(false);
+    }
+  }
+
+  function friendly(err) {
+    const msg = (err && (err.shortMessage || err.reason || err.message)) || "Transaction failed";
+    if (/incorrect password|invalid password|could not decrypt/i.test(msg)) {
+      return "Incorrect password.";
+    }
+    if (/insufficient funds/i.test(msg)) return "Insufficient funds for amount + gas.";
+    return msg;
+  }
+
+  if (step === "review") {
+    return (
+      <form className="stack" onSubmit={confirmSend}>
+        <div>
+          <h3 className="section-title">Review &amp; confirm</h3>
+          <p className="muted small" style={{ margin: "4px 0 0" }}>
+            You approve every transaction. Nothing is signed until you enter your password.
+          </p>
+        </div>
+
+        <dl className="tx-summary">
+          <div><dt>Network</dt><dd>{chain.name}</dd></div>
+          <div><dt>Asset</dt><dd>{symbol}</dd></div>
+          <div><dt>To</dt><dd className="num">{to}</dd></div>
+          <div><dt>Amount</dt><dd className="num">{amount} {symbol}</dd></div>
+          <div><dt>Est. network fee</dt><dd className="num">≈ {Number(estimate.feeEth).toFixed(6)} {chain.nativeSymbol}</dd></div>
+        </dl>
+
+        <Field label="Wallet password">
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoFocus
+            required
+          />
+        </Field>
+
+        {error && <p className="error-text">{error}</p>}
+
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <Button variant="ghost" onClick={() => { setStep("form"); setPassword(""); }} disabled={busy}>
+            Back
+          </Button>
+          <Button variant="primary" type="submit" disabled={busy}>
+            {busy ? "Signing…" : "Sign & send"}
+          </Button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <form className="stack" onSubmit={review}>
+      <div>
+        <h3 className="section-title">Send</h3>
+        <p className="muted small" style={{ margin: "4px 0 0" }}>
+          On {chain.name} · testnet funds only.
+        </p>
+      </div>
+
+      <Field label="Recipient address">
+        <Input value={to} onChange={(e) => setTo(e.target.value)} placeholder="0x…" required />
+      </Field>
+      <div className="grid2">
+        <Field label="Amount">
+          <Input
+            type="number"
+            min="0"
+            step="any"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            required
+          />
+        </Field>
+        <Field label="Asset">
+          <Select value={asset} onChange={(e) => setAsset(e.target.value)}>
+            <option value="native">{chain.nativeSymbol} (native)</option>
+            {tokens.map((t) => (
+              <option key={t.address} value={t.address}>{t.symbol}</option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+
+      <div className="wallet-guarantee subtle">
+        <ShieldCheck size={15} />
+        <span>The next step shows a full summary and asks for your password before anything is signed.</span>
+      </div>
+
+      {error && <p className="error-text">{error}</p>}
+
+      <div className="row" style={{ justifyContent: "flex-end" }}>
+        <Button variant="primary" type="submit" disabled={busy}>
+          {busy ? "Estimating…" : "Review transaction"}
+        </Button>
+      </div>
+    </form>
+  );
+}

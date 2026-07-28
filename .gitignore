@@ -1,0 +1,11 @@
+# LedgerWatch — root ignore (belt-and-suspenders; server/ and client/ each have their own)
+# Never commit secrets or dependencies.
+**/node_modules/
+**/.env
+.env
+**/dist/
+dist/
+*.log
+.DS_Store
+.env.local
+build/

@@ -1,0 +1,11 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Full-bleed navy so the icon survives circular/rounded maskable cropping. -->
+  <rect width="512" height="512" fill="#16294A"/>
+  <!-- Ledger-to-chart bars + the watch dot, centred inside the 80% safe zone. -->
+  <g transform="translate(96,96) scale(10)">
+    <rect x="8" y="19" width="4" height="6" rx="1.4" fill="#FFFFFF" opacity="0.62"/>
+    <rect x="14" y="15" width="4" height="10" rx="1.4" fill="#FFFFFF" opacity="0.82"/>
+    <rect x="20" y="11" width="4" height="14" rx="1.4" fill="#FFFFFF"/>
+    <circle cx="22" cy="7.5" r="2.6" fill="#C0A053"/>
+  </g>
+</svg>
