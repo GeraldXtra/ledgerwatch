@@ -223,12 +223,51 @@ async function searchCoins(q) {
   return { coins: entry.data, stale: now - entry.ts > SEARCH_TTL };
 }
 
+// ---- NGN rate for crypto receivables --------------------------------------
+const ngnCache = new Map(); // coinId -> { ngn, ts }
+const NGN_TTL = 5 * 60 * 1000; // 5 min — an invoice rate does not need to tick
+
+/**
+ * Price of a coin in NGN. Used to snapshot the rate when an invoice payment
+ * address is issued, so the token amount owed is unambiguous later.
+ *
+ * Same discipline as the rest of this module: cached, single-flighted, serves
+ * stale on failure, and NEVER throws — the caller falls back to a configured
+ * rate so address generation cannot hard-fail on a third-party outage.
+ *
+ * @returns {Promise<{ngn:number, stale:boolean}|null>}
+ */
+async function getNgnPrice(coinId = "usd-coin") {
+  const now = Date.now();
+  const hit = ngnCache.get(coinId);
+  if (hit && now - hit.ts < NGN_TTL) return { ngn: hit.ngn, stale: false };
+
+  await singleFlight(`ngn:${coinId}`, async () => {
+    try {
+      console.log(`CoinGecko GET simple/price [${coinId} in ngn]`);
+      const { data } = await axios.get(`${API}/simple/price`, {
+        params: { ids: coinId, vs_currencies: "ngn" },
+        timeout: TIMEOUT,
+      });
+      const ngn = data && data[coinId] && data[coinId].ngn;
+      if (typeof ngn === "number" && ngn > 0) ngnCache.set(coinId, { ngn, ts: Date.now() });
+    } catch (err) {
+      logError("simple/price ngn", err);
+    }
+  });
+
+  const entry = ngnCache.get(coinId);
+  if (!entry) return null; // caller uses its configured fallback
+  return { ngn: entry.ngn, stale: Date.now() - entry.ts > NGN_TTL };
+}
+
 module.exports = {
   getMarketsMap,
   getPrices,
   getPrice,
   getChart,
   searchCoins,
+  getNgnPrice,
   MARKETS_TTL,
   CHART_TTL,
   SEARCH_TTL,

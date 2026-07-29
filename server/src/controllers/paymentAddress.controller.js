@@ -1,0 +1,120 @@
+const PaymentAddress = require("../models/PaymentAddress");
+const { getChain, listChains } = require("../config/chains");
+const { confirmationsFor } = require("../config/derivation");
+const { allocateIndex, issueAddress, getNgnRate } = require("../services/paymentAddress.service");
+
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+/**
+ * POST /api/payment-addresses/allocate  { chainId }
+ *
+ * Step 1 of a two-step issue. Reserves the next derivation index atomically and
+ * returns it plus the chain/token context. The client then derives the address
+ * for that index IN THE BROWSER and posts it back to /issue. The server never
+ * sees a key or a seed at any point.
+ */
+async function allocate(req, res) {
+  try {
+    const chainId = Number(req.body && req.body.chainId);
+    const chain = getChain(chainId);
+    if (!chain) return res.status(400).json({ error: "Unknown or disabled chain" });
+
+    const token = (chain.tokens || [])[0];
+    if (!token) {
+      return res.status(400).json({ error: `No stablecoin configured for ${chain.name}` });
+    }
+
+    const derivationIndex = await allocateIndex(req.user._id);
+    const rate = await getNgnRate();
+
+    return res.json({
+      derivationIndex,
+      chain: {
+        chainId: chain.chainId,
+        name: chain.name,
+        explorer: chain.explorer,
+        testnet: chain.testnet,
+      },
+      token,
+      confirmations: confirmationsFor(chain.chainId),
+      rate: { ngnPerToken: rate.rate, fetchedAt: rate.fetchedAt, stale: rate.stale },
+    });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error("allocate index error:", err.message);
+    return res.status(500).json({ error: "Failed to allocate a payment address" });
+  }
+}
+
+/**
+ * POST /api/payment-addresses  { debtId, chainId, address, derivationIndex }
+ * Step 2: record the browser-derived address against the invoice.
+ */
+async function create(req, res) {
+  try {
+    const { debtId, chainId, address, derivationIndex } = req.body || {};
+    if (!ADDRESS_RE.test(address || "")) {
+      return res.status(400).json({ error: "Invalid address" });
+    }
+    if (!Number.isInteger(derivationIndex) || derivationIndex < 0) {
+      return res.status(400).json({ error: "Invalid derivation index" });
+    }
+
+    const result = await issueAddress({
+      userId: req.user._id,
+      debtId,
+      chainId: Number(chainId),
+      address,
+      derivationIndex,
+    });
+
+    return res.status(201).json({
+      paymentAddress: result.paymentAddress,
+      chain: result.chain,
+      rateStale: result.rateStale,
+    });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    // A duplicate index means the unique guard caught a logic slip — surface it
+    // loudly rather than letting two invoices share an address.
+    if (err.code === 11000) {
+      return res
+        .status(409)
+        .json({ error: "That derivation index is already in use. Please try again." });
+    }
+    console.error("create payment address error:", err.message);
+    return res.status(500).json({ error: "Failed to create the payment address" });
+  }
+}
+
+// GET /api/payment-addresses?debtId=  -> addresses for an invoice (or all).
+async function list(req, res) {
+  try {
+    const query = { userId: req.user._id };
+    if (req.query.debtId) query.debtId = req.query.debtId;
+    const addresses = await PaymentAddress.find(query).sort({ createdAt: -1 }).limit(100);
+    return res.json({ addresses, chains: listChains() });
+  } catch (err) {
+    console.error("list payment addresses error:", err.message);
+    return res.status(500).json({ error: "Failed to load payment addresses" });
+  }
+}
+
+// PATCH /api/payment-addresses/:id/revoke -> stop watching early.
+async function revoke(req, res) {
+  try {
+    const record = await PaymentAddress.findOne({ _id: req.params.id, userId: req.user._id });
+    if (!record) return res.status(404).json({ error: "Payment address not found" });
+    if (record.status !== "active") {
+      return res.status(409).json({ error: `Address is already ${record.status}` });
+    }
+    record.status = "revoked";
+    await record.save();
+    return res.json({ paymentAddress: record });
+  } catch (err) {
+    console.error("revoke payment address error:", err.message);
+    return res.status(500).json({ error: "Failed to revoke the address" });
+  }
+}
+
+module.exports = { allocate, create, list, revoke };
