@@ -63,7 +63,11 @@ export function AuthProvider({ children }) {
     return data.user;
   }, []);
 
-  const value = { user, loading, login, register, logout, updateProfile };
+  // Push a user returned by any OTHER endpoint (avatar upload/removal) into
+  // context, so the sidebar and topbar update without a refetch.
+  const applyUser = useCallback((next) => setUser(next), []);
+
+  const value = { user, loading, login, register, logout, updateProfile, applyUser };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

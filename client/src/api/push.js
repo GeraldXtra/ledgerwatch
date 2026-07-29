@@ -1,8 +1,8 @@
 import http from "./http";
 
-// The API base the service worker should call. Passed on the SW registration URL so
-// it persists across SW restarts. Mirrors http.js's baseURL resolution.
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+// The API base the service worker should call. Passed on the registration URL
+// because a service worker cannot read Vite env or localStorage.
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export function pushSupported() {
   return (
@@ -18,19 +18,19 @@ function urlBase64ToUint8Array(base64String) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
   const raw = window.atob(base64);
-  const output = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i);
-  return output;
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
 }
 
-// Register (or reuse) the service worker. Query string carries the API base.
 export async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return null;
-  const url = `/sw.js?api=${encodeURIComponent(API_BASE)}`;
-  return navigator.serviceWorker.register(url, { scope: "/" });
+  return navigator.serviceWorker.register(`/sw.js?api=${encodeURIComponent(API_BASE)}`, {
+    scope: "/",
+  });
 }
 
-// Current state: is push supported, is the server configured, is this browser subscribed?
+/** Is push supported, configured server-side, and subscribed on this device? */
 export async function getPushState() {
   if (!pushSupported()) {
     return { supported: false, configured: false, subscribed: false, permission: "unsupported" };
@@ -45,10 +45,7 @@ export async function getPushState() {
   let subscribed = false;
   try {
     const reg = await navigator.serviceWorker.getRegistration();
-    if (reg) {
-      const sub = await reg.pushManager.getSubscription();
-      subscribed = Boolean(sub);
-    }
+    if (reg) subscribed = Boolean(await reg.pushManager.getSubscription());
   } catch {
     subscribed = false;
   }
@@ -56,10 +53,8 @@ export async function getPushState() {
 }
 
 /**
- * Enable push for this browser. MUST be called from a user gesture (permission
- * prompt). Registers the SW, requests permission, subscribes with the server's
- * VAPID key, and persists the subscription server-side.
- * @returns {Promise<{ok:boolean, reason?:string}>}
+ * Enable push for this browser. MUST be called from a real user gesture — the
+ * permission prompt is never shown on page load.
  */
 export async function enablePush() {
   if (!pushSupported()) return { ok: false, reason: "unsupported" };
@@ -80,12 +75,10 @@ export async function enablePush() {
       applicationServerKey: urlBase64ToUint8Array(data.publicKey),
     });
   }
-
   await http.post("/api/push/subscribe", { subscription: sub.toJSON() });
   return { ok: true };
 }
 
-// Disable push for this browser: unsubscribe locally and remove server-side.
 export async function disablePush() {
   if (!pushSupported()) return { ok: true };
   try {
@@ -99,7 +92,37 @@ export async function disablePush() {
       }
     }
   } catch {
-    /* best-effort */
+    /* best effort */
   }
   return { ok: true };
+}
+
+export async function sendTestNotification() {
+  const { data } = await http.post("/api/push/test");
+  return data;
+}
+
+/**
+ * Foreground bridge: while a window is focused the service worker suppresses the
+ * OS notification and posts the payload here instead, so the user sees a single
+ * in-app toast rather than being told the same thing twice.
+ */
+export function onForegroundPush(handler) {
+  if (!("serviceWorker" in navigator)) return () => {};
+  const listener = (event) => {
+    if (event.data && event.data.type === "push") handler(event.data.payload);
+  };
+  navigator.serviceWorker.addEventListener("message", listener);
+  return () => navigator.serviceWorker.removeEventListener("message", listener);
+}
+
+/** Registers the SW on load if the user already granted permission previously. */
+export async function ensureServiceWorker() {
+  if (!pushSupported()) return;
+  if (Notification.permission !== "granted") return;
+  try {
+    await registerServiceWorker();
+  } catch {
+    /* non-fatal */
+  }
 }

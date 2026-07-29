@@ -286,7 +286,7 @@ function WalletInner() {
             />
           )}
           {subtab === "receive" && chain && <ReceivePanel address={address} chain={chain} />}
-          {subtab === "history" && <TxHistory txs={txs} chain={chain} />}
+          {subtab === "history" && <TxHistory txs={txs} chain={chain} onReceive={() => setSubtab("receive")} />}
         </div>
       </Card>
     </>

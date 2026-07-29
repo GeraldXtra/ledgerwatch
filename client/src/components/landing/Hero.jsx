@@ -38,14 +38,14 @@ export default function Hero() {
       <div className="landing-inner hero-grid-landing">
         <div className="hero-copy">
           <span className="overline accent hero-in" style={{ animationDelay: "0ms" }}>
-            Built for small business
+            Built for companies carrying receivables
           </span>
           <h1 className="display hero-in" style={{ animationDelay: "70ms" }}>
-            Get paid what you&rsquo;re owed. Watch the markets you can&rsquo;t.
+            Collect what you&rsquo;re owed. Watch the markets you can&rsquo;t.
           </h1>
           <p className="lead hero-in" style={{ animationDelay: "140ms" }}>
-            LedgerWatch chases every debt for you and monitors crypto around the clock, so
-            nothing slips while you run the business.
+            LedgerWatch chases every outstanding invoice for you and monitors the market around
+            the clock, so nothing slips while you run the business.
           </p>
           <div className="row wrap hero-in" style={{ animationDelay: "210ms" }}>
             <Link to="/login" className="btn btn-primary btn-lg">

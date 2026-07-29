@@ -3,6 +3,17 @@ import { ShieldAlert } from "lucide-react";
 import http from "../../api/http";
 import { Button, Field, Input } from "../../components/ui";
 import ReliabilityBadge from "./ReliabilityBadge";
+import { compactNgn } from "./format";
+
+/** Group the integer part with thousand separators while preserving what the
+ *  user is mid-way through typing (including a trailing decimal point). */
+function groupDigits(raw) {
+  const s = String(raw ?? "");
+  if (!s) return "";
+  const [intPart, ...rest] = s.split(".");
+  const grouped = intPart ? Number(intPart).toLocaleString("en-NG") : "";
+  return rest.length ? `${grouped}.${rest.join("")}` : grouped;
+}
 
 const EMPTY = {
   debtorName: "",
@@ -130,15 +141,25 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
               placeholder="name@example.com"
             />
           </Field>
-          <Field label="Amount (NGN)">
+          <Field label="Amount (₦)">
+            {/* Text rather than number so thousand separators can be shown while
+                typing — enterprise invoices run to nine figures and an unbroken
+                run of digits is unreadable. The raw numeric string is kept in
+                state; only the display is grouped. */}
             <Input
-              type="number"
-              min="1"
-              step="any"
-              value={form.amount}
-              onChange={update("amount")}
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              value={groupDigits(form.amount)}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, amount: e.target.value.replace(/[^\d.]/g, "") }))
+              }
+              placeholder="0"
               required
             />
+            {Number(form.amount) >= 1e6 && (
+              <span className="field-hint num">{compactNgn(Number(form.amount))}</span>
+            )}
           </Field>
           <Field label="Due date">
             <Input type="date" value={form.dueDate} onChange={update("dueDate")} required />

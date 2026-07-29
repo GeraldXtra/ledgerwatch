@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "seed": "node src/seed/seed.js"
+    "seed:demo": "node src/seed/seed.js",
+    "dedupe-alerts": "node src/scripts/dedupe-alerts.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

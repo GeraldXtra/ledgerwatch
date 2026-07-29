@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { ArrowDown, ArrowUp, Users } from "lucide-react";
 import http from "../../api/http";
 import { Avatar, Card, EmptyState, SkeletonLines } from "../../components/ui";
@@ -60,8 +61,13 @@ export default function DebtorsView() {
       ) : debtors.length === 0 ? (
         <EmptyState
           icon={<Users size={20} />}
-          title="No debtors yet"
-          hint="Record a debt and your customers appear here with a reliability score as they build a payment history."
+          title="No clients yet"
+          hint="Record an invoice and your clients appear here with a reliability score as they build a payment history."
+          action={
+            <Link to="/app/receivables" className="btn btn-primary btn-sm">
+              Record your first invoice
+            </Link>
+          }
         />
       ) : (
         <div className="table-wrap">

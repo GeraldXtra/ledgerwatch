@@ -73,7 +73,7 @@ function Receivables() {
     <>
       <PageHeader
         title="Receivables"
-        support="Track credit sales, record part-payments, and see which customers actually pay."
+        support="Track invoices, record part-payments, and see which clients actually pay on terms."
       />
 
       <div className="subtabs" role="tablist">

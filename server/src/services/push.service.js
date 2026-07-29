@@ -1,8 +1,14 @@
 const jwt = require("jsonwebtoken");
 const PushSubscription = require("../models/PushSubscription");
+const User = require("../models/User");
 
-// Lazy web-push init so the app runs fine with no VAPID keys configured — every
-// send simply no-ops. Mirrors the graceful-degradation pattern in notify.service.
+/**
+ * Web Push delivery.
+ *
+ * Lazily initialised so the app runs perfectly well with no VAPID keys — every
+ * send becomes a no-op and the client falls back to in-app toasts. Nothing here
+ * ever throws into a caller.
+ */
 let webpush = null;
 let configured = false;
 let initTried = false;
@@ -13,7 +19,7 @@ function getWebPush() {
 
   const { VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT } = process.env;
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
-    console.log("[push] VAPID keys not set — push notifications disabled (graceful).");
+    console.log("[push] VAPID keys not set — push disabled (in-app toasts still work).");
     return null;
   }
 
@@ -33,23 +39,17 @@ function getWebPush() {
   }
 }
 
-function pushConfigured() {
-  return Boolean(getWebPush());
-}
-
-function publicKey() {
-  return process.env.VAPID_PUBLIC_KEY || null;
-}
+const pushConfigured = () => Boolean(getWebPush());
+const publicKey = () => process.env.VAPID_PUBLIC_KEY || null;
 
 /**
- * Short-lived, single-purpose action token embedded in a push payload. Because a
- * service worker cannot read the JWT from localStorage, the notification carries
- * this token so its action buttons can call an authenticated endpoint. It is bound
- * to ONE action + ONE resource and expires quickly, so it cannot be replayed for
- * anything else.
- * @param {string} userId
- * @param {"send_whatsapp"|"send_email"|"approve"|"dismiss"} act
- * @param {string} ref  the debt id (reminder actions) or alert id (alert actions)
+ * Short-lived, single-purpose token embedded in a push payload.
+ *
+ * A service worker cannot read the JWT from localStorage, so the notification
+ * carries this instead. It is bound to ONE action and ONE resource and expires
+ * in 15 minutes, so it cannot be replayed for anything else.
+ *
+ * @param {"dismiss_alert"|"send_whatsapp"|"send_email"} act
  */
 function signActionToken(userId, act, ref) {
   return jwt.sign(
@@ -61,20 +61,36 @@ function signActionToken(userId, act, ref) {
 
 function verifyActionToken(token) {
   const decoded = jwt.verify(token, process.env.JWT_SECRET);
-  if (decoded.kind !== "push_action") {
-    throw new Error("Not a push action token");
-  }
-  return decoded; // { sub, act, ref }
+  if (decoded.kind !== "push_action") throw new Error("Not a push action token");
+  return decoded;
 }
 
 /**
- * Send a push payload to every subscription of a user. Prunes subscriptions that
- * the push service reports as gone (404/410). Never throws.
+ * Should this user receive this category of notification? Per-type opt-outs live
+ * on the user; the default is on once they have granted permission.
+ */
+async function wantsCategory(userId, category) {
+  try {
+    const user = await User.findById(userId).select("notifyPrefs").lean();
+    const prefs = (user && user.notifyPrefs) || {};
+    return prefs[category] !== false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Send to every subscription belonging to a user. Prunes endpoints the push
+ * service reports as gone. Never throws.
  * @returns {Promise<{sent:number, skipped?:boolean}>}
  */
-async function notifyUser(userId, payload) {
+async function notifyUser(userId, payload, category) {
   const wp = getWebPush();
   if (!wp) return { sent: 0, skipped: true };
+
+  if (category && !(await wantsCategory(userId, category))) {
+    return { sent: 0, skipped: true };
+  }
 
   let subs;
   try {
@@ -90,13 +106,10 @@ async function notifyUser(userId, payload) {
   await Promise.all(
     subs.map(async (sub) => {
       try {
-        await wp.sendNotification(
-          { endpoint: sub.endpoint, keys: sub.keys },
-          body
-        );
+        await wp.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, body);
         sent++;
       } catch (err) {
-        // 404/410 => the subscription is dead; remove it so we stop trying.
+        // 404/410 => the subscription is dead; drop it so we stop retrying.
         if (err.statusCode === 404 || err.statusCode === 410) {
           await PushSubscription.deleteOne({ _id: sub._id }).catch(() => {});
         } else {

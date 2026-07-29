@@ -30,6 +30,18 @@ const userSchema = new mongoose.Schema({
   autoSend: { type: autoSendSchema, default: () => ({}) },
   // Public wallet address only — private keys never touch the server (Phase 4).
   walletAddress: { type: String, default: null },
+  // Profile picture as a base64 data URL. Stored on the document so it needs no
+  // external object storage and survives redeploys; the client square-crops and
+  // resizes to ~512px first, and the server caps the DECODED size at 2MB.
+  avatarUrl: { type: String, default: null },
+  // Shown on reminders and statements alongside the payout details.
+  companyName: { type: String, default: "" },
+  // Per-category push opt-outs. Absent/true = send; explicit false = suppress.
+  notifyPrefs: {
+    marketAlerts: { type: Boolean, default: true },
+    remindersDue: { type: Boolean, default: true },
+    txUpdates: { type: Boolean, default: true },
+  },
   createdAt: { type: Date, default: Date.now },
 });
 

@@ -1,27 +1,31 @@
 const PushSubscription = require("../models/PushSubscription");
 const User = require("../models/User");
-const Debt = require("../models/Debt");
 const Alert = require("../models/Alert");
-const { publicKey, verifyActionToken } = require("../services/push.service");
+const Debt = require("../models/Debt");
+const {
+  publicKey,
+  verifyActionToken,
+  notifyUser,
+  pushConfigured,
+} = require("../services/push.service");
 const {
   generateReminderForDebt,
   dispatchReminder,
 } = require("../services/reminder.service");
-const { approveAlert } = require("../services/market.service");
 
-// GET /api/push/key  -> the VAPID public key (or null when push is not configured).
+// GET /api/push/key -> VAPID public key (null when push is not configured).
 async function key(req, res) {
-  return res.json({ publicKey: publicKey() });
+  return res.json({ publicKey: publicKey(), configured: pushConfigured() });
 }
 
-// POST /api/push/subscribe  { subscription: { endpoint, keys:{p256dh, auth} } }
-// Upsert by endpoint so re-subscribing the same browser never duplicates.
+// POST /api/push/subscribe { subscription }
 async function subscribe(req, res) {
   try {
     const sub = req.body && req.body.subscription;
     if (!sub || !sub.endpoint || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) {
       return res.status(400).json({ error: "Invalid subscription" });
     }
+    // Upsert by endpoint so re-subscribing the same browser never duplicates.
     await PushSubscription.findOneAndUpdate(
       { endpoint: sub.endpoint },
       {
@@ -39,12 +43,11 @@ async function subscribe(req, res) {
   }
 }
 
-// POST /api/push/unsubscribe  { endpoint }
+// POST /api/push/unsubscribe { endpoint }
 async function unsubscribe(req, res) {
   try {
     const endpoint = req.body && req.body.endpoint;
     if (!endpoint) return res.status(400).json({ error: "endpoint required" });
-    // Only remove the caller's own subscription.
     await PushSubscription.deleteOne({ endpoint, userId: req.user._id });
     return res.json({ ok: true });
   } catch (err) {
@@ -53,10 +56,43 @@ async function unsubscribe(req, res) {
   }
 }
 
-// POST /api/push/action  { token, action }
-// Authenticated by the short-lived action token in the payload (NOT the Bearer JWT —
-// a service worker cannot read localStorage). The token is bound to one action and
-// one resource; we re-check ownership and the requested action against it.
+// POST /api/push/test -> lets the user verify delivery end to end.
+async function test(req, res) {
+  try {
+    const result = await notifyUser(req.user._id, {
+      title: "LedgerWatch test notification",
+      body: "If you can see this, notifications are working on this device.",
+      tag: "test",
+      type: "test",
+      url: "/app/settings",
+    });
+    if (result.skipped) {
+      return res
+        .status(503)
+        .json({ error: "Push is not configured on the server (no VAPID keys)." });
+    }
+    if (result.sent === 0) {
+      return res
+        .status(404)
+        .json({ error: "No push subscriptions for this account. Enable notifications first." });
+    }
+    return res.json({ ok: true, sent: result.sent });
+  } catch (err) {
+    console.error("push test error:", err.message);
+    return res.status(500).json({ error: "Failed to send test notification" });
+  }
+}
+
+/**
+ * POST /api/push/action { token, action }
+ *
+ * Authenticated by the short-lived action token in the body, because a service
+ * worker cannot attach the Bearer JWT. The token is bound to one action and one
+ * resource, and is re-checked against the requested action here.
+ *
+ * NOTE: buy/sell are deliberately NOT executable from a notification — those
+ * deep-link into the app so the user still sets an amount and confirms.
+ */
 async function action(req, res) {
   try {
     const { token } = req.body || {};
@@ -72,34 +108,23 @@ async function action(req, res) {
     const user = await User.findById(claims.sub).select("-passwordHash");
     if (!user) return res.status(401).json({ error: "User no longer exists" });
 
+    if (claims.act === "dismiss_alert") {
+      await Alert.updateOne(
+        { _id: claims.ref, userId: user._id, status: "pending" },
+        { status: "dismissed", userAction: "dismiss", actedAt: new Date() }
+      );
+      return res.json({ ok: true, act: claims.act });
+    }
+
     if (claims.act === "send_whatsapp" || claims.act === "send_email") {
       const debt = await Debt.findOne({ _id: claims.ref, userId: user._id });
       if (!debt) return res.status(404).json({ error: "Debt not found" });
       const channel = claims.act === "send_whatsapp" ? "whatsapp" : "email";
-      const result = await generateReminderForDebt(debt, user);
-      const deliveries = await dispatchReminder(result.reminder, debt, user, {
+      const generated = await generateReminderForDebt(debt, user);
+      const deliveries = await dispatchReminder(generated.reminder, debt, user, {
         channels: [channel],
       });
       return res.json({ ok: true, act: claims.act, deliveries });
-    }
-
-    if (claims.act === "approve") {
-      const alert = await Alert.findOne({ _id: claims.ref, userId: user._id });
-      if (!alert) return res.status(404).json({ error: "Alert not found" });
-      if (alert.status !== "pending") {
-        return res.json({ ok: true, act: "approve", already: alert.status });
-      }
-      const result = await approveAlert(user._id, alert);
-      return res.json({ ok: true, act: "approve", ...result });
-    }
-
-    if (claims.act === "dismiss") {
-      // Dismiss a pending alert if the ref is an alert; harmless no-op otherwise.
-      await Alert.updateOne(
-        { _id: claims.ref, userId: user._id, status: "pending" },
-        { status: "dismissed" }
-      ).catch(() => {});
-      return res.json({ ok: true, act: "dismiss" });
     }
 
     return res.status(400).json({ error: "Unknown action" });
@@ -109,4 +134,4 @@ async function action(req, res) {
   }
 }
 
-module.exports = { key, subscribe, unsubscribe, action };
+module.exports = { key, subscribe, unsubscribe, test, action };

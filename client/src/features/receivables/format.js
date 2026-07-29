@@ -1,24 +1,50 @@
 // Shared formatting for the Receivables module.
+//
+// Amounts run to enterprise scale (past ₦100,000,000,000). Precision is safe:
+// these are whole naira held as IEEE-754 doubles, and 1e11 sits far below the
+// 2^53 integer-safe ceiling, so nothing is lost. The real problem at that size
+// is LAYOUT — hence two formatters:
+//   ngn()        full precision, for tables, detail views, receipts and tooltips
+//   compactNgn() ₦125.4M / ₦1.2B, for KPI cards, chart axes and narrow cells
+// The ₦ symbol is used throughout: it is correct, and it buys back the width
+// that large figures need.
 
-export function ngn(amount, currency = "NGN") {
+const NAIRA = "₦";
+
+export function ngn(amount, symbol = NAIRA) {
   const n = Number(amount) || 0;
-  return `${currency} ${n.toLocaleString("en-NG")}`;
+  return `${symbol}${n.toLocaleString("en-NG", { maximumFractionDigits: 2 })}`;
 }
 
 // Whole-naira variant for CountUp: the animation feeds fractional intermediate
-// values, and `toLocaleString("en-NG")` would render them as "NGN 48,213.738".
-// Naira amounts in this app are whole, so the resting value is unchanged.
-export function ngnWhole(amount, currency = "NGN") {
-  return ngn(Math.round(Number(amount) || 0), currency);
+// values, which would otherwise render as "₦48,213.74" mid-flight. Amounts in
+// this app are whole naira, so the resting value is unchanged.
+export function ngnWhole(amount, symbol = NAIRA) {
+  return ngn(Math.round(Number(amount) || 0), symbol);
 }
 
-export function compactNgn(amount, currency = "NGN") {
+/**
+ * Compact form for tight spaces. One decimal reads better at a glance than two
+ * and keeps KPI cards from overflowing: ₦125.4M, ₦1.2B, ₦96.4M.
+ */
+export function compactNgn(amount, symbol = NAIRA) {
   const v = Number(amount) || 0;
   const abs = Math.abs(v);
-  if (abs >= 1e9) return `${currency} ${(v / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `${currency} ${(v / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `${currency} ${(v / 1e3).toFixed(1)}K`;
-  return `${currency} ${v.toLocaleString("en-NG")}`;
+  if (abs >= 1e12) return `${symbol}${(v / 1e12).toFixed(1)}T`;
+  if (abs >= 1e9) return `${symbol}${(v / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `${symbol}${(v / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `${symbol}${Math.round(v / 1e3)}K`;
+  return `${symbol}${Math.round(v).toLocaleString("en-NG")}`;
+}
+
+/**
+ * KPI figures: compact once the number would be too wide to sit comfortably at
+ * display size, full precision below that. Keeps the most-looked-at element
+ * readable at any scale without truncating or shrinking the type.
+ */
+export function kpiNgn(amount) {
+  const v = Number(amount) || 0;
+  return Math.abs(v) >= 1e6 ? compactNgn(v) : ngnWhole(v);
 }
 
 export function shortDate(value) {
