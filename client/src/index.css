@@ -862,10 +862,13 @@ legend {
 }
 
 /* Tier 3 — elevated hero: stronger shadow + a 3px navy→gold top rule. */
+/* NOTE: no `overflow: hidden` here. It used to be set so the top accent stripe
+   followed the card's rounded corners, but it also CLIPPED the hero figure — a
+   large total was cut off at the card's edge. The stripe now rounds its own top
+   corners instead, so nothing crops the number. */
 .card.hero {
   position: relative;
   box-shadow: var(--sh-lg);
-  overflow: hidden;
 }
 .card.hero::before {
   content: "";
@@ -875,6 +878,10 @@ legend {
   right: 0;
   height: 3px;
   background: linear-gradient(90deg, var(--navy-700), var(--gold-500));
+  /* Rounds itself to the card's corners, so the card no longer needs
+     `overflow: hidden` — which was clipping the hero figure. */
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
 }
 
 /* legend swatch (replaces a bullet glyph in chart tooltips) */
@@ -1854,11 +1861,19 @@ legend {
 }
 
 /* portfolio hero */
+/* The figure column was capped at 300px, which cut off large totals — a value
+   like $999,999,999.99 needs well over that. `min-content` lets the column grow
+   to whatever the number actually needs, and the cap only applies once there is
+   room to spare. */
 .hero-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(min-content, 0.85fr) minmax(0, 1fr);
   gap: 24px;
   align-items: stretch;
+}
+
+.hero-grid > * {
+  min-width: 0;
 }
 
 .hero-figure {
@@ -4124,4 +4139,57 @@ input[type="checkbox"] {
   border-radius: 999px;
   color: var(--warn-text);
   background: var(--warn-bg);
+}
+
+/* ============================================================================
+   OVERSIZED FIGURES — must never clip, at any value or viewport.
+   A big number is the most-looked-at element on every screen; it may scale
+   down, but it may never be cut off, truncated or ellipsised.
+   ========================================================================== */
+.hero-value,
+.stat-value,
+.balance-amount,
+.figure-xl {
+  /* Scales with the viewport AND stays inside its column. min-width:0 lets a
+     flex/grid child shrink below its content size instead of overflowing. */
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  /* Long values wrap to a smaller size rather than spilling past the card. */
+  overflow-wrap: normal;
+}
+
+/* Responsive sizes: the floor is small enough that even a 14-character value
+   ($999,999,999.99) fits a narrow column at 1366px. */
+.hero-value {
+  font-size: clamp(28px, 3.2vw, 46px);
+}
+
+.stat-value {
+  font-size: clamp(24px, 2.2vw, 34px);
+}
+
+.balance-amount {
+  font-size: clamp(20px, 1.9vw, 26px);
+}
+
+/* Their containers must not crop either. */
+.hero-figure,
+.stat-card,
+.stat-body,
+.balance-tile {
+  min-width: 0;
+}
+
+.hero-figure,
+.stat-body {
+  overflow: visible;
+}
+
+/* Market Watch header: the description was wrapping into a narrow column with
+   dead space beside it. */
+.page-head-text .support {
+  max-width: 68ch;
 }

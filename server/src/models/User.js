@@ -42,6 +42,21 @@ const userSchema = new mongoose.Schema({
     remindersDue: { type: Boolean, default: true },
     txUpdates: { type: Boolean, default: true },
   },
+
+  // Crypto payment rails for invoices.
+  crypto: {
+    enabled: { type: Boolean, default: false },
+    defaultChainId: { type: Number, default: 84532 }, // Base Sepolia
+    expiryHours: { type: Number, default: 72 }, // max 720 (30 days)
+    // Monotonic counter for the receivables derivation branch. ONLY ever moved
+    // by an atomic $inc — never read-then-written — so two concurrent address
+    // generations can never be handed the same index. A reused index would
+    // break payment attribution irrecoverably.
+    nextDerivationIndex: { type: Number, default: 0 },
+    // Where swept funds go. Defaults to the user's own main wallet address.
+    sweepDestination: { type: String, default: null },
+    notifyOnDetected: { type: Boolean, default: true },
+  },
   createdAt: { type: Date, default: Date.now },
 });
 
