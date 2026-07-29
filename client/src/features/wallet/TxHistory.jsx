@@ -1,5 +1,5 @@
 import { ArrowDownLeft, ArrowUpRight, ExternalLink } from "lucide-react";
-import { EmptyState } from "../../components/ui";
+import { Button, EmptyState } from "../../components/ui";
 
 function shorten(addr) {
   if (!addr) return "";
@@ -13,13 +13,20 @@ function when(value) {
 
 // Locally-recorded transaction history. Works with no Alchemy key; each row deep
 // links to the correct block explorer for its chain.
-export default function TxHistory({ txs, chain }) {
+export default function TxHistory({ txs, chain, onReceive }) {
   if (!txs || txs.length === 0) {
     return (
       <EmptyState
         icon={<ArrowUpRight size={20} />}
         title="No transactions yet"
-        hint="Sends you make from this wallet will appear here."
+        hint="Sends you make from this wallet appear here. Fund the wallet from a testnet faucet to get started."
+        action={
+          onReceive && (
+            <Button variant="primary" size="sm" onClick={onReceive}>
+              <ArrowDownLeft size={14} /> Receive funds
+            </Button>
+          )
+        }
       />
     );
   }

@@ -1,10 +1,16 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { lazy } from "react";
 import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
 import Dashboard from "./pages/Dashboard";
-import StylePreview from "./pages/StylePreview"; // TEMPORARY — remove with /style-preview
+import ReceivablesPage from "./features/receivables/ReceivablesPage";
+import MarketWatchPage from "./features/market/MarketWatchPage";
+import SettingsPage from "./pages/Settings";
 import LogoMark from "./components/LogoMark";
+
+// Wallet pulls in ethers + qrcode — code-split so those load only on demand.
+const WalletPage = lazy(() => import("./features/wallet/WalletPage"));
 
 function Booting() {
   return (
@@ -56,6 +62,9 @@ export default function App() {
             </PublicOnly>
           }
         />
+        {/* The shell renders sidebar + topbar and an <Outlet> for the section, so
+            each tab gets a real shareable URL and /app/settings can exist. Each
+            page's own data flow is unchanged. */}
         <Route
           path="/app"
           element={
@@ -63,11 +72,14 @@ export default function App() {
               <Dashboard />
             </RequireAuth>
           }
-        />
-        {/* TEMPORARY palette comparison. Unguarded so it opens signed in or out,
-            and declared before the catch-all, which would otherwise bounce it
-            to "/". Delete this route with the rebuild. */}
-        <Route path="/style-preview" element={<StylePreview />} />
+        >
+          <Route index element={<Navigate to="/app/receivables" replace />} />
+          <Route path="receivables" element={<ReceivablesPage />} />
+          <Route path="market" element={<MarketWatchPage />} />
+          <Route path="wallet" element={<WalletPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/app/receivables" replace />} />
+        </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AuthProvider>

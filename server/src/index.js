@@ -20,7 +20,10 @@ const allowedOrigins = [
 ];
 
 // Middleware
-app.use(express.json());
+// Raised above the 100kb default because avatars are posted as base64 data URLs.
+// The avatar controller enforces the real 2MB cap on the DECODED image, so this
+// ceiling only has to clear base64's ~33% encoding overhead.
+app.use(express.json({ limit: "3mb" }));
 app.use(
   cors({
     origin(origin, callback) {
@@ -49,6 +52,7 @@ app.use("/api/markets", require("./routes/markets.routes"));
 app.use("/api/coins", require("./routes/coins.routes"));
 app.use("/api/alerts", require("./routes/alerts.routes"));
 app.use("/api/portfolio", require("./routes/portfolio.routes"));
+app.use("/api/push", require("./routes/push.routes"));
 app.use("/api/push", require("./routes/push.routes"));
 app.use("/api/wallet", require("./routes/wallet.routes"));
 

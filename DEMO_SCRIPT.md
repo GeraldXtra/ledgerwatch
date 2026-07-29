@@ -10,13 +10,13 @@ no real messages.
 
 1. **Start MongoDB** — local `mongod` running, or your Atlas `MONGO_URI` set in `server/.env`.
 2. **Start the server** — `cd server && npm run dev`
-   Wait for: `✅ MongoDB connected` and `🚀 Server on http://localhost:5000` and
+   Wait for: `✅ MongoDB connected` and `🚀 Server on http://localhost:8000` and
    `Automation: loop started`.
 3. **Start the client** — `cd client && npm run dev` → open the printed URL (Vite default http://localhost:5173).
-4. **Seed fresh — do this LAST** — `cd server && npm run seed`
+4. **Seed fresh — do this LAST** — `cd server && npm run seed:demo -- --force`
    Read the printed summary. This resets the demo user's data and, crucially, sets the
    guaranteed BTC watch's `lastTriggeredAt` back to null so it fires on your first pass.
-5. **Confirm health** — open http://localhost:5000/api/health → `{"status":"ok"}`.
+5. **Confirm health** — open http://localhost:8000/api/health → `{"status":"ok"}`.
 6. **Log in once** to warm the page, then log out (or just refresh) so you start clean on stage.
 7. **Control the live-trigger moment (important):** the automation loop runs every
    `AUTOMATION_INTERVAL_MS` (in `server/.env`). If it's short (e.g. 15000 = 15s), the seeded
@@ -47,11 +47,11 @@ no real messages.
 ### 1. Receivables — "who owes me, and chase them automatically" (90s)
 - You're on the **Receivables** tab. Point at the KPI row: **Total outstanding**,
   **Overdue** (shows 2), **Collected this month**, **Active debtors**.
-- In the **Debts** table, point out the two **Overdue** pills (Chidi Okafor, Amara Nwosu).
+- In the **Debts** table, point out the two **Overdue** pills (Dangote Cement, Zenith Bank).
   "These two are past due and have never been reminded."
 - Click **"Check now"** is on the Market tab — for Receivables, the automation runs on a
   timer, but to show it instantly: open the debtor's **⋯ menu → Generate reminder** on
-  Chidi Okafor. (Or run one backend pass — see the curl note below — to have the loop
+  Dangote Cement. (Or run one backend pass — see the curl note below — to have the loop
   generate both overdue reminders at once.)
 - The **Reminder** modal opens with the drafted message — note it **includes your bank
   details** so the debtor can pay. Three send buttons: **Send WhatsApp**, **Send Email**,
@@ -61,7 +61,7 @@ no real messages.
   and it degrades gracefully whether or not the messaging providers are set up."
 - (Optional, if you set `User.autoSend` on) mention the **Payout & reminders** dialog has an
   opt-in **Send reminders automatically** toggle (WhatsApp/Email) — off by default.
-- Close the modal. On Chidi's row, **⋯ → Mark as paid**. The status pill flips to **Paid**
+- Close the modal. On that client's row, **⋯ → Mark as paid**. The status pill flips to **Paid**
   with a soft highlight. "Marking paid automatically cancels every scheduled reminder for
   that debtor — no more nagging someone who already paid."
 - (Optional) reopen a reminder on the paid debtor to show its log entry is **Cancelled**.
@@ -75,8 +75,15 @@ no real messages.
 - Click **"Check now"** (top right). The automation runs a price pass. A **BTC alert**
   appears in **Alerts awaiting approval** with a suggestion and the price. "The agent
   found a condition hit, explained why, and suggested a buy — but it's waiting for me."
-- Click **Approve**. The **portfolio visibly updates**: cash drops, a holding grows/opens,
-  P/L re-animates. "One tap. The trade executed against the *simulated* portfolio."
+- The alert offers **Buy / Sell / Dismiss**. The agent's suggestion is shown as a
+  *recommendation* — say so: "it advises, I decide." Click **Buy** (or deliberately click
+  **Sell** against a buy suggestion to make the point).
+- The **trade panel** opens: type an amount, or hit **25% / 50% / 75% / MAX**, toggle between
+  the token amount and the USD value, and watch the live quote update. Try an amount larger
+  than your cash to show it is rejected inline rather than failing silently.
+- **Review** then **Confirm**. The **portfolio visibly updates**: cash drops, the holding opens,
+  P/L re-animates. In **Alert history** the row shows *agent buy -> you sell* with an
+  **overrode** chip when you went against the recommendation.
 - Back in chat, type: `how is my portfolio?` → the agent answers in plain language over
   your real positions.
 
@@ -113,9 +120,9 @@ no real messages.
 
 ## Backend one-liner (optional, to fire the automation from a terminal instead of the UI)
 ```bat
-curl.exe -s -X POST http://localhost:5000/api/auth/login -H "Content-Type: application/json" -d "{\"email\":\"demo@ledgerwatch.app\",\"password\":\"demo1234\"}"
+curl.exe -s -X POST http://localhost:8000/api/auth/login -H "Content-Type: application/json" -d "{\"email\":\"demo@ledgerwatch.app\",\"password\":\"demo1234\"}"
 set TOKEN=PASTE_TOKEN
-curl.exe -s -X POST http://localhost:5000/api/automation/run -H "Authorization: Bearer %TOKEN%"
+curl.exe -s -X POST http://localhost:8000/api/automation/run -H "Authorization: Bearer %TOKEN%"
 ```
 This runs BOTH passes: the two overdue debts get reminders, and the guaranteed BTC watch
 fires an alert. Then refresh the UI.
@@ -124,17 +131,17 @@ fires an alert. Then refresh the UI.
 With the server running and `%TOKEN%` set from the login above:
 ```bat
 REM Messaging — manual send (graceful "skipped" if Twilio/SMTP not configured)
-curl.exe -s -X POST http://localhost:5000/api/debts/%DEBT%/send -H "Authorization: Bearer %TOKEN%" -H "Content-Type: application/json" -d "{\"channels\":[\"whatsapp\",\"email\"]}"
+curl.exe -s -X POST http://localhost:8000/api/debts/%DEBT%/send -H "Authorization: Bearer %TOKEN%" -H "Content-Type: application/json" -d "{\"channels\":[\"whatsapp\",\"email\"]}"
 
 REM Push — VAPID public key (null until VAPID_* are set); a bogus action token is rejected
-curl.exe -s http://localhost:5000/api/push/key -H "Authorization: Bearer %TOKEN%"
-curl.exe -s -o NUL -w "%%{http_code}\n" -X POST http://localhost:5000/api/push/action -H "Content-Type: application/json" -d "{\"token\":\"bogus\",\"action\":\"approve\"}"   REM -> 401
+curl.exe -s http://localhost:8000/api/push/key -H "Authorization: Bearer %TOKEN%"
+curl.exe -s -o NUL -w "%%{http_code}\n" -X POST http://localhost:8000/api/push/action -H "Content-Type: application/json" -d "{\"token\":\"bogus\",\"action\":\"approve\"}"   REM -> 401
 
 REM Wallet — enabled testnet chains (mainnet filtered), RPC proxy allowlist
-curl.exe -s http://localhost:5000/api/wallet/chains -H "Authorization: Bearer %TOKEN%"
-curl.exe -s -X POST http://localhost:5000/api/wallet/rpc/84532 -H "Authorization: Bearer %TOKEN%" -H "Content-Type: application/json" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_blockNumber\",\"params\":[]}"
-curl.exe -s -o NUL -w "%%{http_code}\n" -X POST http://localhost:5000/api/wallet/rpc/84532 -H "Authorization: Bearer %TOKEN%" -H "Content-Type: application/json" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_accounts\",\"params\":[]}"   REM -> 403 (not on allowlist)
-curl.exe -s -o NUL -w "%%{http_code}\n" -X POST http://localhost:5000/api/wallet/rpc/1 -H "Authorization: Bearer %TOKEN%" -H "Content-Type: application/json" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_blockNumber\",\"params\":[]}"   REM -> 400 (mainnet disabled)
+curl.exe -s http://localhost:8000/api/wallet/chains -H "Authorization: Bearer %TOKEN%"
+curl.exe -s -X POST http://localhost:8000/api/wallet/rpc/84532 -H "Authorization: Bearer %TOKEN%" -H "Content-Type: application/json" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_blockNumber\",\"params\":[]}"
+curl.exe -s -o NUL -w "%%{http_code}\n" -X POST http://localhost:8000/api/wallet/rpc/84532 -H "Authorization: Bearer %TOKEN%" -H "Content-Type: application/json" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_accounts\",\"params\":[]}"   REM -> 403 (not on allowlist)
+curl.exe -s -o NUL -w "%%{http_code}\n" -X POST http://localhost:8000/api/wallet/rpc/1 -H "Authorization: Bearer %TOKEN%" -H "Content-Type: application/json" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_blockNumber\",\"params\":[]}"   REM -> 400 (mainnet disabled)
 ```
 Provider setup (Twilio sandbox join code, Gmail App Password, `npx web-push generate-vapid-keys`,
 Alchemy key) is documented in **README.md → Provider setup**.
@@ -150,4 +157,4 @@ Alchemy key) is documented in **README.md → Provider setup**.
 - **Wallet: "Could not load balances"?** A public testnet RPC was briefly slow — hit the
   refresh icon. A brand-new address shows `0` until you use the faucet. Sends need test funds
   for amount + gas.
-- **Re-seed anytime:** `cd server && npm run seed` resets the demo cleanly.
+- **Re-seed anytime:** `cd server && npm run seed:demo -- --force` resets the demo cleanly.

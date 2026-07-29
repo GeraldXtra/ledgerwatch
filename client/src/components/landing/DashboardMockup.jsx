@@ -54,12 +54,12 @@ export default function DashboardMockup() {
             <svg viewBox="0 0 144 44" preserveAspectRatio="none">
               <defs>
                 <linearGradient id="mkFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#C0A053" stopOpacity="0.28" />
-                  <stop offset="100%" stopColor="#C0A053" stopOpacity="0" />
+                  <stop offset="0%" stopColor="#2A4A7D" stopOpacity="0.30" />
+                  <stop offset="100%" stopColor="#2A4A7D" stopOpacity="0" />
                 </linearGradient>
               </defs>
               <path d={`${AREA} L144,44 L0,44 Z`} fill="url(#mkFill)" />
-              <path d={AREA} fill="none" stroke="#C0A053" strokeWidth="1.8" strokeLinecap="round" />
+              <path d={AREA} fill="none" stroke="#2A4A7D" strokeWidth="2.2" strokeLinecap="round" />
             </svg>
           </div>
 

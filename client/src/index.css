@@ -547,9 +547,12 @@ h4 {
   color: var(--ink);
 }
 
+/* Widened from 1440px, which left ~480px of dead margin at 1920. At 1680 the
+   content fills a 1920 viewport (minus the 244px sidebar) with balanced gutters,
+   and still centres comfortably at 1366. */
 .page {
   width: 100%;
-  max-width: 1440px;
+  max-width: 1680px;
   margin: 0 auto;
   padding: 32px;
   flex: 1;
@@ -970,9 +973,9 @@ legend {
   display: inline-flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 30px;
-  font-weight: 690;
-  letter-spacing: -0.7px;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.9px;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
   line-height: 1.05;
@@ -1870,12 +1873,29 @@ legend {
 }
 
 .hero-value {
-  font-size: 38px;
+  font-size: clamp(40px, 4vw, 52px);
   font-weight: 700;
-  letter-spacing: -1px;
+  letter-spacing: -1.4px;
   line-height: 1;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
+}
+
+/* ====================================================================
+   LEGIBILITY GUARD — a primary figure must never be blurred, hazed,
+   faded or gradient-filled. Enforced here rather than left to
+   discipline, so a later effect cannot quietly make a number
+   unreadable. Every figure stays solid, opaque and high contrast.
+   ==================================================================== */
+.stat-value,
+.hero-value,
+.kpi-value,
+.pill {
+  filter: none !important;
+  backdrop-filter: none !important;
+  opacity: 1 !important;
+  -webkit-text-fill-color: currentColor !important;
+  text-shadow: none;
 }
 
 .hero-pl {
@@ -2007,6 +2027,14 @@ legend {
     animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  /* Scroll-reveal starts at opacity 0 and is switched on by JS. If motion is
+     reduced — or the observer never runs — the content must still be visible.
+     Nothing may be left permanently invisible by an entrance effect. */
+  .reveal {
+    opacity: 1 !important;
+    transform: none !important;
   }
 }
 
@@ -2935,17 +2963,19 @@ input[type="checkbox"] {
 
 /* ---- display typography ---- */
 .display {
-  font-size: clamp(36px, 4.4vw, 60px);
+  font-size: clamp(33px, 3.7vw, 52px);
   font-weight: 700;
-  letter-spacing: -1.8px;
-  line-height: 1.06;
+  letter-spacing: -1.5px;
+  line-height: 1.08;
   color: var(--ink);
   margin: 0;
 }
 
 /* keep the hero headline on ~two lines in its wider column; enlarge the mockup +
    parallax drift (JS sets --parallax; transform-only, capped ~20px) */
-.hero-copy .display { max-width: 15ch; }
+/* The headline is ~54 characters. At the old 15ch cap it wrapped onto FOUR
+   lines; ~28ch lands it on two and balances the column against the mockup. */
+.hero-copy .display { max-width: 28ch; }
 .hero-visual .mockup {
   transform: rotate(-0.6deg) scale(1.04) translate3d(0, var(--parallax, 0px), 0);
   transform-origin: center left;
@@ -2986,7 +3016,7 @@ input[type="checkbox"] {
 
 .landing-inner {
   width: 100%;
-  max-width: 1280px;
+  max-width: 1360px;
   margin: 0 auto;
   padding: 0 24px;
 }
@@ -3759,4 +3789,339 @@ input[type="checkbox"] {
 @media (max-width: 520px) {
   .mnemonic-grid { grid-template-columns: repeat(2, 1fr); }
   .chain-switcher .select { min-width: 130px; }
+}
+
+/* ============================================================================
+   POLISH — card hover lift, staggered entrance, table rows
+   ========================================================================== */
+
+/* Consistent lift on every card surface: 2px + a slightly deeper shadow. */
+.card,
+.stat-card {
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+
+.card:hover,
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--sh-md);
+}
+
+/* Staggered entrance for KPI cards — 60ms apart, always ending fully opaque
+   (rise-in resolves to opacity 1, and `both` holds that final state). */
+.kpi-row > *:nth-child(1) { animation-delay: 0ms; }
+.kpi-row > *:nth-child(2) { animation-delay: 60ms; }
+.kpi-row > *:nth-child(3) { animation-delay: 120ms; }
+.kpi-row > *:nth-child(4) { animation-delay: 180ms; }
+
+/* Table rows arrive in sequence. Capped at the first 8 so a long ledger does
+   not stagger for seconds; every row still resolves to full opacity. */
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.table tbody tr {
+  animation: row-in 320ms var(--ease-out) both;
+}
+.table tbody tr:nth-child(1) { animation-delay: 0ms; }
+.table tbody tr:nth-child(2) { animation-delay: 60ms; }
+.table tbody tr:nth-child(3) { animation-delay: 120ms; }
+.table tbody tr:nth-child(4) { animation-delay: 180ms; }
+.table tbody tr:nth-child(5) { animation-delay: 240ms; }
+.table tbody tr:nth-child(6) { animation-delay: 300ms; }
+.table tbody tr:nth-child(7) { animation-delay: 360ms; }
+.table tbody tr:nth-child(n + 8) { animation-delay: 420ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .card:hover,
+  .stat-card:hover {
+    transform: none;
+  }
+  .table tbody tr {
+    animation: none;
+  }
+}
+
+/* ============================================================================
+   SETTINGS — sectioned page with sub-navigation
+   ========================================================================== */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 88px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav .nav-item {
+  width: 100%;
+  text-align: left;
+}
+
+.settings-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--sh-sm);
+  padding: 28px;
+  min-width: 0;
+  animation: rise-in 300ms var(--ease-out) both;
+}
+
+.settings-head {
+  padding-bottom: 4px;
+}
+.settings-head .muted {
+  margin: 4px 0 0;
+}
+
+.settings-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.settings-note svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent-600);
+}
+.settings-note.danger svg {
+  color: var(--neg-text);
+}
+
+/* ---- Sliding nav indicator (sidebar) ---- */
+.sidebar-nav {
+  position: relative;
+}
+
+.nav-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent-600);
+  transition: transform var(--t-pop) var(--ease-out), height var(--t-pop) var(--ease-out);
+  pointer-events: none;
+}
+
+/* The single travelling bar replaces the per-row marker. */
+.nav-item.active::before {
+  display: none;
+}
+
+.sidebar-nav .nav-item,
+.sidebar-user {
+  text-decoration: none;
+}
+
+.sidebar-user {
+  border-radius: 10px;
+  transition: background var(--t-fast) ease;
+}
+.sidebar-user:hover {
+  background: var(--well);
+}
+
+.user-chip {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* ---- Avatar image ---- */
+.avatar-img {
+  object-fit: cover;
+  background: var(--well);
+  display: block;
+  border-radius: 999px;
+}
+
+/* ---- Avatar upload ---- */
+.avatar-upload {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 20px;
+  background: var(--well);
+  border-radius: 12px;
+}
+
+.avatar-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+  padding: 20px 16px;
+  border: 1.5px dashed var(--border-hi);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--body);
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: border-color var(--t-fast) ease, background var(--t-fast) ease;
+}
+.avatar-drop:hover,
+.avatar-drop:focus-visible,
+.avatar-drop.is-dragging {
+  border-color: var(--accent-600);
+  background: var(--accent-50);
+}
+.avatar-drop svg {
+  color: var(--accent-600);
+}
+
+/* ---- Danger zone ---- */
+.danger-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.danger-action {
+  display: flex;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid #f3cdc6;
+  background: #fffbfb;
+  border-radius: 12px;
+}
+.danger-action .input {
+  max-width: 220px;
+}
+
+@media (max-width: 900px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+  .settings-nav {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 6px;
+    padding-bottom: 4px;
+  }
+  .settings-nav .nav-item {
+    width: auto;
+    white-space: nowrap;
+  }
+  .settings-panel {
+    padding: 22px 18px;
+  }
+  .avatar-upload {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .danger-action .row {
+    flex-wrap: wrap;
+  }
+  .danger-action .input {
+    max-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-indicator {
+    transition: none;
+  }
+}
+
+/* Live compact preview under a large amount input (₦152.0M while typing). */
+.field-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-700);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================================
+   TRADE PANEL — user-set Buy/Sell on an alert
+   ========================================================================== */
+.agent-reasoning {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--well);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+/* Shown when the user takes the opposite side to the agent. Informational, not
+   a blocker — the human decides. */
+.against-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+}
+.against-note svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.trade-quote {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.trade-quote > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.trade-quote > div:last-child {
+  border-bottom: none;
+}
+.trade-quote dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+.trade-quote dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.override-chip {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--warn-text);
+  background: var(--warn-bg);
 }

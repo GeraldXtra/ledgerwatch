@@ -208,13 +208,25 @@ async function runPricePass({ userId } = {}) {
       const { hit, pctChange } = evaluateCondition(watch, price);
       if (!hit) continue;
 
-      // cooldown guard — avoids duplicate alerts on rapid re-runs
+      // Cooldown guard — spaces out re-alerts after the watch last fired.
       if (
         watch.lastTriggeredAt &&
         now - new Date(watch.lastTriggeredAt).getTime() < ALERT_COOLDOWN_MS
       ) {
         continue;
       }
+
+      // PRIMARY dedup guard: never stack a second alert on a watch the user has
+      // not answered yet. A condition that stays true — e.g. a price_below whose
+      // threshold sits above market — otherwise re-fires on EVERY pass, which is
+      // what produced hundreds of pending alerts from a handful of watches. The
+      // cooldown above only spaces them out; this stops them entirely until the
+      // human approves or dismisses the one already waiting.
+      const alreadyWaiting = await Alert.exists({
+        watchId: watch._id,
+        status: "pending",
+      });
+      if (alreadyWaiting) continue;
 
       const suggestion = suggestionForType(watch.condition.type);
       const template = buildAlertMessage(watch, price, pctChange);
@@ -244,27 +256,33 @@ async function runPricePass({ userId } = {}) {
       await watch.save();
       alertsCreated++;
 
-      // Actionable push: Approve / Dismiss, each carrying a short-lived action token.
-      // Human-in-the-loop preserved — the agent never auto-trades. No-ops if push off.
+      // Actionable push. Buy/Sell deliberately carry NO action token — they deep
+      // link into the app so the user still sets an amount and confirms. Only
+      // Dismiss resolves straight from the notification. No-ops if push is off.
       try {
-        await notifyUser(watch.userId, {
-          title: `Price alert — ${watch.symbol.toUpperCase()}`,
-          body: message.slice(0, 140),
-          tag: `alert-${alert._id}`,
-          type: "alert",
-          url: "/app",
-          actions: [
-            { action: "approve", title: "Approve" },
-            { action: "dismiss", title: "Dismiss" },
-          ],
-          tokens: {
-            approve: signActionToken(watch.userId, "approve", alert._id),
-            dismiss: signActionToken(watch.userId, "dismiss", alert._id),
+        await notifyUser(
+          watch.userId,
+          {
+            title: `${watch.symbol.toUpperCase()} alert — agent suggests ${suggestion}`,
+            body: message.slice(0, 140),
+            tag: `alert-${alert._id}`,
+            type: "alert",
+            url: `/app/market?alert=${alert._id}`,
+            actions: [
+              { action: "buy", title: "Buy" },
+              { action: "sell", title: "Sell" },
+              { action: "dismiss", title: "Dismiss" },
+            ],
+            // Only the dismiss action is executable from the notification.
+            tokens: { dismiss: signActionToken(watch.userId, "dismiss_alert", alert._id) },
+            alertId: String(alert._id),
           },
-        });
+          "marketAlerts"
+        );
       } catch (err) {
-        console.error(`Automation: alert push failed for alert ${alert._id}:`, err.message);
+        console.error(`Push for alert ${alert._id} failed:`, err.message);
       }
+
     } catch (err) {
       console.error(
         `Automation: failed to evaluate watch ${watch._id}:`,
@@ -331,6 +349,118 @@ async function getPortfolio(userId) {
  * Approve an alert -> create a SimTrade and update the Portfolio per section 2a.
  * Throws with a status code on invalid states. Returns { alert, trade, portfolio }.
  */
+/**
+ * Act on an alert with a side and an amount BOTH chosen by the user.
+ *
+ * The agent's `suggestion` is advisory: the user may buy when it suggested sell,
+ * or the reverse. Whatever they choose is recorded on the alert alongside the
+ * suggestion, so history shows recommendation vs decision.
+ *
+ * Amount is validated HERE, server-side — never trusted from the client:
+ *   buy  — quote value may not exceed available cash
+ *   sell — token qty may not exceed the held position
+ *
+ * @param {string} userId
+ * @param {object} alert   pending Alert document
+ * @param {{ action:"buy"|"sell", amount:number, denom:"token"|"quote" }} intent
+ */
+async function actOnAlert(userId, alert, intent) {
+  if (alert.status !== "pending") {
+    throw httpError(409, `Alert is already ${alert.status}`);
+  }
+
+  const side = intent.action;
+  if (side !== "buy" && side !== "sell") {
+    throw httpError(400, 'action must be "buy" or "sell"');
+  }
+
+  const rawAmount = Number(intent.amount);
+  if (!isFinite(rawAmount) || rawAmount <= 0) {
+    throw httpError(400, "Enter an amount greater than zero");
+  }
+
+  const portfolio = await loadOrCreatePortfolio(userId);
+
+  // Current price: live if available, else the price captured on the alert.
+  const row = await getPrice(alert.coinId);
+  const price =
+    (row && row.usd) || Number(alert.priceAtAlert) || 0;
+  if (!price || price <= 0) {
+    throw httpError(400, `No price available for ${alert.symbol} right now`);
+  }
+
+  // Normalise the amount to BOTH denominations so validation and the trade
+  // record agree regardless of which unit the user typed in.
+  const denom = intent.denom === "quote" ? "quote" : "token";
+  const qty = denom === "quote" ? rawAmount / price : rawAmount;
+  const value = denom === "quote" ? rawAmount : rawAmount * price;
+
+  let trade = null;
+
+  if (side === "buy") {
+    if (value > portfolio.cashBalance + 1e-9) {
+      throw httpError(
+        400,
+        `Amount exceeds your available cash (${portfolio.cashBalance.toFixed(2)})`
+      );
+    }
+
+    portfolio.cashBalance -= value;
+    const existing = portfolio.holdings.find((h) => h.coinId === alert.coinId);
+    if (existing) {
+      const newQty = existing.qty + qty;
+      existing.avgBuyPrice = (existing.qty * existing.avgBuyPrice + qty * price) / newQty;
+      existing.qty = newQty;
+    } else {
+      portfolio.holdings.push({
+        coinId: alert.coinId,
+        symbol: alert.symbol,
+        qty,
+        avgBuyPrice: price,
+      });
+    }
+  } else {
+    const idx = portfolio.holdings.findIndex((h) => h.coinId === alert.coinId);
+    if (idx === -1) throw httpError(400, `You hold no ${alert.symbol} to sell`);
+
+    const holding = portfolio.holdings[idx];
+    if (qty > holding.qty + 1e-12) {
+      throw httpError(
+        400,
+        `You only hold ${holding.qty} ${alert.symbol}; cannot sell ${qty}`
+      );
+    }
+
+    portfolio.cashBalance += qty * price;
+    holding.qty -= qty;
+    // Selling out completely removes the position rather than leaving dust.
+    if (holding.qty <= 1e-12) portfolio.holdings.splice(idx, 1);
+  }
+
+  trade = await SimTrade.create({
+    userId,
+    coinId: alert.coinId,
+    symbol: alert.symbol,
+    side,
+    qty,
+    priceAtTrade: price,
+    approvedByUser: true,
+  });
+
+  await portfolio.save();
+
+  alert.status = "approved";
+  alert.userAction = side;
+  alert.executedQty = qty;
+  alert.executedValue = value;
+  alert.executedPrice = price;
+  alert.actedAt = new Date();
+  await alert.save();
+
+  const enrichedPortfolio = await getPortfolio(userId);
+  return { alert, trade, portfolio: enrichedPortfolio };
+}
+
 async function approveAlert(userId, alert) {
   if (alert.status !== "pending") {
     throw httpError(409, `Alert is already ${alert.status}`);
@@ -497,6 +627,7 @@ module.exports = {
   runPricePass,
   getPortfolio,
   approveAlert,
+  actOnAlert,
   parseWatchCommand,
   buildPortfolioSummaryText,
 };

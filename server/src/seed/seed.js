@@ -48,8 +48,77 @@ const DEMO = {
 // Fallback prices so the seed never fails if CoinGecko is unreachable.
 const FALLBACK = { bitcoin: 95000, ethereum: 3200, solana: 180 };
 
+// ---------------------------------------------------------------------------
+// SAFETY GATE
+//
+// This script DELETES the target account's ledger before reseeding. That is by
+// design (it must be idempotent), but it means an accidental run destroys real
+// user-created records — which is exactly what happened: records created through
+// the UI vanished because the seed was re-run against the live demo account.
+//
+// Three independent protections:
+//   1. --force is required before anything is deleted.
+//   2. The target email must be EXACTLY the demo account, checked against a
+//      frozen constant rather than the mutable DEMO object.
+//   3. A loud warning prints the real record counts about to be destroyed.
+// ---------------------------------------------------------------------------
+const ONLY_SEEDABLE_EMAIL = "demo@ledgerwatch.app";
+const FORCED = process.argv.includes("--force");
+
+function abort(message) {
+  console.error(`\n  ✖ ${message}\n`);
+  process.exitCode = 1;
+}
+
 async function main() {
   await connectDB();
+
+  // GUARD 2 — never touch any account but the demo one, even if DEMO.email is
+  // edited. Compared against a separate frozen constant on purpose.
+  if (DEMO.email !== ONLY_SEEDABLE_EMAIL) {
+    abort(
+      `Refusing to seed "${DEMO.email}". This script may only ever target ` +
+        `${ONLY_SEEDABLE_EMAIL}. Seeding any other account is not supported.`
+    );
+    return null;
+  }
+
+  // GUARD 3 — count what would be destroyed and say so plainly.
+  const existing = await User.findOne({ email: DEMO.email });
+  if (existing) {
+    const uid = existing._id;
+    const [debts, payments, reminders, watches, alerts, trades] = await Promise.all([
+      Debt.countDocuments({ userId: uid }),
+      Payment.countDocuments({ userId: uid }),
+      Reminder.countDocuments({ userId: uid }),
+      Watch.countDocuments({ userId: uid }),
+      Alert.countDocuments({ userId: uid }),
+      SimTrade.countDocuments({ userId: uid }),
+    ]);
+    const total = debts + payments + reminders + watches + alerts + trades;
+
+    console.log("\n========================================");
+    console.log("  ⚠  DESTRUCTIVE OPERATION");
+    console.log("========================================");
+    console.log(`  Account : ${DEMO.email}`);
+    console.log(`  Database: ${mongoose.connection.name} @ ${mongoose.connection.host}`);
+    console.log("  ----------------------------------------");
+    console.log(`  Will PERMANENTLY DELETE ${total} record(s) on this account:`);
+    console.log(`    debts ${debts} · payments ${payments} · reminders ${reminders}`);
+    console.log(`    watches ${watches} · alerts ${alerts} · sim trades ${trades}`);
+    console.log("  Anything created through the UI on this account is included.");
+    console.log("========================================\n");
+
+    // GUARD 1 — nothing is deleted without an explicit --force.
+    if (!FORCED) {
+      abort(
+        "Nothing was deleted. Re-run with --force if you really want to wipe and\n" +
+          "    reseed that account:   npm run seed:demo -- --force"
+      );
+      return null;
+    }
+    console.log("  --force given, proceeding with the wipe...\n");
+  }
 
   // 1) Upsert the demo user (stable _id across runs).
   const passwordHash = await bcrypt.hash(DEMO.password, 10);
@@ -99,26 +168,37 @@ async function main() {
   //    reliability scores, aging, and the 6-month charts all populate. Multiple
   //    debts per debtor give history. Status is derived from payments.
   //    payments[].days is relative to now; method cash/transfer/other.
+  //    Enterprise scale: corporate clients carrying real receivables, from a few
+  //    million naira up past ₦100M, so the KPI cards, aging buckets and 6-month
+  //    charts all exercise compact formatting (₦125.4M, ₦1.2B) and large-number
+  //    layout rather than looking like a market stall.
   const debtSpecs = [
-    // Chidi Okafor — reliable repeat customer (Good): pays close to on time.
-    { debtorName: "Chidi Okafor", debtorPhone: "08031234567", amount: 60000, createdDays: -150, dueDays: -140, note: "Ankara fabric supply", payments: [{ amount: 60000, days: -142, method: "transfer" }] },
-    { debtorName: "Chidi Okafor", debtorPhone: "08031234567", amount: 90000, createdDays: -80, dueDays: -70, note: "Bulk lace order", payments: [{ amount: 90000, days: -66, method: "transfer" }] },
-    { debtorName: "Chidi Okafor", debtorPhone: "08031234567", amount: 85000, createdDays: -25, dueDays: -10, note: "Ankara supply, 20 yards", payments: [{ amount: 40000, days: -8, method: "cash" }] }, // partial + overdue
+    // Dangote Cement Plc — large, reliable: settles close to terms (Good).
+    { debtorName: "Dangote Cement Plc", debtorPhone: "08031234567", amount: 42500000, createdDays: -152, dueDays: -122, note: "Q1 haulage and logistics contract", payments: [{ amount: 42500000, days: -119, method: "transfer" }] },
+    { debtorName: "Dangote Cement Plc", debtorPhone: "08031234567", amount: 118750000, createdDays: -84, dueDays: -54, note: "Bulk cement distribution, 12 depots", payments: [{ amount: 118750000, days: -50, method: "transfer" }] },
+    { debtorName: "Dangote Cement Plc", debtorPhone: "08031234567", amount: 96400000, createdDays: -27, dueDays: -9, note: "Fleet servicing retainer, Q3", payments: [{ amount: 45000000, days: -6, method: "transfer" }] }, // partial + overdue
 
-    // Amara Nwosu — risky payer (Risky): one very late, one unpaid and overdue.
-    { debtorName: "Amara Nwosu", debtorPhone: "08062345678", amount: 50000, createdDays: -120, dueDays: -110, note: "Hair extensions", payments: [{ amount: 50000, days: -70, method: "transfer" }] }, // ~40 days late
-    { debtorName: "Amara Nwosu", debtorPhone: "08062345678", amount: 42000, createdDays: -18, dueDays: -4, note: "Bulk hair extensions", payments: [] }, // overdue, unpaid
+    // Zenith Bank Plc — slow payer, one badly late and one unpaid (Risky).
+    { debtorName: "Zenith Bank Plc", debtorPhone: "08062345678", amount: 27300000, createdDays: -128, dueDays: -98, note: "Branch fit-out, phase one", payments: [{ amount: 27300000, days: -46, method: "transfer" }] }, // ~52 days late
+    { debtorName: "Zenith Bank Plc", debtorPhone: "08062345678", amount: 64800000, createdDays: -68, dueDays: -44, note: "ATM network maintenance, H2", payments: [] }, // overdue ~44d -> 31-60 bucket
 
-    // Tunde Bakare — new customer, part-paid, not yet due (New).
-    { debtorName: "Tunde Bakare", debtorPhone: "08023456789", amount: 120000, createdDays: -6, dueDays: 3, note: "Catering deposit balance", payments: [{ amount: 50000, days: -2, method: "transfer" }] }, // partial, upcoming
+    // Julius Berger — part-paid and ~76 days late, so the 61-90 aging bucket has
+    // data too and all five bars render.
+    { debtorName: "Julius Berger", debtorPhone: "08088123456", amount: 38600000, createdDays: -104, dueDays: -76, note: "Site equipment leasing, Q2", payments: [{ amount: 9600000, days: -60, method: "transfer" }] },
 
-    // Zainab Bello — excellent, always on time (Excellent).
-    { debtorName: "Zainab Bello", debtorPhone: "08094567890", amount: 30000, createdDays: -95, dueDays: -88, note: "Social-media retainer", payments: [{ amount: 30000, days: -89, method: "transfer" }] },
-    { debtorName: "Zainab Bello", debtorPhone: "08094567890", amount: 30000, createdDays: -60, dueDays: -53, note: "Social-media retainer", payments: [{ amount: 30000, days: -54, method: "transfer" }] },
-    { debtorName: "Zainab Bello", debtorPhone: "08094567890", amount: 30000, createdDays: -2, dueDays: 14, note: "Social-media retainer", payments: [] }, // upcoming
+    // Flour Mills of Nigeria — new client, part-paid, not yet due (New).
+    { debtorName: "Flour Mills of Nigeria", debtorPhone: "08023456789", amount: 152000000, createdDays: -8, dueDays: 22, note: "Grain silo construction, milestone 2", payments: [{ amount: 60000000, days: -3, method: "transfer" }] },
 
-    // Emeka Obi — settled late (Fair). Keeps the cancel-on-paid story.
-    { debtorName: "Emeka Obi", debtorPhone: "08051239876", amount: 65000, createdDays: -20, dueDays: -7, note: "POS machine installment", payments: [{ amount: 65000, days: -1, method: "cash" }], reminded: true },
+    // MTN Nigeria — excellent, always early (Excellent).
+    { debtorName: "MTN Nigeria", debtorPhone: "08094567890", amount: 18500000, createdDays: -97, dueDays: -67, note: "Managed IT services, monthly", payments: [{ amount: 18500000, days: -71, method: "transfer" }] },
+    { debtorName: "MTN Nigeria", debtorPhone: "08094567890", amount: 18500000, createdDays: -66, dueDays: -36, note: "Managed IT services, monthly", payments: [{ amount: 18500000, days: -40, method: "transfer" }] },
+    { debtorName: "MTN Nigeria", debtorPhone: "08094567890", amount: 21750000, createdDays: -4, dueDays: 26, note: "Managed IT services, monthly", payments: [] }, // upcoming
+
+    // Lafarge Africa — settled late (Fair). Keeps the cancel-on-paid story.
+    { debtorName: "Lafarge Africa", debtorPhone: "08051239876", amount: 8900000, createdDays: -23, dueDays: -8, note: "Plant safety audit and certification", payments: [{ amount: 8900000, days: -1, method: "transfer" }], reminded: true },
+
+    // GTCO Plc — very large, long overdue: drives the 90d+ aging bucket.
+    { debtorName: "GTCO Plc", debtorPhone: "08077654321", amount: 74200000, createdDays: -142, dueDays: -112, note: "Core banking migration, phase three", payments: [{ amount: 12000000, days: -95, method: "transfer" }] },
   ];
 
   // One email per debtor (repeated across their debts, so debtor grouping is
@@ -126,15 +206,17 @@ async function main() {
   // demo send can never reach a real stranger — swap in your own address to watch
   // a branded reminder actually land in an inbox.
   const debtorEmails = {
-    "Chidi Okafor": "chidi.okafor@example.com",
-    "Amara Nwosu": "amara.nwosu@example.com",
-    "Tunde Bakare": "tunde.bakare@example.com",
-    "Zainab Bello": "zainab.bello@example.com",
-    "Emeka Obi": "emeka.obi@example.com",
+    "Dangote Cement Plc": "accounts.payable@dangote.example.com",
+    "Zenith Bank Plc": "vendor.payments@zenith.example.com",
+    "Flour Mills of Nigeria": "finance@flourmills.example.com",
+    "MTN Nigeria": "supplier.billing@mtn.example.com",
+    "Lafarge Africa": "ap.team@lafarge.example.com",
+    "GTCO Plc": "procurement@gtco.example.com",
+    "Julius Berger": "accounts@juliusberger.example.com",
   };
 
-  let emekaDebt = null;
-  let emekaRemindedAt = null;
+  let settledDebt = null;
+  let settledRemindedAt = null;
   for (const d of debtSpecs) {
     const createdAt = rel(d.createdDays);
     const paidTotal = d.payments.reduce((s, p) => s + p.amount, 0);
@@ -144,8 +226,8 @@ async function main() {
 
     const history = [{ at: createdAt, event: "created" }];
     if (d.reminded) {
-      emekaRemindedAt = rel(d.dueDays + 2);
-      history.push({ at: emekaRemindedAt, event: "reminded" });
+      settledRemindedAt = rel(d.dueDays + 2);
+      history.push({ at: settledRemindedAt, event: "reminded" });
     }
     for (const p of d.payments) history.push({ at: rel(p.days), event: "payment_received" });
     if (status === "paid") {
@@ -163,7 +245,7 @@ async function main() {
       dueDate: rel(d.dueDays),
       note: d.note,
       status,
-      lastRemindedAt: d.reminded ? emekaRemindedAt : null, // overdue ones stay null so the first pass reminds them
+      lastRemindedAt: d.reminded ? settledRemindedAt : null, // overdue ones stay null so the first pass reminds them
       history,
       createdAt,
     });
@@ -179,27 +261,27 @@ async function main() {
       });
     }
 
-    if (d.debtorName === "Emeka Obi") emekaDebt = debt;
+    if (d.debtorName === "Lafarge Africa") settledDebt = debt;
   }
 
-  // Emeka's cancelled reminder (the cancel-on-paid story) referencing his balance.
-  if (emekaDebt) {
+  // The settled account cancelled reminder (the cancel-on-paid story).
+  if (settledDebt) {
     await Reminder.create({
-      debtId: emekaDebt._id,
+      debtId: settledDebt._id,
       userId,
       messageText: buildReminderMessage({
-        debtorName: emekaDebt.debtorName,
-        amount: emekaDebt.amount,
+        debtorName: settledDebt.debtorName,
+        amount: settledDebt.amount,
         currency: "NGN",
-        dueDate: emekaDebt.dueDate,
+        dueDate: settledDebt.dueDate,
         daysOverdue: 2,
         tone: "gentle",
         bankDetails: DEMO.bankDetails,
         ownerName: DEMO.name,
       }),
-      scheduledFor: emekaRemindedAt || rel(-5),
+      scheduledFor: settledRemindedAt || rel(-5),
       status: "cancelled",
-      createdAt: emekaRemindedAt || rel(-5),
+      createdAt: settledRemindedAt || rel(-5),
     });
   }
 
@@ -291,12 +373,25 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(async (err) => {
-  console.error("\n❌ Seed failed:", err.message);
-  try {
-    await mongoose.disconnect();
-  } catch {
-    /* ignore */
-  }
-  process.exit(1);
-});
+main()
+  .then(async (result) => {
+    // main() returns null when a safety guard aborted before deleting anything.
+    // Disconnect quietly and exit with the code the guard already set.
+    if (result === null) {
+      try {
+        await mongoose.disconnect();
+      } catch {
+        /* ignore */
+      }
+      process.exit(process.exitCode || 1);
+    }
+  })
+  .catch(async (err) => {
+    console.error("\n❌ Seed failed:", err.message);
+    try {
+      await mongoose.disconnect();
+    } catch {
+      /* ignore */
+    }
+    process.exit(1);
+  });

@@ -13,6 +13,9 @@ function publicUser(user) {
     bankDetails: u.bankDetails || {},
     autoSend: u.autoSend || { enabled: false, whatsapp: false, email: false },
     walletAddress: u.walletAddress || null,
+    avatarUrl: u.avatarUrl || null,
+    companyName: u.companyName || "",
+    notifyPrefs: u.notifyPrefs || { marketAlerts: true, remindersDue: true, txUpdates: true },
     createdAt: u.createdAt,
   };
 }

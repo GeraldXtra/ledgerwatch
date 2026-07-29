@@ -54,11 +54,11 @@ npm install
 copy .env.example .env
 REM edit .env — set MONGO_URI (local default works if mongod is running) and JWT_SECRET
 npm run dev
-REM expect: MongoDB connected + Server on http://localhost:5000 + Automation loop started
+REM expect: MongoDB connected + Server on http://localhost:8000 + Automation loop started
 
 REM 2) Seed demo data (new terminal)
 cd server
-npm run seed
+npm run seed:demo -- --force
 
 REM 3) Frontend (new terminal)
 cd client
@@ -67,10 +67,10 @@ copy .env.example .env
 npm run dev
 REM open the printed URL (Vite default http://localhost:5173)
 ```
-Verify the API: open http://localhost:5000/api/health → `{"status":"ok"}`.
+Verify the API: open http://localhost:8000/api/health → `{"status":"ok"}`.
 
 ## Demo credentials
-After `npm run seed`: **`demo@ledgerwatch.app` / `demo1234`** — the dashboard opens
+After `npm run seed:demo -- --force`: **`demo@ledgerwatch.app` / `demo1234`** — the dashboard opens
 pre-populated with debts, watches, a simulated portfolio, and a pending alert.
 See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the ~4-minute presentation flow.
 
@@ -79,7 +79,7 @@ See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the ~4-minute presentation flow.
 ### `server/.env`
 | Variable | Required | Example / default | Purpose |
 |---|---|---|---|
-| `PORT` | no | `5000` | Server port (hosts like Render inject this) |
+| `PORT` | no | `8000` | Server port (hosts like Render inject this) |
 | `MONGO_URI` | **yes** | `mongodb://127.0.0.1:27017/ledgerwatch` | MongoDB connection (local or Atlas) |
 | `JWT_SECRET` | **yes** | `a-long-random-string` | Signs auth JWTs **and** short-lived push action tokens |
 | `ANTHROPIC_API_KEY` | no | `sk-ant-...` | Enables AI wording; **omit for template/parser fallbacks** |
@@ -100,7 +100,7 @@ See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the ~4-minute presentation flow.
 ### `client/.env`
 | Variable | Required | Example | Purpose |
 |---|---|---|---|
-| `VITE_API_URL` | **yes** | `http://localhost:5000` | Base URL the client calls (the Render URL in prod) |
+| `VITE_API_URL` | **yes** | `http://localhost:8000` | Base URL the client calls (the Render URL in prod) |
 
 ## Provider setup (all optional)
 
@@ -115,11 +115,34 @@ an **App Password** (Google Account → Security → App passwords). Use that 16
 `SMTP_PASS` with `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER=you@gmail.com`. Your
 normal login password will **not** work.
 
-**Push (VAPID).** Run `npx web-push generate-vapid-keys`, then set `VAPID_PUBLIC_KEY`,
-`VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT=mailto:you@example.com`. Enable notifications from the
-in-app **Payout & reminders** dialog (the prompt only appears on that button click). Push needs
-HTTPS (or `localhost`); iOS only delivers Web Push to a PWA **added to the home screen** (iOS
-16.4+).
+**Push (VAPID).** Generate the key pair once:
+
+```bat
+npx web-push generate-vapid-keys
+```
+
+Set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT=mailto:you@example.com`, then
+enable notifications from **Settings → Notifications** (the browser prompt only ever appears on
+that button press, never on page load). That page also has per-type toggles and a **send test
+notification** button so you can confirm delivery.
+
+### What notifications actually do, honestly
+- **Foreground vs background.** While a LedgerWatch tab is focused the service worker suppresses
+  the OS notification and the app shows an in-app toast instead, so you are never told the same
+  thing twice. When no window is focused you get a real OS notification.
+- **Action buttons.** A market alert offers **Buy / Sell / Dismiss**. Dismiss resolves straight
+  from the notification. **Buy and Sell deliberately do not trade** — they open the app on that
+  alert's trade panel, because the amount and the confirmation step are mandatory. A reminder
+  offers Send WhatsApp / Send Email / Dismiss, handled against authenticated endpoints.
+- **Desktop** notifications need the browser to be **running**. It may be minimised or in the
+  background, but if you fully quit it, nothing is delivered. This is a browser limitation, not
+  a bug.
+- **Android** delivers reliably once the PWA is installed to the home screen.
+- **iOS 16.4+** delivers only after the PWA is **added to the home screen** — Safari tabs alone
+  will not receive push.
+- Push requires **HTTPS** (or `localhost` for development).
+- If permission is denied or push is unsupported, the app falls back **silently** to in-app
+  toasts. It never crashes and never nags.
 
 **Wallet (Alchemy, optional).** Without a key the wallet uses public testnet RPC. For higher
 limits, create an Alchemy app and set `ALCHEMY_API_KEY` — it stays server-side and is proxied,
@@ -143,5 +166,5 @@ See [DEPLOY_CHECKLIST.md](DEPLOY_CHECKLIST.md) for a step-by-step Atlas → Rend
 guide. **The local demo is the primary plan; deployment is a backup flex.**
 
 ## Scripts
-- `server`: `npm run dev` (watch), `npm start` (prod), `npm run seed` (demo data)
+- `server`: `npm run dev` (watch), `npm start` (prod), `npm run seed:demo -- --force` (DESTRUCTIVE: wipes+reseeds the demo account)
 - `client`: `npm run dev`, `npm run build`, `npm run preview`

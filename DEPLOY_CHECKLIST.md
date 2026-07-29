@@ -94,9 +94,9 @@ Run the seed locally but pointed at Atlas, so the live demo has data:
 ```bat
 cd server
 set MONGO_URI=mongodb+srv://<user>:<password>@cluster0.xxxx.mongodb.net/ledgerwatch?retryWrites=true^&w=majority
-npm run seed
+npm run seed:demo -- --force
 ```
-(PowerShell: `$env:MONGO_URI="...."; npm run seed`. Note `^&` escapes `&` in cmd; in
+(PowerShell: `$env:MONGO_URI="...."; npm run seed:demo -- --force`. Note `^&` escapes `&` in cmd; in
 PowerShell just quote the whole string.) Re-running is safe — the seed is idempotent and
 only touches the demo user. Then log in at the Vercel URL with `demo@ledgerwatch.app` / `demo1234`.
 

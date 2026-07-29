@@ -19,7 +19,10 @@
       "Bash(curl.exe -s -X POST http://localhost:5000/api/wallet/rpc/84532 -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_blockNumber\",\"params\":[]}')",
       "Bash(curl.exe -s -o /dev/null -w 'HTTP %{http_code}\\\\n' -X POST http://localhost:5000/api/wallet/rpc/84532 -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_accounts\",\"params\":[]}')",
       "Bash(curl.exe -s -X POST http://localhost:5000/api/wallet/rpc/84532 -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_accounts\",\"params\":[]}')",
-      "Bash(curl.exe -s -o /dev/null -w 'HTTP %{http_code}\\\\n' -X POST http://localhost:5000/api/wallet/rpc/1 -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_blockNumber\",\"params\":[]}')"
+      "Bash(curl.exe -s -o /dev/null -w 'HTTP %{http_code}\\\\n' -X POST http://localhost:5000/api/wallet/rpc/1 -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_blockNumber\",\"params\":[]}')",
+      "Bash(python -c ' *)",
+      "Bash(node -e \"try{console.log\\('web-push:',require\\('web-push/package.json'\\).version\\)}catch\\(e\\){console.log\\('web-push NOT installed'\\)}\")",
+      "Bash(node scripts/make-icons.js)"
     ]
   }
 }

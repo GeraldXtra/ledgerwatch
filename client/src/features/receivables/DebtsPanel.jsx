@@ -13,7 +13,7 @@ import {
   useToast,
 } from "../../components/ui";
 import { AlertCircle, CircleDollarSign, HandCoins, Users } from "lucide-react";
-import { ngnWhole } from "./format";
+import { kpiNgn } from "./format";
 import { downloadCsv } from "./csv";
 import DebtList from "./DebtList";
 import DebtForm from "./DebtForm";
@@ -195,10 +195,10 @@ export default function DebtsPanel() {
         </div>
       ) : (
         <div className="kpi-row">
-          <StatCard label="Total outstanding" countTo={k.totalOutstanding} format={ngnWhole} icon={<CircleDollarSign size={17} />} iconTone={k.totalOutstanding > 0 ? "neg" : "neutral"} hint="Sum of open balances" />
+          <StatCard label="Total outstanding" countTo={k.totalOutstanding} format={kpiNgn} icon={<CircleDollarSign size={17} />} iconTone={k.totalOutstanding > 0 ? "neg" : "neutral"} hint="Sum of open balances" />
           <StatCard label="Overdue" countTo={overdueCount} tone={overdueCount > 0 ? "neg" : undefined} iconTone={overdueCount > 0 ? "neg" : "neutral"} icon={<AlertCircle size={17} />} hint={overdueCount === 1 ? "debt past due" : "debts past due"} />
-          <StatCard label="Collected (shown)" countTo={k.collected} format={ngnWhole} tone={k.collected > 0 ? "pos" : undefined} iconTone="pos" icon={<HandCoins size={17} />} hint="Across the filtered list" />
-          <StatCard label="Active debtors" countTo={k.activeDebtors} icon={<Users size={17} />} iconTone="neutral" hint="With an open balance" />
+          <StatCard label="Collected (shown)" countTo={k.collected} format={kpiNgn} tone={k.collected > 0 ? "pos" : undefined} iconTone="pos" icon={<HandCoins size={17} />} hint="Across the filtered list" />
+          <StatCard label="Active clients" countTo={k.activeDebtors} icon={<Users size={17} />} iconTone="neutral" hint="With an open balance" />
         </div>
       )}
 

@@ -32,7 +32,19 @@ export default function AlertHistory({ alerts }) {
               <div className="row space-between">
                 <div className="row">
                   <span className="coin-chip">{a.symbol}</span>
+                  {/* Agent recommendation vs what the user actually did. When
+                      they differ the user overrode the agent — worth showing. */}
+                  <span className="muted caption">agent</span>
                   <StatusPill status={a.suggestion} />
+                  {a.userAction && (
+                    <>
+                      <span className="muted caption">→ you</span>
+                      <StatusPill status={a.userAction === "dismiss" ? "cancelled" : a.userAction} />
+                      {a.userAction !== "dismiss" && a.userAction !== a.suggestion && (
+                        <span className="override-chip">overrode</span>
+                      )}
+                    </>
+                  )}
                 </div>
                 <div className="row">
                   <span className="muted small num">{fmtPrice(a.priceAtAlert)}</span>
@@ -41,6 +53,17 @@ export default function AlertHistory({ alerts }) {
               </div>
               <div className="muted caption" style={{ marginTop: 4 }}>
                 {when(a.createdAt)}
+                {a.executedQty != null && (
+                  <>
+                    {" · "}
+                    <span className="num">
+                      {a.executedQty.toFixed(6)} {a.symbol}
+                    </span>
+                    {a.executedValue != null && (
+                      <span className="num"> ({fmtPrice(a.executedValue)})</span>
+                    )}
+                  </>
+                )}
               </div>
             </li>
           ))}

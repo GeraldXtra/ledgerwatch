@@ -108,17 +108,28 @@ async function me(req, res) {
  */
 async function updateMe(req, res) {
   try {
-    const { name, bankDetails, autoSend } = req.body || {};
+    const { name, companyName, bankDetails, autoSend, notifyPrefs } = req.body || {};
     const updates = {};
 
     if (typeof name === "string" && name.trim()) {
       updates.name = name.trim();
+    }
+    // Company name may be intentionally cleared, so an empty string is valid.
+    if (typeof companyName === "string") {
+      updates.companyName = companyName.trim();
     }
     if (bankDetails && typeof bankDetails === "object") {
       updates.bankDetails = {
         accountName: bankDetails.accountName,
         accountNumber: bankDetails.accountNumber,
         bankName: bankDetails.bankName,
+      };
+    }
+    if (notifyPrefs && typeof notifyPrefs === "object") {
+      updates.notifyPrefs = {
+        marketAlerts: notifyPrefs.marketAlerts !== false,
+        remindersDue: notifyPrefs.remindersDue !== false,
+        txUpdates: notifyPrefs.txUpdates !== false,
       };
     }
     // Opt-in automatic reminder delivery. Coerced to booleans so a stray value can't
@@ -132,7 +143,9 @@ async function updateMe(req, res) {
     }
 
     if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ error: "Nothing to update (provide name, bankDetails, and/or autoSend)" });
+      return res.status(400).json({
+        error: "Nothing to update (provide name, companyName, bankDetails, and/or autoSend)",
+      });
     }
 
     const user = await User.findByIdAndUpdate(req.user._id, updates, {

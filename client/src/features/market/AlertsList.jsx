@@ -1,13 +1,13 @@
-import { BellOff, Check, X } from "lucide-react";
+import { BellOff, TrendingDown, TrendingUp, X } from "lucide-react";
 import { usd } from "./format";
 import { Button, Card, EmptyState, StatusPill } from "../../components/ui";
 
-export default function AlertsList({ alerts, onApprove, onDismiss, busyId }) {
+export default function AlertsList({ alerts, onTrade, onDismiss, busyId }) {
   return (
     <Card
-      eyebrow="Approvals"
-      title="Alerts awaiting approval"
-      subtitle="Human-in-the-loop: nothing executes until you approve it."
+      eyebrow="Your decision"
+      title="Alerts awaiting your decision"
+      subtitle="The agent recommends; you choose the side and the amount. Nothing executes until you confirm."
     >
       {alerts.length === 0 ? (
         <EmptyState
@@ -22,6 +22,9 @@ export default function AlertsList({ alerts, onApprove, onDismiss, busyId }) {
               <div className="row space-between">
                 <div className="row">
                   <span className="coin-chip">{a.symbol}</span>
+                  {/* The suggestion is a recommendation, labelled as such — the
+                      user is free to take the opposite side. */}
+                  <span className="muted small">Agent suggests</span>
                   <StatusPill status={a.suggestion} />
                 </div>
                 <span className="muted small num">{usd(a.priceAtAlert)}</span>
@@ -32,9 +35,16 @@ export default function AlertsList({ alerts, onApprove, onDismiss, busyId }) {
                   variant="primary"
                   size="sm"
                   disabled={busyId === a._id}
-                  onClick={() => onApprove(a)}
+                  onClick={() => onTrade(a, "buy")}
                 >
-                  <Check size={13} /> Approve
+                  <TrendingUp size={13} /> Buy
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={busyId === a._id}
+                  onClick={() => onTrade(a, "sell")}
+                >
+                  <TrendingDown size={13} /> Sell
                 </Button>
                 <Button
                   variant="ghost"

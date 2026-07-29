@@ -1,7 +1,11 @@
 const mongoose = require("mongoose");
 
-// A browser Web Push subscription, scoped to a user. `endpoint` is globally unique
-// (it IS the push channel), so a re-subscribe upserts rather than duplicates.
+/**
+ * A browser Web Push subscription, scoped to a user. `endpoint` IS the push
+ * channel and is globally unique, so re-subscribing the same browser upserts
+ * rather than duplicating. Dead endpoints (404/410 from the push service) are
+ * pruned automatically by push.service.
+ */
 const pushSubscriptionSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
   endpoint: { type: String, required: true, unique: true },

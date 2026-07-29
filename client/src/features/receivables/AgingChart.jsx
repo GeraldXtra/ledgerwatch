@@ -15,14 +15,16 @@ const reduceMotion = () =>
   window.matchMedia &&
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-// Single-hue gold intensity ramp — deeper gold = older money. "Current" stays
-// green (it is not overdue); everything overdue darkens through the accent.
+// Single-hue NAVY intensity ramp: deeper navy = older money, so age reads as
+// weight. The previous ramp mixed a green bucket with four golds — two clashing
+// hues whose pale end vanished against the white card. Every step here is dark
+// enough to hold its own on white, and the darkest is the accent itself.
 const BUCKETS = [
-  { key: "current", label: "Current", color: "#0A6E4C" },
-  { key: "d1_30", label: "1–30d", color: "#EADFC0" },
-  { key: "d31_60", label: "31–60d", color: "#D4BC80" },
-  { key: "d61_90", label: "61–90d", color: "#C0A053" },
-  { key: "d90plus", label: "90d+", color: "#9A7726" },
+  { key: "current", label: "Current", color: "#8FA8CE" },
+  { key: "d1_30", label: "1–30d", color: "#6B8ABB" },
+  { key: "d31_60", label: "31–60d", color: "#47689F" },
+  { key: "d61_90", label: "61–90d", color: "#2A4A7D" },
+  { key: "d90plus", label: "90d+", color: "#16294A" },
 ];
 
 function ChartTooltip({ active, payload }) {
@@ -45,13 +47,22 @@ export default function AgingChart({ aging }) {
 
   return (
     <div className="rec-chart-frame">
-      <ResponsiveContainer width="100%" height={240}>
-        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 8 }} barCategoryGap="16%">
-          <CartesianGrid stroke="#EEF2F7" vertical={false} />
-          <XAxis dataKey="label" tick={{ fill: "#64748B", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#E1E7F0" }} />
-          <YAxis tick={{ fill: "#64748B", fontSize: 11 }} tickLine={false} axisLine={false} width={64} tickFormatter={(v) => compactNgn(v, "").trim()} />
+      <ResponsiveContainer width="100%" height={260}>
+        <BarChart data={data} margin={{ top: 10, right: 8, bottom: 0, left: 8 }} barCategoryGap="12%">
+          <CartesianGrid stroke="#F1F4F9" vertical={false} />
+          <XAxis dataKey="label" tick={{ fill: "#64748B", fontSize: 11.5 }} tickLine={false} axisLine={{ stroke: "#E1E7F0" }} />
+          <YAxis tick={{ fill: "#64748B", fontSize: 11.5 }} tickLine={false} axisLine={false} width={66} tickFormatter={(v) => compactNgn(v, "").trim()} />
           <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(22,41,74,0.05)" }} />
-          <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={46} isAnimationActive={!reduceMotion()}>
+          {/* minPointSize keeps a small bucket visible when another dominates the
+              linear scale — without it the smaller bars round to sub-pixel and the
+              chart reads as a single oversized bar. */}
+          <Bar
+            dataKey="value"
+            radius={[6, 6, 0, 0]}
+            maxBarSize={56}
+            minPointSize={3}
+            isAnimationActive={!reduceMotion()}
+          >
             {data.map((d) => (
               <Cell key={d.label} fill={empty ? "#E5E8ED" : d.color} />
             ))}
