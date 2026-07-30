@@ -102,8 +102,17 @@ export function countdown(value) {
 
 /** USDC is a 2 dp figure in the UI, always shown with both places. */
 export function usdc(amount) {
+  return `${usdcAmount(amount)} USDC`;
+}
+
+/**
+ * The figure WITHOUT its unit, for tight columns where the unit goes on its own
+ * line. Keeping "USDC" on the same line as the digits costs about 40px, which is
+ * enough to push a large amount outside a narrow tile.
+ */
+export function usdcAmount(amount) {
   const n = Number(amount) || 0;
-  return `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`;
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /** Shortened hash or address for a dense row: 0x1234…abcd */
