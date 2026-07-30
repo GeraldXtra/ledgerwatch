@@ -90,24 +90,41 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
     if (!chain) return setError("Choose a network first.");
     if (!password) return setError("Enter your wallet password.");
 
+    // 1. Prove the password works AND that this wallet can derive at all, before
+    //    anything irreversible happens. One unlock, reused below: scrypt is
+    //    deliberately slow, so unlocking twice would double the wait.
+    //
+    //    The unlock gets its OWN try/catch so "that password did not work" is
+    //    said only when the unlock is what failed. Pattern matching over every
+    //    error in one block risks blaming the password for an unrelated failure,
+    //    which is the worst mistake this particular screen could make.
+    let master;
     try {
-      // 1. Prove the password works AND that this wallet can derive at all,
-      //    before anything irreversible happens. One unlock, reused below:
-      //    scrypt is deliberately slow, so unlocking twice would double the wait.
-      //    The progress callback matters here: scrypt runs for seconds and a
-      //    button that just says "working" for that long reads as a hang.
+      // The progress callback matters here: scrypt runs for seconds, and a button
+      // that just says "working" for that long reads as a hang.
       setBusy("Unlocking your wallet");
-      const master = await unlockWallet(password, (pct) => {
+      master = await unlockWallet(password, (pct) => {
         const done = Math.round((Number(pct) || 0) * 100);
         if (done < 100) setBusy(`Unlocking your wallet ${done}%`);
       });
+    } catch (err) {
+      const msg = (err && err.message) || "";
+      setBusy("");
+      setError(
+        /no wallet on this device/i.test(msg)
+          ? "There is no wallet saved for this account in this browser. Create one on the Wallet page first."
+          : "That password did not unlock this account's wallet. Each account has its own wallet and its own password."
+      );
+      return;
+    }
 
-      if (!canDerive(master)) {
-        setCannotDerive(true);
-        setBusy("");
-        return;
-      }
+    if (!canDerive(master)) {
+      setCannotDerive(true);
+      setBusy("");
+      return;
+    }
 
+    try {
       // 2. Reserve an index atomically. From here on the index is spent.
       setBusy("Reserving an address");
       const alloc = await allocateIndex(chain.chainId);
@@ -127,12 +144,10 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
       setPassword("");
       onCreated(saved);
     } catch (err) {
+      // The wallet is already open by this point, so nothing here is ever a
+      // password problem. Report what actually went wrong.
       const msg = err?.response?.data?.error || err.message || "";
-      setError(
-        /password|decrypt|invalid password|incorrect/i.test(msg)
-          ? "That password did not unlock your wallet. Please try again."
-          : msg || "Could not create the payment address."
-      );
+      setError(msg || "Could not create the payment address.");
       setBusy("");
     }
   }

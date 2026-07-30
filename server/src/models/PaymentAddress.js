@@ -33,8 +33,27 @@ const observedTxSchema = new mongoose.Schema(
     // Set once this transfer has produced a Payment record, so a restart or a
     // re-run of the watch pass can never double-credit the same transfer.
     settledPaymentId: { type: mongoose.Schema.Types.ObjectId, ref: "Payment", default: null },
+    // Arrived after the address stopped accepting payment. It still settles (the
+    // payer sent what they were quoted) but the owner is told it was late, so a
+    // settlement landing on a closed-looking invoice is never a surprise.
+    late: { type: Boolean, default: false },
     seenAt: { type: Date, default: Date.now },
     confirmedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+// One sweep of this address's balance to the owner's main wallet. Outbound and
+// user-signed, so this is a record of something the user personally approved.
+const sweepSchema = new mongoose.Schema(
+  {
+    txHash: { type: String, required: true },
+    destination: { type: String, required: true },
+    amountUsdc: { type: Number, required: true },
+    // The separate native-token transfer that paid for the sweep's gas, when the
+    // derived address had no native balance of its own. Null when it did.
+    gasFundedTxHash: { type: String, default: null },
+    at: { type: Date, default: Date.now },
   },
   { _id: false }
 );
@@ -90,11 +109,19 @@ const paymentAddressSchema = new mongoose.Schema({
 
   observed: { type: [observedTxSchema], default: [] },
   foreign: { type: [foreignTxSchema], default: [] },
+  sweeps: { type: [sweepSchema], default: [] },
 
   // Where the watcher has scanned up to, so each pass only reads new blocks.
   lastScannedBlock: { type: Number, default: 0 },
 
   expiresAt: { type: Date, required: true },
+  // When the address actually flipped to `expired`. The grace watch measures its
+  // 30 day window from here rather than from expiresAt, so an address that was
+  // expired late (server down over the boundary) still gets its full grace.
+  expiredAt: { type: Date, default: null },
+  // Last time the watcher looked at this address, of either kind. The grace pass
+  // throttles on this so it cannot re-scan every expired address every minute.
+  lastWatchedAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },
 });
 
@@ -104,7 +131,24 @@ const paymentAddressSchema = new mongoose.Schema({
 // turns any logic slip into a hard write error rather than silent corruption.
 paymentAddressSchema.index({ userId: 1, derivationIndex: 1 }, { unique: true });
 
+/**
+ * No address may EVER back two invoices, across all accounts.
+ *
+ * The index above is scoped per user, so it cannot catch this: keystores are
+ * per-account, and somebody who imports the same recovery phrase into two
+ * accounts derives identical addresses at identical indices. Both accounts would
+ * then hand the same address to different debtors and one payment would settle
+ * the wrong invoice. This turns that into a hard write error instead of money
+ * quietly credited to the wrong person. Addresses are never reused by design, so
+ * uniqueness holds as an invariant.
+ */
+paymentAddressSchema.index({ address: 1 }, { unique: true });
+
 // The watch pass scans active addresses per chain.
 paymentAddressSchema.index({ status: 1, chainId: 1 });
+
+// The grace pass selects expired addresses least-recently watched, so it reads
+// this compound index rather than scanning every expired row each minute.
+paymentAddressSchema.index({ status: 1, lastWatchedAt: 1 });
 
 module.exports = mongoose.model("PaymentAddress", paymentAddressSchema);

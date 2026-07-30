@@ -4372,3 +4372,16 @@ input[type="checkbox"] {
     align-items: stretch;
   }
 }
+
+/* Wallet states between "no wallet" and "wallet ready": an address registered to
+   this account but absent from this browser, and the pre-scoping wallet awaiting
+   an explicit claim. */
+.wallet-elsewhere {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.wallet-elsewhere code {
+  font-size: 12.5px;
+  color: var(--ink);
+}

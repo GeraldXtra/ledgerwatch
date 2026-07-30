@@ -67,21 +67,29 @@ export async function deriveAddress(password, index) {
 }
 
 /**
- * Derive a SIGNER for `index`, connected to a provider. Used only for sweeping,
- * which is an outbound transaction and therefore always user-approved.
+ * Derive a SIGNER for `index` from an ALREADY UNLOCKED wallet.
+ *
+ * Same reason as deriveAddressFromWallet: unlocking runs scrypt, which takes
+ * seconds by design. A batch sweep over N addresses that unlocked per address
+ * would be unusable, so the caller unlocks once and derives N signers from that
+ * one master.
  *
  * The returned wallet holds a live private key: use it for one operation and let
  * it go out of scope. Never store it, never log it, never put it in a request.
  */
-export async function deriveSigner(password, index, provider) {
-  const master = await unlockWallet(password);
-  if (!canDerive(master)) {
-    throw new Error(
-      "This wallet cannot derive payment addresses. Re-import it using your recovery phrase."
-    );
-  }
+export function deriveSignerFromWallet(master, index, provider) {
+  if (!canDerive(master)) throw new Error(CANNOT_DERIVE);
   const node = ethers.HDNodeWallet.fromPhrase(master.mnemonic.phrase, "", pathForIndex(index));
   return provider ? node.connect(provider) : node;
+}
+
+/**
+ * Derive a SIGNER for `index`, connected to a provider. Used only for sweeping,
+ * which is an outbound transaction and therefore always user-approved.
+ */
+export async function deriveSigner(password, index, provider) {
+  const master = await unlockWallet(password);
+  return deriveSignerFromWallet(master, index, provider);
 }
 
 /**
