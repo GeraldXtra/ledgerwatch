@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, BellRing, Check, Inbox, Pencil, Trash2, Wallet } from "lucide-react";
+import { ArrowDown, ArrowUp, BellRing, Check, Coins, Inbox, Pencil, Trash2, Wallet } from "lucide-react";
 import { Avatar, EmptyState, KebabMenu, StatusPill } from "../../components/ui";
 import { ngn, shortDate } from "./format";
 import ProgressBar from "./ProgressBar";
@@ -29,6 +29,10 @@ export default function DebtList({
   onRemind,
   onRecordPayment,
   onAdd,
+  // Debt ids with a live crypto payment address. Shown as a chip so the ledger
+  // answers "which invoices are awaiting a stablecoin payment" at a glance,
+  // rather than requiring each row to be opened.
+  cryptoIds,
 }) {
   if (!debts.length) {
     return (
@@ -84,6 +88,7 @@ export default function DebtList({
             const paid = status === "paid";
             const balance = debt.balance != null ? debt.balance : debt.amount;
             const isSel = selected && selected.has(debt._id);
+            const hasCrypto = cryptoIds && cryptoIds.has(String(debt._id));
             return (
               <tr key={debt._id} className={`clickable-row ${isSel ? "row-selected" : ""}`}>
                 <td data-label="" className="check-col" onClick={(e) => e.stopPropagation()}>
@@ -99,7 +104,14 @@ export default function DebtList({
                     <Avatar name={debt.debtorName} />
                     <div>
                       <div className="lead-name">{debt.debtorName}</div>
-                      <div className="lead-sub num">{debt.debtorPhone || "no phone on file"}</div>
+                      <div className="lead-sub num">
+                        {debt.debtorPhone || "no phone on file"}
+                        {hasCrypto && (
+                          <span className="crypto-chip" title="Awaiting a USDC payment on a testnet address">
+                            <Coins size={11} /> USDC
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </td>

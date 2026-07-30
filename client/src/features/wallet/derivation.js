@@ -38,19 +38,32 @@ export function canDerive(wallet) {
   return Boolean(wallet && wallet.mnemonic && wallet.mnemonic.phrase);
 }
 
+const CANNOT_DERIVE =
+  "This wallet was imported from a private key, so it cannot derive payment addresses. Re-import it using your recovery phrase to enable crypto payments.";
+
+/**
+ * Derive the invoice address for `index` from an ALREADY UNLOCKED wallet.
+ *
+ * Unlocking runs scrypt, which is deliberately slow (seconds, on purpose). A
+ * caller that has to check `canDerive` before doing other work would otherwise
+ * unlock once for the check and again to derive, doubling the wait for no
+ * benefit. Takes the wallet so that cost is paid once.
+ *
+ * Returns only the public address; the derived node goes out of scope on return.
+ */
+export function deriveAddressFromWallet(master, index) {
+  if (!canDerive(master)) throw new Error(CANNOT_DERIVE);
+  const node = ethers.HDNodeWallet.fromPhrase(master.mnemonic.phrase, "", pathForIndex(index));
+  return node.address;
+}
+
 /**
  * Derive the invoice address for `index`, WITHOUT exposing the key.
  * Returns only the public address; the derived node is discarded on return.
  */
 export async function deriveAddress(password, index) {
   const master = await unlockWallet(password);
-  if (!canDerive(master)) {
-    throw new Error(
-      "This wallet was imported from a private key, so it cannot derive payment addresses. Re-import it using your recovery phrase to enable crypto payments."
-    );
-  }
-  const node = ethers.HDNodeWallet.fromPhrase(master.mnemonic.phrase, "", pathForIndex(index));
-  return node.address;
+  return deriveAddressFromWallet(master, index);
 }
 
 /**

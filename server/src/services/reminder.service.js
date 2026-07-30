@@ -184,10 +184,13 @@ async function generateReminderForDebt(debt, owner) {
       // before it rather than after the "Warm regards" line.
       const block = cryptoBlockText(activeAddress, chain);
       const idx = baseText.lastIndexOf("\nWarm regards,");
+      // The block opens with its own blank line, and the text before the sign-off
+      // ends with one too. Trimming the left side keeps that to a single blank
+      // line instead of stacking two.
       messageText =
         idx === -1
-          ? `${baseText}\n${block}`
-          : `${baseText.slice(0, idx)}\n${block}\n${baseText.slice(idx + 1)}`;
+          ? `${baseText.replace(/\s+$/, "")}\n${block}`
+          : `${baseText.slice(0, idx).replace(/\s+$/, "")}\n${block}\n${baseText.slice(idx + 1)}`;
     }
   }
 

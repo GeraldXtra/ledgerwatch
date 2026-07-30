@@ -168,11 +168,12 @@ Each invoice can be issued its own blockchain address so a client can settle in
 stablecoin. The reminder then carries both payment options: the usual bank details and
 the crypto option.
 
-**Addresses are HD derived** on a dedicated branch, . BIP-44 uses
+**Addresses are HD derived** on a dedicated branch, `m/44'/60'/0'/2/<index>`. BIP-44 uses
 change-level 0 for receive and 1 for change, so level 2 is a branch no standard wallet
 touches: importing the same seed into MetaMask will never surface or spend a receivables
-address. Indices come from an atomic , so two concurrent requests can never be
-handed the same one, and a unique compound index backs that up. **No derived private key
+address. Indices come from an atomic `findOneAndUpdate({$inc})`, so two concurrent requests
+can never be handed the same one, and a unique compound index backs that up. **No derived
+private key
 is ever stored** — keys are derived in the browser from the encrypted keystore after the
 user enters their password, and discarded.
 
@@ -183,11 +184,12 @@ recovery phrase to enable it.
 **The token is testnet USDC, not USDT.** Tether has no official deployment on these
 testnets, and the reminder tells the payer that sending anything else loses the money
 permanently, so the label has to be true. Circle's testnet USDC is faucet-obtainable, so
-the flow is genuinely testable. Contract addresses per chain are in .
+the flow is genuinely testable. Contract addresses per chain are in
+[`server/src/config/chains.js`](server/src/config/chains.js).
 
 **Watching and settlement** run as a third pass inside the existing automation loop, so
 they share its overlap guard and also fire from the manual *Check now* trigger. A transfer
-is  first, then  once it is deep enough (12 blocks on Sepolia, 5 on
+is `detected` first, then `confirmed` once it is deep enough (12 blocks on Sepolia, 5 on
 L2s, configurable). Settlement converts using the **rate snapshot taken when the address
 was issued, never the live rate** — a payer who sent exactly what was asked must never
 still appear to owe money. A transaction hash can settle only once, enforced by a unique
@@ -195,6 +197,17 @@ sparse index rather than application memory, so repeated passes, a restart mid-p
 the manual trigger racing the timer are all safe.
 
 Payments in any other token are recorded and surfaced as a warning, never settled.
+
+**Where it is in the app.** Receivables → the **Debts** table → click an invoice → **Crypto
+payment** in the action row. The dialog shows the balance, the USDC amount, the rate **and how
+old that rate is**, and the expiry, then asks for your wallet password. The password is checked
+*before* an index is reserved, because reserving one is irreversible and a typo would waste it.
+Once issued, the invoice itself shows the address with a QR and copy button, a live expiry
+countdown, and progress split into **confirmed**, **incoming but unconfirmed**, and **still
+needed** — so money in flight is visible before it settles, with a block explorer link on every
+transaction. The debts table marks those invoices with a `USDC` chip. A read-only
+`GET /api/payment-addresses/quote` backs the dialog so opening and closing it never consumes an
+index.
 
 ### Not yet built
 - **Sweeping** derived-address funds to the main wallet (outbound, so it needs password

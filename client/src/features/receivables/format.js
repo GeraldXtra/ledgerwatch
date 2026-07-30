@@ -59,6 +59,59 @@ export function dateTime(value) {
   return d.toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+/**
+ * How long ago something happened, in plain words. Used for the age of the
+ * FX rate on a payment address: a rate is only trustworthy if you can see how
+ * old it is, so this is shown next to every converted figure.
+ */
+export function agoLabel(value) {
+  const then = new Date(value).getTime();
+  if (isNaN(then)) return "unknown age";
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (secs < 45) return "moments ago";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+/**
+ * Time remaining until `value`, as a compact countdown. Returns null once the
+ * moment has passed, so the caller shows an expired state rather than counting
+ * negative time.
+ */
+export function countdown(value) {
+  const target = new Date(value).getTime();
+  if (isNaN(target)) return null;
+  let left = Math.floor((target - Date.now()) / 1000);
+  if (left <= 0) return null;
+
+  const days = Math.floor(left / 86400);
+  left -= days * 86400;
+  const hours = Math.floor(left / 3600);
+  left -= hours * 3600;
+  const mins = Math.floor(left / 60);
+  const secs = left - mins * 60;
+
+  const pad = (n) => String(n).padStart(2, "0");
+  if (days > 0) return `${days}d ${pad(hours)}h ${pad(mins)}m`;
+  return `${pad(hours)}:${pad(mins)}:${pad(secs)}`;
+}
+
+/** USDC is a 2 dp figure in the UI, always shown with both places. */
+export function usdc(amount) {
+  const n = Number(amount) || 0;
+  return `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`;
+}
+
+/** Shortened hash or address for a dense row: 0x1234…abcd */
+export function shortHash(value) {
+  const s = String(value || "");
+  return s.length > 14 ? `${s.slice(0, 8)}…${s.slice(-6)}` : s;
+}
+
 // Reliability band -> semantic tone class (pos/neg/warn/neutral).
 export function bandTone(band) {
   switch (band) {
@@ -75,4 +128,9 @@ export function bandTone(band) {
   }
 }
 
-export const METHOD_LABEL = { cash: "Cash", transfer: "Transfer", other: "Other" };
+export const METHOD_LABEL = {
+  cash: "Cash",
+  transfer: "Transfer",
+  crypto: "Crypto (USDC)",
+  other: "Other",
+};

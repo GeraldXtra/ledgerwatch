@@ -1,9 +1,37 @@
 const PaymentAddress = require("../models/PaymentAddress");
 const { getChain, listChains } = require("../config/chains");
 const { confirmationsFor } = require("../config/derivation");
-const { allocateIndex, issueAddress, getNgnRate } = require("../services/paymentAddress.service");
+const {
+  allocateIndex,
+  issueAddress,
+  getNgnRate,
+  quoteForInvoice,
+} = require("../services/paymentAddress.service");
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+/**
+ * GET /api/payment-addresses/quote?debtId=&chainId=
+ *
+ * What issuing an address WOULD ask for, without reserving anything. The
+ * confirmation screen needs the balance, USDC amount, rate and rate age up
+ * front; using /allocate for that would consume a derivation index every time a
+ * dialog was opened and abandoned.
+ */
+async function quote(req, res) {
+  try {
+    const result = await quoteForInvoice({
+      userId: req.user._id,
+      debtId: req.query.debtId,
+      chainId: Number(req.query.chainId),
+    });
+    return res.json(result);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error("payment address quote error:", err.message);
+    return res.status(500).json({ error: "Failed to quote this invoice" });
+  }
+}
 
 /**
  * POST /api/payment-addresses/allocate  { chainId }
@@ -117,4 +145,4 @@ async function revoke(req, res) {
   }
 }
 
-module.exports = { allocate, create, list, revoke };
+module.exports = { allocate, create, list, revoke, quote };
