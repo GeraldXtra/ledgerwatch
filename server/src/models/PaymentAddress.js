@@ -66,12 +66,20 @@ const paymentAddressSchema = new mongoose.Schema({
   tokenContract: { type: String, required: true },
   tokenDecimals: { type: Number, required: true },
 
-  // Rate snapshot taken when the address was issued. Both sides are stored so
-  // attribution is unambiguous later, however the rate has moved since.
-  ngnBalanceAtIssue: { type: Number, required: true },
-  expectedAmount: { type: String, required: true }, // raw token units, string
-  rateNgnPerToken: { type: Number, required: true },
-  rateFetchedAt: { type: Date, required: true },
+  // Rate snapshot taken when the address was issued. 1 USDC is treated as exactly
+  // 1 USD, so `ngnPerUsd` is the only rate in play — no USDC/USD price is fetched.
+  // Both the NGN balance and the USDC figure are stored, so attribution stays
+  // unambiguous however far the rate moves afterwards.
+  invoiceBalanceNgn: { type: Number, required: true },
+  expectedUsdc: { type: Number, required: true }, // 2 dp, rounded UP at issue
+  ngnPerUsd: { type: Number, required: true },
+  rateTimestamp: { type: Date, required: true },
+
+  // Running totals maintained by the watch pass, so the invoice can show
+  // received-so-far and still-needed without recomputing from logs each render.
+  receivedUsdc: { type: Number, default: 0 }, // confirmed only
+  settledNgn: { type: Number, default: 0 },
+  overpaidUsdc: { type: Number, default: 0 },
 
   status: {
     type: String,

@@ -1,7 +1,10 @@
 const Reminder = require("../models/Reminder");
 const Payment = require("../models/Payment");
+const PaymentAddress = require("../models/PaymentAddress");
 const { normalizePhone } = require("../utils/phone");
 const { buildReminderMessage } = require("../utils/reminderTemplate");
+const { cryptoBlockText, cryptoBlockHtml } = require("../utils/cryptoPaymentBlock");
+const { getChain } = require("../config/chains");
 const { draftReminder } = require("./anthropic.service");
 const { sendWhatsApp, sendEmail, buildReminderEmail } = require("./notify.service");
 
@@ -39,10 +42,42 @@ async function dispatchReminder(reminder, debt, owner, { channels = [], force = 
     if (channel === "whatsapp") {
       res = await sendWhatsApp(debt.debtorPhone, reminder.messageText);
     } else if (channel === "email") {
+      // The email gets the richer crypto block: a copyable monospace address plus a
+      // scannable QR, so the payer never has to retype 42 characters by hand. The
+      // plain-text message already carries the same details for WhatsApp.
+      let cryptoHtml = "";
+      const active = await PaymentAddress.findOne({
+        debtId: debt._id,
+        status: "active",
+        expiresAt: { $gt: new Date() },
+      });
+      if (active) {
+        const chain = getChain(active.chainId);
+        if (chain) {
+          let qrDataUrl = null;
+          try {
+            // eslint-disable-next-line global-require
+            const QRCode = require("qrcode");
+            qrDataUrl = await QRCode.toDataURL(active.address, {
+              width: 336,
+              margin: 1,
+              color: { dark: "#0a1428", light: "#ffffff" },
+            });
+          } catch {
+            // A missing QR must never block the reminder — the address is still
+            // present in text form right above it.
+          }
+          cryptoHtml = cryptoBlockHtml(active, chain, qrDataUrl);
+        }
+      }
+
       const html = buildReminderEmail({
         businessName: owner && owner.name,
-        messageText: reminder.messageText,
+        // Base text here, not messageText: the crypto details are rendered below
+        // as rich HTML, so using the full text would duplicate them.
+        messageText: cryptoHtml ? reminder.baseMessageText || reminder.messageText : reminder.messageText,
         bankDetails: (owner && owner.bankDetails) || {},
+        cryptoHtml,
       });
       res = await sendEmail(debt.debtorEmail, `Payment reminder from ${(owner && owner.name) || "your supplier"}`, html);
     } else {
@@ -124,12 +159,43 @@ async function generateReminderForDebt(debt, owner) {
   // AI draft with graceful fallback to the plain template.
   const aiText = await draftReminder(params);
   const source = aiText ? "ai" : "template";
-  const messageText = aiText || buildReminderMessage(params);
+  const baseText = aiText || buildReminderMessage(params);
+
+  /**
+   * The crypto block is APPENDED here, identically for the AI and template paths,
+   * rather than being described to the model and left for it to reproduce.
+   *
+   * An address is 42 characters with no human-noticeable checksum: if the model
+   * transposed one character the payer would send real money to an address nobody
+   * controls, unrecoverably. The same goes for the amount. So the model writes the
+   * human paragraphs and the machine writes the numbers.
+   */
+  const activeAddress = await PaymentAddress.findOne({
+    debtId: debt._id,
+    status: "active",
+    expiresAt: { $gt: new Date() },
+  });
+
+  let messageText = baseText;
+  if (activeAddress) {
+    const chain = getChain(activeAddress.chainId);
+    if (chain) {
+      // Sign-off sits at the end of the base text, so the payment details go in
+      // before it rather than after the "Warm regards" line.
+      const block = cryptoBlockText(activeAddress, chain);
+      const idx = baseText.lastIndexOf("\nWarm regards,");
+      messageText =
+        idx === -1
+          ? `${baseText}\n${block}`
+          : `${baseText.slice(0, idx)}\n${block}\n${baseText.slice(idx + 1)}`;
+    }
+  }
 
   const reminder = await Reminder.create({
     debtId: debt._id,
     userId: debt.userId,
     messageText,
+    baseMessageText: baseText,
     scheduledFor: new Date(),
     status: "scheduled",
   });

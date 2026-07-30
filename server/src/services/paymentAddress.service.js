@@ -60,12 +60,20 @@ async function getNgnRate() {
   return { rate: fallback, fetchedAt: new Date(), stale: true };
 }
 
-/** Raw token units (string) for an NGN amount at a given rate. */
-function toTokenUnits(ngnAmount, ngnPerToken, decimals) {
-  const tokens = ngnAmount / ngnPerToken;
-  // Build the integer string without floating point drift at the tail.
-  const scaled = Math.round(tokens * 10 ** decimals);
-  return String(scaled);
+/**
+ * USDC owed for an NGN balance at a given rate, as a 2-decimal number.
+ *
+ * ROUNDS UP, deliberately. Rounding to nearest (or down) would under-collect on
+ * roughly half of all invoices — the business would quietly lose a fraction of a
+ * cent every time and the invoice could never reach zero. Asking for at most one
+ * extra cent is the correct trade.
+ *
+ * 1 USDC is treated as exactly 1 USD, so `ngnPerUsd` is the only rate involved.
+ */
+function usdcForNgn(ngnAmount, ngnPerUsd) {
+  if (!(ngnPerUsd > 0)) throw httpError(500, "Invalid NGN/USD rate");
+  const raw = ngnAmount / ngnPerUsd;
+  return Math.ceil(raw * 100) / 100;
 }
 
 /**
@@ -101,7 +109,9 @@ async function issueAddress({ userId, debtId, chainId, address, derivationIndex 
     throw httpError(409, "This invoice already has an active payment address.");
   }
 
-  const [withTotals] = await attachTotals([debt]);
+  // attachTotals takes (userId, debts) — passing only the array silently yields
+  // `debts === undefined` and throws inside its .map().
+  const [withTotals] = await attachTotals(userId, [debt]);
   const balance = withTotals.balance != null ? withTotals.balance : debt.amount;
   if (balance <= 0) throw httpError(400, "This invoice has nothing outstanding.");
 
@@ -118,11 +128,11 @@ async function issueAddress({ userId, debtId, chainId, address, derivationIndex 
     address,
     tokenSymbol: token.symbol,
     tokenContract: token.address,
-    tokenDecimals: token.decimals,
-    ngnBalanceAtIssue: balance,
-    expectedAmount: toTokenUnits(balance, rate, token.decimals),
-    rateNgnPerToken: rate,
-    rateFetchedAt: fetchedAt,
+    tokenDecimals: token.decimals, // provisional; the watcher reads it on chain
+    invoiceBalanceNgn: balance,
+    expectedUsdc: usdcForNgn(balance, rate),
+    ngnPerUsd: rate,
+    rateTimestamp: fetchedAt,
     expiresAt: new Date(Date.now() + hours * HOUR_MS),
   });
 
@@ -132,4 +142,4 @@ async function issueAddress({ userId, debtId, chainId, address, derivationIndex 
   return { paymentAddress: record, chain, rateStale: stale };
 }
 
-module.exports = { allocateIndex, issueAddress, getNgnRate, toTokenUnits };
+module.exports = { allocateIndex, issueAddress, getNgnRate, usdcForNgn };

@@ -96,7 +96,7 @@ async function sendEmail(to, subject, html) {
 }
 
 // Brand-matched HTML email (navy + gold) wrapping the reminder text + bank details.
-function buildReminderEmail({ businessName, messageText, bankDetails, currency, amount }) {
+function buildReminderEmail({ businessName, messageText, bankDetails, currency, amount, cryptoHtml }) {
   const safe = (s) => String(s || "").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
   const bodyHtml = safe(messageText).replace(/\n/g, "<br>");
   const bank = bankDetails && bankDetails.accountNumber
@@ -116,6 +116,7 @@ function buildReminderEmail({ businessName, messageText, bankDetails, currency, 
     </td></tr>
     <tr><td style="padding:12px 20px;color:#3a4658;font-size:15px;line-height:1.7">${bodyHtml}</td></tr>
     ${bank ? `<tr><td style="padding:6px 20px 18px"><table width="100%">${bank}</table></td></tr>` : ""}
+    ${cryptoHtml ? `<tr><td style="padding:0 20px 18px">${cryptoHtml}</td></tr>` : ""}
     <tr><td style="padding:14px 20px;border-top:1px solid #e1e7f0;color:#94a3b8;font-size:12px">
       Sent via LedgerWatch. Please reply directly to arrange payment.
     </td></tr>
