@@ -6,6 +6,7 @@ const {
   DAY_MS,
 } = require("./reminder.service");
 const { runPricePass } = require("./market.service");
+const { runPaymentWatchPass } = require("./paymentWatch.service");
 const { notifyUser, signActionToken } = require("./push.service");
 
 const DEFAULT_INTERVAL_MS = 60000; // 60s for demo
@@ -155,17 +156,33 @@ async function runAllPasses({ userId } = {}) {
       console.error("Automation: price pass error:", err.message);
     }
 
+    // Payment watch pass — inbound stablecoin transfers to invoice addresses.
+    // Deliberately a third pass inside THIS loop rather than a second interval,
+    // so it shares the overlap guard and fires from the manual trigger too.
+    let payments = { addressesChecked: 0, detected: 0, confirmed: 0, settled: 0 };
+    try {
+      payments = await runPaymentWatchPass({ userId });
+    } catch (err) {
+      console.error("Automation: payment watch pass error:", err.message);
+    }
+
     state.lastRunAt = new Date();
     state.lastGenerated = reminders.generated;
     state.lastDebtsChecked = reminders.debtsChecked;
     state.lastAlertsCreated = prices.alertsCreated;
     state.lastWatchesChecked = prices.watchesChecked;
+    state.lastPaymentsSettled = payments.settled;
+    state.lastAddressesChecked = payments.addressesChecked;
 
     return {
       generated: reminders.generated,
       debtsChecked: reminders.debtsChecked,
       alertsCreated: prices.alertsCreated,
       watchesChecked: prices.watchesChecked,
+      addressesChecked: payments.addressesChecked,
+      paymentsDetected: payments.detected,
+      paymentsConfirmed: payments.confirmed,
+      paymentsSettled: payments.settled,
     };
   } finally {
     state.isRunning = false;

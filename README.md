@@ -161,6 +161,49 @@ strict **method allowlist** — no signing method exists on the server, and disa
 chains are rejected. You review a full summary and enter your password to sign locally; the
 agent may prepare an unsigned transaction but never signs.
 
+
+## Crypto payments on invoices (testnet)
+
+Each invoice can be issued its own blockchain address so a client can settle in
+stablecoin. The reminder then carries both payment options: the usual bank details and
+the crypto option.
+
+**Addresses are HD derived** on a dedicated branch, . BIP-44 uses
+change-level 0 for receive and 1 for change, so level 2 is a branch no standard wallet
+touches: importing the same seed into MetaMask will never surface or spend a receivables
+address. Indices come from an atomic , so two concurrent requests can never be
+handed the same one, and a unique compound index backs that up. **No derived private key
+is ever stored** — keys are derived in the browser from the encrypted keystore after the
+user enters their password, and discarded.
+
+A wallet **imported from a bare private key cannot be used** for this: with no mnemonic
+and no chain code, BIP-32 derivation is mathematically impossible. Re-import using the
+recovery phrase to enable it.
+
+**The token is testnet USDC, not USDT.** Tether has no official deployment on these
+testnets, and the reminder tells the payer that sending anything else loses the money
+permanently, so the label has to be true. Circle's testnet USDC is faucet-obtainable, so
+the flow is genuinely testable. Contract addresses per chain are in .
+
+**Watching and settlement** run as a third pass inside the existing automation loop, so
+they share its overlap guard and also fire from the manual *Check now* trigger. A transfer
+is  first, then  once it is deep enough (12 blocks on Sepolia, 5 on
+L2s, configurable). Settlement converts using the **rate snapshot taken when the address
+was issued, never the live rate** — a payer who sent exactly what was asked must never
+still appear to owe money. A transaction hash can settle only once, enforced by a unique
+sparse index rather than application memory, so repeated passes, a restart mid-pass, or
+the manual trigger racing the timer are all safe.
+
+Payments in any other token are recorded and surfaced as a warning, never settled.
+
+### Not yet built
+- **Sweeping** derived-address funds to the main wallet (outbound, so it needs password
+  approval and has a native-gas prerequisite on the derived address).
+- **Expiry grace watch** — addresses currently stop being watched at expiry; the
+  low-frequency 30 day grace watch for late payments is not implemented yet.
+- **Settings UI** for the crypto section (enable, default chain, expiry, confirmation
+  depth, sweep destination). The values are configurable via env and the User model today.
+
 ## Deployment
 See [DEPLOY_CHECKLIST.md](DEPLOY_CHECKLIST.md) for a step-by-step Atlas → Render → Vercel
 guide. **The local demo is the primary plan; deployment is a backup flex.**
