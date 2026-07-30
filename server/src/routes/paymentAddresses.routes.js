@@ -6,6 +6,7 @@ const {
   list,
   revoke,
   quote,
+  recordSweep,
 } = require("../controllers/paymentAddress.controller");
 
 const router = express.Router();
@@ -19,5 +20,6 @@ router.post("/allocate", allocate); // reserve an index (atomic)
 router.post("/", create); // record the browser-derived address
 router.get("/", list);
 router.patch("/:id/revoke", revoke);
+router.post("/:id/sweeps", recordSweep); // bookkeeping for a browser-signed sweep
 
 module.exports = router;

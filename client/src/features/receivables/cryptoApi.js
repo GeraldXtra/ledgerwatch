@@ -53,3 +53,18 @@ export async function revokePaymentAddress(id) {
   const { data } = await http.patch(`/api/payment-addresses/${id}/revoke`);
   return data;
 }
+
+/**
+ * Record a sweep the browser has already signed and broadcast. Bookkeeping only
+ * — the transaction is on chain before this is called, so a failure here must
+ * never be reported to the user as a failed sweep.
+ */
+export async function recordSweep(id, { txHash, destination, amountUsdc, gasFundedTxHash }) {
+  const { data } = await http.post(`/api/payment-addresses/${id}/sweeps`, {
+    txHash,
+    destination,
+    amountUsdc,
+    gasFundedTxHash,
+  });
+  return data;
+}

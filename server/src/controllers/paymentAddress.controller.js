@@ -103,12 +103,16 @@ async function create(req, res) {
     });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
-    // A duplicate index means the unique guard caught a logic slip — surface it
-    // loudly rather than letting two invoices share an address.
+    // A duplicate key means one of the unique guards caught something that must
+    // never happen. Surface it loudly rather than letting two invoices share an
+    // address, and name which guard fired — they mean different things.
     if (err.code === 11000) {
-      return res
-        .status(409)
-        .json({ error: "That derivation index is already in use. Please try again." });
+      const onAddress = /address/.test(err.message || "") && !/derivationIndex/.test(err.message || "");
+      return res.status(409).json({
+        error: onAddress
+          ? "That address is already in use by another invoice. This happens if the same recovery phrase is used by more than one account; use a separate wallet for each."
+          : "That derivation index is already in use. Please try again.",
+      });
     }
     console.error("create payment address error:", err.message);
     return res.status(500).json({ error: "Failed to create the payment address" });
@@ -145,4 +149,61 @@ async function revoke(req, res) {
   }
 }
 
-module.exports = { allocate, create, list, revoke, quote };
+/**
+ * POST /api/payment-addresses/:id/sweeps
+ * { txHash, destination, amountUsdc, gasFundedTxHash }
+ *
+ * Records a sweep the user has already signed and broadcast in their browser.
+ * The server never signs and never holds a key, so this is bookkeeping: the
+ * transaction is already on chain by the time this is called.
+ */
+async function recordSweep(req, res) {
+  try {
+    const { txHash, destination, amountUsdc, gasFundedTxHash } = req.body || {};
+    if (!HASH_RE.test(txHash || "")) {
+      return res.status(400).json({ error: "Invalid transaction hash" });
+    }
+    if (!ADDRESS_RE.test(destination || "")) {
+      return res.status(400).json({ error: "Invalid destination address" });
+    }
+    if (gasFundedTxHash && !HASH_RE.test(gasFundedTxHash)) {
+      return res.status(400).json({ error: "Invalid gas funding transaction hash" });
+    }
+    const amount = Number(amountUsdc);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: "Invalid swept amount" });
+    }
+
+    const record = await PaymentAddress.findOne({ _id: req.params.id, userId: req.user._id });
+    if (!record) return res.status(404).json({ error: "Payment address not found" });
+
+    // Idempotent: a retry after a dropped response must not append twice.
+    if (!record.sweeps.some((s) => s.txHash === txHash)) {
+      record.sweeps.push({
+        txHash,
+        destination,
+        amountUsdc: amount,
+        gasFundedTxHash: gasFundedTxHash || null,
+      });
+    }
+
+    /**
+     * `swept` is set NARROWLY, and only for an address that is finished
+     * collecting. An address that is still `active` is still expected to receive
+     * a top up, and flipping it here would stop the watcher and silently lose
+     * that payment. Sweeping moves what has arrived; it does not close an
+     * invoice. The sweeps array records the movement either way.
+     */
+    if (["paid", "expired", "revoked"].includes(record.status)) {
+      record.status = "swept";
+    }
+
+    await record.save();
+    return res.status(201).json({ paymentAddress: record });
+  } catch (err) {
+    console.error("record sweep error:", err.message);
+    return res.status(500).json({ error: "Failed to record the sweep" });
+  }
+}
+
+module.exports = { allocate, create, list, revoke, quote, recordSweep };

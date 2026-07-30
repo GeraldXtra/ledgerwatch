@@ -4,6 +4,7 @@ import {
   Copy,
   Check,
   Droplets,
+  History,
   PlusCircle,
   DownloadCloud,
   RefreshCw,
@@ -18,9 +19,17 @@ import {
   SkeletonLines,
   ToastProvider,
 } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { getProvider, ERC20_ABI } from "./provider";
-import { hasWallet, getStoredAddress, clearWallet } from "./keystore";
-import { fetchChains, fetchTxs, clearAddress, updateTxStatus } from "./walletApi";
+import {
+  hasWallet,
+  getStoredAddress,
+  clearWallet,
+  getLegacyWallet,
+  claimLegacyWallet,
+  discardLegacyWallet,
+} from "./keystore";
+import { fetchChains, fetchTxs, clearAddress, updateTxStatus, saveAddress } from "./walletApi";
 import CreateWalletModal from "./CreateWalletModal";
 import ImportWalletModal from "./ImportWalletModal";
 import SendForm from "./SendForm";
@@ -32,9 +41,12 @@ function shorten(a) {
 }
 
 function WalletInner() {
+  const { user, applyUser } = useAuth();
   const [chains, setChains] = useState([]);
   const [chainId, setChainId] = useState(null);
   const [address, setAddress] = useState(getStoredAddress());
+  const [legacy, setLegacy] = useState(() => getLegacyWallet());
+  const [claiming, setClaiming] = useState(false);
   const [subtab, setSubtab] = useState("send");
   const [balances, setBalances] = useState(null);
   const [balLoading, setBalLoading] = useState(false);
@@ -44,6 +56,16 @@ function WalletInner() {
   const [copied, setCopied] = useState(false);
 
   const chain = chains.find((c) => c.chainId === chainId) || null;
+
+  // Keystores are scoped per account, so switching account changes which wallet
+  // (if any) belongs to this page. Re-read on identity change rather than
+  // trusting the value captured at mount.
+  useEffect(() => {
+    setAddress(getStoredAddress());
+    setLegacy(getLegacyWallet());
+    setBalances(null);
+    setTxs([]);
+  }, [user?._id]);
 
   // Load the config-driven chain list once. The server already filters disabled
   // chains; we filter again here so a mainnet entry can never surface client-side
@@ -134,8 +156,39 @@ function WalletInner() {
 
   function onWalletReady(addr) {
     setAddress(addr);
+    setLegacy(null);
     setCreateOpen(false);
     setImportOpen(false);
+  }
+
+  // Take over the pre-scoping wallet for THIS account. Explicit and one time:
+  // the legacy entry is removed on success so a second account cannot claim the
+  // same wallet, which is the cross-account leak this whole change fixes.
+  async function claimLegacy() {
+    setClaiming(true);
+    try {
+      const addr = claimLegacyWallet();
+      const saved = await saveAddress(addr).catch(() => null);
+      if (saved && applyUser && user) applyUser({ ...user, walletAddress: addr });
+      setLegacy(null);
+      setAddress(addr);
+    } catch {
+      /* the panel stays up; the user can create a wallet instead */
+    } finally {
+      setClaiming(false);
+    }
+  }
+
+  function discardLegacy() {
+    if (
+      !window.confirm(
+        "Forget that earlier wallet? If you have not saved its recovery phrase, anything in it becomes unreachable."
+      )
+    ) {
+      return;
+    }
+    discardLegacyWallet();
+    setLegacy(null);
   }
 
   async function removeWallet() {
@@ -144,6 +197,9 @@ function WalletInner() {
     }
     clearWallet();
     await clearAddress().catch(() => {});
+    // Keep context in step, or the "has a wallet but not on this device" card
+    // would appear immediately after deliberately removing it.
+    if (applyUser && user) applyUser({ ...user, walletAddress: null });
     setAddress(null);
     setBalances(null);
     setTxs([]);
@@ -170,14 +226,68 @@ function WalletInner() {
         />
         <span className="testnet-badge">TESTNET ONLY · no real funds</span>
 
+        {/* This account already registered an address, but its keystore is not in
+            this browser — a different machine, or storage was cleared. Say so,
+            rather than implying the account has no wallet. */}
+        {user?.walletAddress && (
+          <Card>
+            <div className="wallet-elsewhere">
+              <span className="icon-tile neutral">
+                <History size={16} />
+              </span>
+              <div className="grow">
+                <div className="card-title">This account has a wallet, but not on this device</div>
+                <p className="muted small" style={{ margin: "4px 0 8px" }}>
+                  It is registered as <code className="num">{shorten(user.walletAddress)}</code>.
+                  Keys only ever live in the browser they were made in, so import it here with its
+                  recovery phrase to use it again.
+                </p>
+                <Button variant="primary" onClick={() => setImportOpen(true)}>
+                  <DownloadCloud size={15} /> Import with recovery phrase
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* A wallet left over from before keystores were scoped per account. Only
+            ever adopted on an explicit click. */}
+        {legacy && (
+          <Card>
+            <div className="wallet-elsewhere">
+              <span className="icon-tile neutral">
+                <WalletIcon size={16} />
+              </span>
+              <div className="grow">
+                <div className="card-title">There is an earlier wallet in this browser</div>
+                <p className="muted small" style={{ margin: "4px 0 8px" }}>
+                  <code className="num">{shorten(legacy.address)}</code> was created before wallets
+                  were kept separate per account, so it does not belong to any account yet. Claim it
+                  for <strong>{user?.email}</strong> and it becomes this account's wallet, using the
+                  password you originally set. Otherwise create a fresh one below.
+                </p>
+                <div className="row wrap">
+                  <Button variant="primary" onClick={claimLegacy} disabled={claiming}>
+                    <Check size={15} /> {claiming ? "Claiming…" : "Claim for this account"}
+                  </Button>
+                  <Button variant="ghost" onClick={discardLegacy} disabled={claiming}>
+                    <Trash2 size={14} /> Forget it
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
+
         <Card>
           <div className="wallet-intro">
             <div className="wallet-intro-icon"><WalletIcon size={22} /></div>
             <h3 className="section-title">Create or import a wallet</h3>
             <p className="muted" style={{ maxWidth: "52ch", margin: "0 auto" }}>
               Keys are generated and encrypted in your browser. Only the encrypted keystore is
-              stored on this device — the plaintext key never touches our servers. Testnet chains
-              only; mainnet is disabled behind a security audit.
+              stored on this device — the plaintext key never touches our servers. Each account
+              has its own wallet, so this one is separate from any other you have signed into.
+              Testnet chains only; mainnet is disabled behind a security audit.
             </p>
             <div className="row" style={{ justifyContent: "center", marginTop: 16 }}>
               <Button variant="primary" onClick={() => setCreateOpen(true)}>
