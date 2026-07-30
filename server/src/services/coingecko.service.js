@@ -235,12 +235,18 @@ const NGN_TTL = 5 * 60 * 1000; // 5 min — an invoice rate does not need to tic
  * stale on failure, and NEVER throws — the caller falls back to a configured
  * rate so address generation cannot hard-fail on a third-party outage.
  *
- * @returns {Promise<{ngn:number, stale:boolean}|null>}
+ * `fetchedAt` is the time the rate was actually RETRIEVED FROM COINGECKO, not the
+ * time of this call. A cache hit can be up to NGN_TTL old, and a stale serve can
+ * be far older, so returning `Date.now()` here would let the UI tell the user a
+ * five minute old rate was fetched this second. The invoice screen displays this
+ * age, so it has to be the truth.
+ *
+ * @returns {Promise<{ngn:number, stale:boolean, fetchedAt:number}|null>}
  */
 async function getNgnPrice(coinId = "usd-coin") {
   const now = Date.now();
   const hit = ngnCache.get(coinId);
-  if (hit && now - hit.ts < NGN_TTL) return { ngn: hit.ngn, stale: false };
+  if (hit && now - hit.ts < NGN_TTL) return { ngn: hit.ngn, stale: false, fetchedAt: hit.ts };
 
   await singleFlight(`ngn:${coinId}`, async () => {
     try {
@@ -258,7 +264,11 @@ async function getNgnPrice(coinId = "usd-coin") {
 
   const entry = ngnCache.get(coinId);
   if (!entry) return null; // caller uses its configured fallback
-  return { ngn: entry.ngn, stale: Date.now() - entry.ts > NGN_TTL };
+  return {
+    ngn: entry.ngn,
+    stale: Date.now() - entry.ts > NGN_TTL,
+    fetchedAt: entry.ts,
+  };
 }
 
 module.exports = {

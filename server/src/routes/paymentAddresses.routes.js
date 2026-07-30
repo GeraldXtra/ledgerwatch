@@ -5,6 +5,7 @@ const {
   create,
   list,
   revoke,
+  quote,
 } = require("../controllers/paymentAddress.controller");
 
 const router = express.Router();
@@ -13,6 +14,7 @@ const router = express.Router();
 // handles PUBLIC addresses and derivation indices — never a key or a seed.
 router.use(requireAuth);
 
+router.get("/quote", quote); // preview figures — reserves nothing
 router.post("/allocate", allocate); // reserve an index (atomic)
 router.post("/", create); // record the browser-derived address
 router.get("/", list);

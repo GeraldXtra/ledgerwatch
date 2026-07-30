@@ -4193,3 +4193,182 @@ input[type="checkbox"] {
 .page-head-text .support {
   max-width: 68ch;
 }
+
+/* ============================================================
+   CRYPTO PAYMENT ADDRESSES ON INVOICES
+   Reuses the existing navy system: white card, --well insets,
+   --border hairlines, the same pill and icon-tile tones. No new
+   visual language, no gradient or blur anywhere near a figure.
+   ============================================================ */
+
+/* Sub-label under a quote figure — the rate's age, the confirmation depth.
+   Small and muted, but fully opaque: it qualifies a number, so it has to be
+   readable. */
+.quote-sub {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0;
+}
+
+/* Gold-family warning tone for pills and figures, matching --warn-*. */
+.pill.warn {
+  color: var(--warn-text);
+  background: var(--warn-bg);
+}
+.value-warn {
+  color: var(--warn-text);
+}
+
+/* Blocked states in the issue modal: no wallet, or a wallet that cannot derive. */
+.crypto-blocked {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--well);
+}
+
+/* ---- The address card on the invoice ---- */
+.crypto-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  overflow: hidden;
+}
+.crypto-card-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--well);
+}
+.crypto-card-body {
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  gap: 18px;
+  padding: 16px 14px;
+}
+.crypto-qr-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.crypto-qr-col .wallet-address {
+  max-width: 220px;
+  font-size: 12px;
+}
+.crypto-detail-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* Progress: confirmed money against what was asked for. */
+.crypto-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.crypto-progress-figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.crypto-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--well);
+  min-width: 0;
+}
+.crypto-figure .num {
+  font-size: 13.5px;
+  /* Figures never shrink out of legibility, and never sit behind anything. */
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.crypto-empty {
+  margin: 0;
+  padding: 0 14px 14px;
+}
+
+/* Observed transactions. Detected and confirmed are deliberately distinct: a
+   transfer that has landed but not yet confirmed must be visible as incoming,
+   not reported as nothing. */
+.crypto-tx-list {
+  padding: 0 14px;
+  border-top: 1px solid var(--border);
+}
+.crypto-tx-row {
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+}
+.crypto-tx-row:last-child {
+  border-bottom: none;
+}
+.tx-hash-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-600);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.tx-hash-link:hover {
+  text-decoration: underline;
+}
+
+.crypto-card-foot {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--well);
+}
+
+/* Ledger indicator: which invoices are awaiting a stablecoin payment. */
+.crypto-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border: 1px solid var(--gold-200);
+  vertical-align: 1px;
+}
+.crypto-chip svg {
+  flex: none;
+}
+
+@media (max-width: 720px) {
+  .crypto-card-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .crypto-progress-figures {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .crypto-card-foot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

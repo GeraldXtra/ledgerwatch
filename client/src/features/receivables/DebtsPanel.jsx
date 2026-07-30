@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BellRing, Download, Plus, Search } from "lucide-react";
 import http from "../../api/http";
 import {
@@ -20,6 +20,14 @@ import DebtForm from "./DebtForm";
 import DebtDetailModal from "./DebtDetailModal";
 import ReminderPanel from "./ReminderPanel";
 import BulkActionBar from "./BulkActionBar";
+import { fetchPaymentAddresses } from "./cryptoApi";
+
+// Lazy, on purpose. This modal reaches ethers (for HD derivation) and qrcode,
+// which together are the largest dependency in the app. Importing it eagerly
+// pulls both into the main bundle, so every user would download the crypto
+// stack just to open the dashboard — the wallet is code-split for exactly this
+// reason. cryptoApi itself is a plain http wrapper and stays eager.
+const CryptoPaymentModal = lazy(() => import("./CryptoPaymentModal"));
 
 function kpis(debts) {
   const totalOutstanding = debts.reduce((s, d) => s + (d.balance ?? d.amount ?? 0), 0);
@@ -65,6 +73,14 @@ export default function DebtsPanel() {
   const [reminder, setReminder] = useState(null);
   const [bulkBusy, setBulkBusy] = useState(false);
 
+  // Crypto payment addresses. `cryptoIds` drives the ledger indicator, so the
+  // table can show which invoices are awaiting a stablecoin payment without
+  // anyone having to open each one. `cryptoKey` bumps to re-read after an
+  // address is issued or revoked.
+  const [cryptoDebt, setCryptoDebt] = useState(null);
+  const [cryptoIds, setCryptoIds] = useState(() => new Set());
+  const [cryptoKey, setCryptoKey] = useState(0);
+
   const debounceRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -91,6 +107,27 @@ export default function DebtsPanel() {
     debounceRef.current = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(debounceRef.current);
   }, [load, search]);
+
+  // Which invoices have a live payment address. Deliberately independent of
+  // `load` so retyping in the search box does not refetch it, and silent on
+  // failure — the indicator is a convenience and must never break the ledger.
+  useEffect(() => {
+    let active = true;
+    fetchPaymentAddresses()
+      .then((data) => {
+        if (!active) return;
+        const ids = (data.addresses || [])
+          .filter((a) => a.status === "active")
+          .map((a) => String(a.debtId));
+        setCryptoIds(new Set(ids));
+      })
+      .catch(() => {
+        if (active) setCryptoIds(new Set());
+      });
+    return () => {
+      active = false;
+    };
+  }, [cryptoKey]);
 
   // --- sorting toggles asc/desc via a "_asc" suffix (client-side) ---
   function onSort(key) {
@@ -265,6 +302,7 @@ export default function DebtsPanel() {
             onRemind={generateReminder}
             onRecordPayment={(d) => setDetailId(d._id)}
             onAdd={() => setAdding(true)}
+            cryptoIds={cryptoIds}
           />
         )}
       </Card>
@@ -290,7 +328,26 @@ export default function DebtsPanel() {
           onEdit={(d) => { setDetailId(null); setEditing(d); }}
           onDelete={deleteDebt}
           onChanged={load}
+          onCrypto={(d) => { setDetailId(null); setCryptoDebt(d); }}
+          cryptoKey={cryptoKey}
         />
+      )}
+      {cryptoDebt && (
+        <Suspense fallback={null}>
+        <CryptoPaymentModal
+          debt={cryptoDebt}
+          onClose={() => setCryptoDebt(null)}
+          onCreated={() => {
+            const id = cryptoDebt._id;
+            setCryptoDebt(null);
+            setCryptoKey((k) => k + 1);
+            // Land back on the invoice so the new address, QR and amount are
+            // there to read immediately rather than being hunted for.
+            setDetailId(id);
+            toast("Payment address created. Share it with your client.", { type: "success" });
+          }}
+        />
+        </Suspense>
       )}
       {reminder && (
         <ReminderPanel debt={reminder.debt} result={reminder.result} onClose={() => setReminder(null)} />

@@ -1,15 +1,30 @@
-import { BellRing, Check, Pencil, Trash2, X } from "lucide-react";
+import { Suspense, lazy } from "react";
+import { BellRing, Check, Coins, Pencil, Trash2, X } from "lucide-react";
 import { Avatar, Button, Modal, StatusPill } from "../../components/ui";
 import { ngn, shortDate } from "./format";
 import PaymentPanel from "./PaymentPanel";
 
+// Lazy: this panel pulls in qrcode to render the address. Most invoices have no
+// crypto address, so the library should not be in the main bundle.
+const CryptoPaymentPanel = lazy(() => import("./CryptoPaymentPanel"));
+
 /**
  * Debt detail: debtor header, key figures, the payment panel (progress + history +
- * record + receipt), and quick actions. `debt` carries derived amountPaid/balance/
- * displayStatus. Callbacks bubble to the page. onChanged(updatedDebt) fires when a
- * payment changes the debt.
+ * record + receipt), the crypto payment address if one has been issued, and quick
+ * actions. `debt` carries derived amountPaid/balance/displayStatus. Callbacks
+ * bubble to the page. onChanged(updatedDebt) fires when a payment changes the debt.
  */
-export default function DebtDetailModal({ debt, onClose, onRemind, onMarkPaid, onEdit, onDelete, onChanged }) {
+export default function DebtDetailModal({
+  debt,
+  onClose,
+  onRemind,
+  onMarkPaid,
+  onEdit,
+  onDelete,
+  onChanged,
+  onCrypto,
+  cryptoKey = 0,
+}) {
   const currency = debt.currency || "NGN";
   const balance = debt.balance != null ? debt.balance : debt.amount;
   const paid = debt.displayStatus === "paid" || balance <= 0;
@@ -60,10 +75,19 @@ export default function DebtDetailModal({ debt, onClose, onRemind, onMarkPaid, o
 
       <PaymentPanel debt={debt} onChange={onChanged} />
 
+      <Suspense fallback={null}>
+        <CryptoPaymentPanel debt={debt} refreshKey={cryptoKey} />
+      </Suspense>
+
       <div className="row wrap detail-actions no-print">
         <Button onClick={() => onRemind(debt)}>
           <BellRing size={14} /> Generate reminder
         </Button>
+        {!paid && onCrypto && (
+          <Button onClick={() => onCrypto(debt)}>
+            <Coins size={14} /> Crypto payment
+          </Button>
+        )}
         {!paid && (
           <Button onClick={() => onMarkPaid(debt)}>
             <Check size={14} /> Mark fully paid

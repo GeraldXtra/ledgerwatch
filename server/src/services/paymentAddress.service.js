@@ -2,7 +2,7 @@ const User = require("../models/User");
 const Debt = require("../models/Debt");
 const PaymentAddress = require("../models/PaymentAddress");
 const { getChain } = require("../config/chains");
-const { MAX_ADDRESSES_PER_HOUR } = require("../config/derivation");
+const { MAX_ADDRESSES_PER_HOUR, confirmationsFor } = require("../config/derivation");
 const { attachTotals } = require("./receivables.service");
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -51,7 +51,14 @@ async function getNgnRate() {
     if (typeof getNgnPrice === "function") {
       const row = await getNgnPrice("usd-coin");
       if (row && row.ngn > 0) {
-        return { rate: row.ngn, fetchedAt: new Date(), stale: false };
+        // fetchedAt is when CoinGecko was actually read, which may be minutes
+        // ago on a cache hit. The invoice UI shows this age to the user, so it
+        // must not be overwritten with "now".
+        return {
+          rate: row.ngn,
+          fetchedAt: new Date(row.fetchedAt || Date.now()),
+          stale: Boolean(row.stale),
+        };
       }
     }
   } catch {
@@ -74,6 +81,51 @@ function usdcForNgn(ngnAmount, ngnPerUsd) {
   if (!(ngnPerUsd > 0)) throw httpError(500, "Invalid NGN/USD rate");
   const raw = ngnAmount / ngnPerUsd;
   return Math.ceil(raw * 100) / 100;
+}
+
+/**
+ * Read-only preview of what issuing an address would ask for.
+ *
+ * Exists so the confirmation screen can show the real balance, USDC amount, rate
+ * and rate AGE before the user commits. The alternative — calling /allocate to
+ * get those figures — would burn a derivation index every time somebody merely
+ * opened the dialog and changed their mind. Indices are monotonic and never
+ * reused, so that waste is permanent.
+ *
+ * Deliberately does not reserve anything and does not write.
+ */
+async function quoteForInvoice({ userId, debtId, chainId }) {
+  const chain = getChain(chainId);
+  if (!chain) throw httpError(400, "Unknown or disabled chain");
+
+  const token = (chain.tokens || [])[0];
+  if (!token) throw httpError(400, `No stablecoin configured for ${chain.name}`);
+
+  const debt = await Debt.findOne({ _id: debtId, userId });
+  if (!debt) throw httpError(404, "Invoice not found");
+
+  const [withTotals] = await attachTotals(userId, [debt]);
+  const balance = withTotals.balance != null ? withTotals.balance : debt.amount;
+
+  const { rate, fetchedAt, stale } = await getNgnRate();
+  const user = await User.findById(userId).select("crypto");
+  const expiryHours = Math.min(720, Math.max(1, user?.crypto?.expiryHours || 72));
+
+  const active = await PaymentAddress.findOne({ debtId, status: "active" });
+
+  return {
+    balanceNgn: balance,
+    // A fully paid invoice has nothing to quote; the caller shows why rather
+    // than dividing zero by a rate and offering an address for 0 USDC.
+    expectedUsdc: balance > 0 ? usdcForNgn(balance, rate) : 0,
+    ngnPerUsd: rate,
+    rateTimestamp: fetchedAt,
+    rateStale: stale,
+    expiryHours,
+    confirmations: confirmationsFor(chain.chainId),
+    token,
+    hasActiveAddress: Boolean(active),
+  };
 }
 
 /**
@@ -142,4 +194,4 @@ async function issueAddress({ userId, debtId, chainId, address, derivationIndex 
   return { paymentAddress: record, chain, rateStale: stale };
 }
 
-module.exports = { allocateIndex, issueAddress, getNgnRate, usdcForNgn };
+module.exports = { allocateIndex, issueAddress, getNgnRate, usdcForNgn, quoteForInvoice };
