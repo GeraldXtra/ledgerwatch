@@ -12,7 +12,7 @@ import {
 import { Button, SkeletonLines } from "../../components/ui";
 import ProgressBar from "./ProgressBar";
 import { fetchPaymentAddresses, revokePaymentAddress } from "./cryptoApi";
-import { agoLabel, countdown, dateTime, ngn, shortHash, usdc } from "./format";
+import { agoLabel, countdown, dateTime, ngn, shortHash, usdc, usdcAmount } from "./format";
 
 // Status of the address itself, as a pill tone the design system already knows.
 const STATUS_TONE = {
@@ -251,28 +251,42 @@ function AddressCard({ pa, chain, onChanged }) {
           </dl>
 
           <div className="crypto-progress">
-            <div className="row space-between">
+            <div className="row space-between crypto-progress-head">
               <span className="overline">Confirmed and settled</span>
               <span className="num mono-strong">
-                {usdc(received)} of {usdc(expected)}
+                {usdcAmount(received)} of {usdc(expected)}
               </span>
             </div>
             <ProgressBar paid={received} total={expected || 1} />
+            {/* The unit sits on its own line in these tiles. Each one has only
+                about 100px of width inside this modal, and "36,799.89 USDC" on a
+                single line needs very nearly all of it. */}
             <div className="crypto-progress-figures">
               <div className="crypto-figure">
                 <span className="overline">Received</span>
-                <span className="num mono-strong value-pos">{usdc(received)}</span>
+                <span className="num mono-strong value-pos">
+                  {usdcAmount(received)}
+                  <span className="figure-unit">USDC</span>
+                </span>
               </div>
               <div className="crypto-figure">
                 <span className="overline">Incoming, unconfirmed</span>
                 <span className={`num mono-strong ${pending > 0 ? "value-warn" : ""}`}>
-                  {usdc(pending)}
+                  {usdcAmount(pending)}
+                  <span className="figure-unit">USDC</span>
                 </span>
               </div>
               <div className="crypto-figure">
                 <span className="overline">Still needed</span>
                 <span className={`num mono-strong ${stillNeeded > 0 ? "value-neg" : "value-pos"}`}>
-                  {stillNeeded > 0 ? usdc(stillNeeded) : "Nothing"}
+                  {stillNeeded > 0 ? (
+                    <>
+                      {usdcAmount(stillNeeded)}
+                      <span className="figure-unit">USDC</span>
+                    </>
+                  ) : (
+                    "Nothing"
+                  )}
                 </span>
               </div>
             </div>

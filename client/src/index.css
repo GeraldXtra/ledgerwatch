@@ -4276,7 +4276,11 @@ input[type="checkbox"] {
 }
 .crypto-progress-figures {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* auto-fit, NOT a fixed 3 columns. This card lives inside a fixed-width modal,
+     so viewport media queries cannot help it — the container is narrow however
+     wide the screen is. auto-fit reflows to two rows on a tight container instead
+     of crushing three figures into columns too narrow to hold them. */
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 10px;
 }
 .crypto-figure {
@@ -4291,9 +4295,29 @@ input[type="checkbox"] {
 }
 .crypto-figure .num {
   font-size: 13.5px;
-  /* Figures never shrink out of legibility, and never sit behind anything. */
-  white-space: nowrap;
-  overflow: visible;
+  line-height: 1.25;
+  min-width: 0;
+  /* Wrap only as a last resort. `white-space: nowrap` with `overflow: visible`
+     used to be here, which is why a large amount ran straight out through the
+     tile border: it could neither wrap nor be contained. Clipping instead would
+     be worse than either, because a cut-off figure reads as a smaller amount. */
+  overflow-wrap: break-word;
+}
+/* The unit on its own line. This is the actual fix for the overflow: each tile
+   has roughly 100px of content width in the invoice modal, and the digits alone
+   need about 60px where digits plus " USDC" need very nearly the lot. */
+.figure-unit {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+/* The summary line above the bar carries two amounts, so let it wrap onto a
+   second line rather than push past the card edge. */
+.crypto-progress-head {
+  flex-wrap: wrap;
+  gap: 4px 12px;
 }
 
 .crypto-empty {
