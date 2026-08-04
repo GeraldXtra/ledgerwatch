@@ -268,6 +268,10 @@ async function runPricePass({ userId } = {}) {
             tag: `alert-${alert._id}`,
             type: "alert",
             url: `/app/market?alert=${alert._id}`,
+            // ORDERED BY VALUE. The service worker trims this list to whatever
+            // Notification.maxActions allows — 2 on Chrome desktop — and it trims
+            // from the end, so Dismiss is the one that goes when there is only
+            // room for two. Buy and Sell are the actions worth keeping.
             actions: [
               { action: "buy", title: "Buy" },
               { action: "sell", title: "Sell" },

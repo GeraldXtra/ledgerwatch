@@ -9,6 +9,7 @@ import {
   DownloadCloud,
   RefreshCw,
   Trash2,
+  TriangleAlert,
   Wallet as WalletIcon,
 } from "lucide-react";
 import {
@@ -34,6 +35,7 @@ import CreateWalletModal from "./CreateWalletModal";
 import ImportWalletModal from "./ImportWalletModal";
 import SendForm from "./SendForm";
 import ReceivePanel from "./ReceivePanel";
+import CollectedPanel from "./CollectedPanel";
 import TxHistory from "./TxHistory";
 
 function shorten(a) {
@@ -56,6 +58,12 @@ function WalletInner() {
   const [copied, setCopied] = useState(false);
 
   const chain = chains.find((c) => c.chainId === chainId) || null;
+
+  // A zero native balance means nothing can be sent from this chain at all.
+  // Surfaced persistently rather than at the moment of signing.
+  const noGas = Boolean(
+    balances && balances.some((b) => b.native && Number(b.amount) === 0)
+  );
 
   // Keystores are scoped per account, so switching account changes which wallet
   // (if any) belongs to this page. Re-read on identity change rather than
@@ -352,13 +360,40 @@ function WalletInner() {
             balances.map((b) => (
               <div key={b.symbol} className={`balance-tile${b.native ? " primary" : ""}`}>
                 <span className="balance-amount num">{Number(b.amount).toLocaleString(undefined, { maximumFractionDigits: 6 })}</span>
-                <span className="balance-symbol">{b.symbol}</span>
+                <span className="balance-symbol">
+                  {b.symbol}
+                  {/* The native token is what pays for every transaction, so it
+                      is labelled as such and its emptiness is called out here
+                      rather than discovered at signing time. */}
+                  {b.native && <span className="balance-role">pays network fees</span>}
+                </span>
               </div>
             ))
           ) : (
             <p className="muted small">Could not load balances. Try refresh.</p>
           )}
         </div>
+
+        {noGas && (
+          <div className="against-note" style={{ marginTop: 12 }}>
+            <TriangleAlert size={15} />
+            <span>
+              You hold no {chain?.nativeSymbol} on {chain?.name}, so no transaction can be sent
+              from this network — not a transfer, not a sweep, not a trade. Token balances are
+              unaffected.
+              {chain?.testnet && chain?.faucet && (
+                <>
+                  {" "}
+                  <a href={chain.faucet} target="_blank" rel="noopener noreferrer" className="linklike">
+                    <Droplets size={13} style={{ verticalAlign: "-2px" }} /> Get free{" "}
+                    {chain.nativeSymbol} from the {chain.name} faucet
+                  </a>
+                  .
+                </>
+              )}
+            </span>
+          </div>
+        )}
 
         {chain?.faucet && (
           <a className="faucet-link" href={chain.faucet} target="_blank" rel="noopener noreferrer">
@@ -374,6 +409,7 @@ function WalletInner() {
           options={[
             { id: "send", label: "Send" },
             { id: "receive", label: "Receive" },
+            { id: "collected", label: "Collected" },
             { id: "history", label: "History" },
           ]}
         />
@@ -396,6 +432,18 @@ function WalletInner() {
             />
           )}
           {subtab === "receive" && chain && <ReceivePanel address={address} chain={chain} />}
+          {subtab === "collected" && chain && (
+            <CollectedPanel
+              chain={chain}
+              mainAddress={address}
+              sweepDestination={user?.crypto?.sweepDestination}
+              onSwept={() => {
+                // Swept funds land in this wallet, so both views are now stale.
+                loadBalances();
+                loadTxs();
+              }}
+            />
+          )}
           {subtab === "history" && <TxHistory txs={txs} chain={chain} onReceive={() => setSubtab("receive")} />}
         </div>
       </Card>

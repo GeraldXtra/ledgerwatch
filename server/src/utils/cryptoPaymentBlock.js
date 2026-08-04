@@ -65,74 +65,101 @@ function cryptoBlockText(pa, chain) {
 }
 
 /**
- * HTML block for the branded email. The address sits in a copyable monospace box,
- * with a QR image the payer can scan instead of copying by hand.
- * @param {string} qrDataUrl  base64 QR of the address, or null
+ * HTML block for the branded email: a copyable monospace address plus a QR the
+ * payer can scan instead of transcribing 42 characters by hand.
+ *
+ * The QR is referenced by CONTENT ID, not as a `data:` URI. Gmail strips `data:`
+ * images outright, so the previous data-URL version simply never appeared for
+ * most recipients. `qrCid` must correspond to an inline attachment on the message.
+ *
+ * @param {object} pa      PaymentAddress document
+ * @param {object} chain   { name } from the chain config
+ * @param {string|null} qrCid  content id of the attached QR, or null for no QR
  */
-function cryptoBlockHtml(pa, chain, qrDataUrl) {
+function cryptoBlockHtml(pa, chain, qrCid) {
   if (!pa || !chain) return "";
 
-  const qr = qrDataUrl
-    ? `<tr><td style="padding:14px 0 0;text-align:center">
-         <img src="${qrDataUrl}" width="168" height="168" alt="Payment address QR code"
-              style="border-radius:10px;border:1px solid #e1e7f0" />
+  const FONT = "'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+  const MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,'Courier New',monospace";
+
+  const qr = qrCid
+    ? `<tr><td style="padding:4px 18px 18px" align="center">
+         <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+           <tr><td style="padding:14px;background:#ffffff;border:1px solid #e1e7f0;border-radius:12px" align="center">
+             <img src="cid:${qrCid}" width="170" height="170"
+                  alt="QR code for the payment address"
+                  style="display:block;border:0;width:170px;height:170px" />
+           </td></tr>
+           <tr><td style="padding-top:8px;font:400 12px ${FONT};color:#64748b" align="center">
+             Scan with your wallet app
+           </td></tr>
+         </table>
        </td></tr>`
     : "";
 
   return `
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
-         style="margin-top:20px;border:1px solid #e1e7f0;border-radius:12px;overflow:hidden">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+         style="border:1px solid #e1e7f0;border-radius:12px;overflow:hidden">
     <tr>
-      <td style="background:#f4f7fa;padding:12px 18px;font:600 13px Inter,Arial,sans-serif;color:#16294a">
-        Pay in ${pa.tokenSymbol} &middot; ${chain.name}
-        <span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;
-                     background:#fdf0da;color:#8a5a11;font-size:11px;font-weight:700">TESTNET</span>
+      <td style="background:#f4f7fa;padding:12px 18px;border-bottom:1px solid #e1e7f0;
+                 font:600 13px ${FONT};color:#16294a">
+        Or pay in ${pa.tokenSymbol}
+        <span style="display:inline-block;margin-left:6px;padding:2px 8px;border-radius:999px;
+                     background:#f4eddc;color:#7a5e1b;font-size:10px;font-weight:700;
+                     letter-spacing:.06em">TESTNET</span>
       </td>
     </tr>
     <tr>
-      <td style="padding:18px">
-        <p style="margin:0 0 6px;font:400 14px Inter,Arial,sans-serif;color:#3a4658">
-          Send <strong>${pa.tokenSymbol} only</strong>, on the <strong>${chain.name}</strong> network,
-          to this address:
+      <td style="padding:18px 18px 4px">
+        <p style="margin:0 0 10px;font:400 14px/1.6 ${FONT};color:#3a4658">
+          Send <strong style="color:#0a1428">${pa.tokenSymbol} only</strong>, on the
+          <strong style="color:#0a1428">${chain.name}</strong> network, to this address:
         </p>
-        <div style="font:600 13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-                    word-break:break-all;background:#f4f7fa;border:1px solid #e1e7f0;
-                    border-radius:8px;padding:12px 14px;color:#0a1428">${pa.address}</div>
+        <div style="font:600 13px/1.5 ${MONO};word-break:break-all;background:#f4f7fa;
+                    border:1px solid #e1e7f0;border-radius:8px;padding:12px 14px;
+                    color:#0a1428">${pa.address}</div>
 
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
-               style="margin-top:14px;font:400 14px Inter,Arial,sans-serif;color:#3a4658">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+               style="margin-top:14px;font:400 14px ${FONT};color:#3a4658">
           <tr>
-            <td style="padding:4px 0">Amount to send</td>
-            <td style="padding:4px 0;text-align:right;font-weight:700;color:#0a1428">
+            <td style="padding:5px 0;border-bottom:1px solid #f1f4f9">Amount to send</td>
+            <td style="padding:5px 0;border-bottom:1px solid #f1f4f9;text-align:right;
+                       font-weight:700;font-size:16px;color:#0a1428">
               ${usdc(pa.expectedUsdc)} ${pa.tokenSymbol}
             </td>
           </tr>
           <tr>
-            <td style="padding:4px 0">Same as</td>
-            <td style="padding:4px 0;text-align:right;color:#0a1428">
-              ${ngn(pa.invoiceBalanceNgn)} naira
+            <td style="padding:5px 0;border-bottom:1px solid #f1f4f9">Same as</td>
+            <td style="padding:5px 0;border-bottom:1px solid #f1f4f9;text-align:right;color:#0a1428">
+              &#8358;${ngn(pa.invoiceBalanceNgn)}
             </td>
           </tr>
           <tr>
-            <td style="padding:4px 0">Rate used</td>
-            <td style="padding:4px 0;text-align:right;color:#0a1428">
-              ${ngn(pa.ngnPerUsd)} naira to 1 ${pa.tokenSymbol}
+            <td style="padding:5px 0;border-bottom:1px solid #f1f4f9">Rate used</td>
+            <td style="padding:5px 0;border-bottom:1px solid #f1f4f9;text-align:right;color:#0a1428">
+              &#8358;${ngn(pa.ngnPerUsd)} to 1 ${pa.tokenSymbol}
             </td>
           </tr>
           <tr>
-            <td style="padding:4px 0">Accepts payment until</td>
-            <td style="padding:4px 0;text-align:right;color:#0a1428">
+            <td style="padding:5px 0">Accepts payment until</td>
+            <td style="padding:5px 0;text-align:right;color:#0a1428">
               ${expiryWords(pa.expiresAt)}
             </td>
           </tr>
         </table>
-        ${qr}
-        <p style="margin:16px 0 0;padding:12px 14px;border-radius:8px;background:#fbe4e1;
-                  font:400 13px Inter,Arial,sans-serif;color:#b3362b;line-height:1.55">
-          Please be careful. Send ${pa.tokenSymbol} only, and only on the ${chain.name} network.
-          If you send any other coin, or use any other network, the money will be lost
-          permanently and nobody can recover it for you.
-        </p>
+      </td>
+    </tr>
+    ${qr}
+    <tr>
+      <td style="padding:0 18px 18px">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+               style="background:#fbe9e6;border-radius:8px">
+          <tr><td style="padding:12px 14px;font:400 13px/1.6 ${FONT};color:#a4302a">
+            <strong>Please check before sending.</strong> Send ${pa.tokenSymbol} only, and only on
+            the ${chain.name} network. If you send any other coin, or use any other network, the
+            money will be lost permanently and nobody can recover it for you.
+          </td></tr>
+        </table>
       </td>
     </tr>
   </table>`;

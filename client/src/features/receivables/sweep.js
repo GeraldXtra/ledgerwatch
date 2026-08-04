@@ -2,6 +2,11 @@ import { ethers } from "ethers";
 import { getProvider, ERC20_ABI } from "../wallet/provider";
 import { deriveSignerFromWallet } from "../wallet/derivation";
 import { recordTx, updateTxStatus } from "../wallet/walletApi";
+import {
+  ERC20_TRANSFER_GAS_FALLBACK,
+  currentGasPrice,
+  estimateGasWithFallback,
+} from "../wallet/gas";
 import { recordSweep } from "./cryptoApi";
 
 /**
@@ -20,11 +25,9 @@ import { recordSweep } from "./cryptoApi";
  * below rather than being allowed to fail as "insufficient funds".
  */
 
-// An ERC-20 transfer to an address that already holds a balance costs ~45k gas;
-// to a fresh address ~65k. Used only when the node refuses to estimate at all,
-// and the UI says so when it is used rather than presenting it as a real
-// estimate.
-export const ERC20_TRANSFER_GAS_FALLBACK = 100000n;
+// Re-exported so existing importers keep working; the definition now lives in
+// wallet/gas.js alongside the shared preflight used by send, approve and swap.
+export { ERC20_TRANSFER_GAS_FALLBACK };
 
 // Gas funding is buffered because the fee can rise between the funding
 // transaction and the sweep. Under-funding strands the token: the address would
@@ -59,25 +62,24 @@ export async function planSweep({ paymentAddress: pa, chain, destination, mainAd
   let gasLimit = null;
   let gasSource = "estimated";
   if (rawBalance > 0n) {
-    const data = token.interface.encodeFunctionData("transfer", [destination, rawBalance]);
-    try {
-      // Preferred: estimate as the address that will actually send.
-      gasLimit = await provider.estimateGas({ from: pa.address, to: pa.tokenContract, data });
-    } catch {
-      try {
-        // Many nodes refuse to estimate from a zero-native address. The call
-        // shape is identical, so estimating as the main wallet transfers.
-        gasLimit = await provider.estimateGas({ from: mainAddress, to: pa.tokenContract, data });
-        gasSource = "estimated from your main wallet";
-      } catch {
-        gasLimit = ERC20_TRANSFER_GAS_FALLBACK;
-        gasSource = "a typical transfer cost, because this network would not estimate";
-      }
-    }
+    // Shared with send/approve/swap: estimate as the sending address, retry as
+    // the funded main wallet when a node refuses to estimate from a zero-native
+    // address, and only then fall back to a constant.
+    const estimated = await estimateGasWithFallback({
+      provider,
+      tx: {
+        to: pa.tokenContract,
+        data: token.interface.encodeFunctionData("transfer", [destination, rawBalance]),
+      },
+      from: pa.address,
+      fallbackFrom: mainAddress,
+      fallback: ERC20_TRANSFER_GAS_FALLBACK,
+    });
+    gasLimit = estimated.gasLimit;
+    gasSource = estimated.source;
   }
 
-  const fee = await provider.getFeeData();
-  const gasPrice = fee.maxFeePerGas || fee.gasPrice || 0n;
+  const gasPrice = await currentGasPrice(provider);
   const feeWei = gasLimit ? gasLimit * gasPrice : 0n;
   const fundingWei = (feeWei * GAS_BUFFER_NUMERATOR) / GAS_BUFFER_DENOMINATOR;
   const needsGasFunding = rawBalance > 0n && nativeBalance < feeWei;

@@ -121,8 +121,11 @@ async function action(req, res) {
       if (!debt) return res.status(404).json({ error: "Debt not found" });
       const channel = claims.act === "send_whatsapp" ? "whatsapp" : "email";
       const generated = await generateReminderForDebt(debt, user);
+      // force: the user tapped this button on the notification, so it is an
+      // explicit instruction to send, not an automation pass to be rate limited.
       const deliveries = await dispatchReminder(generated.reminder, debt, user, {
         channels: [channel],
+        force: true,
       });
       return res.json({ ok: true, act: claims.act, deliveries });
     }

@@ -4409,3 +4409,83 @@ input[type="checkbox"] {
   font-size: 12.5px;
   color: var(--ink);
 }
+
+/* ---- Sweeping collected payments into the main wallet ---- */
+.sweep-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+.sweep-row-state {
+  text-align: right;
+  min-width: 0;
+  max-width: 46%;
+}
+.sweep-row-state .error-text {
+  margin: 0;
+}
+/* A destination address must be readable in full before it is approved, so it
+   wraps rather than truncating. Sending to a half-read address is the one
+   mistake this screen exists to prevent. */
+.sweep-dest {
+  word-break: break-all;
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: right;
+  max-width: 34ch;
+}
+
+.collected-list {
+  max-height: 380px;
+  overflow-y: auto;
+}
+.collected-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+}
+.collected-all {
+  margin: 0;
+}
+.collected-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 4px;
+}
+
+/* Notification permission status row in Settings. The value is stated plainly
+   because the API cannot re-prompt once blocked, so the user has to be told
+   exactly what state they are in. */
+.perm-row {
+  padding: 10px 0 2px;
+}
+
+/* Notification deep link pointing at an alert that has already been resolved.
+   Information, not an error, so it uses the neutral well rather than the error
+   tone. */
+.deeplink-note {
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--well);
+  color: var(--ink);
+  font-size: 13.5px;
+}
+.deeplink-note .row {
+  gap: 9px;
+  align-items: center;
+}
+
+/* The native token pays for every transaction, so its tile says so. Small and
+   muted, but fully opaque — it qualifies a balance. */
+.balance-role {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-transform: none;
+  margin-top: 1px;
+}

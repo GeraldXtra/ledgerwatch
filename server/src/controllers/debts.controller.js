@@ -1,6 +1,7 @@
 const Debt = require("../models/Debt");
 const Reminder = require("../models/Reminder");
 const Payment = require("../models/Payment");
+const PaymentAddress = require("../models/PaymentAddress");
 const { normalizePhone } = require("../utils/phone");
 const {
   generateReminderForDebt,
@@ -183,6 +184,9 @@ async function remove(req, res) {
 
     await Reminder.deleteMany({ debtId: debt._id, userId: req.user._id });
     await Payment.deleteMany({ debtId: debt._id, userId: req.user._id });
+    // Payment addresses belong to the invoice. Left behind, the watch pass keeps
+    // scanning them for an invoice that no longer exists and could never settle.
+    await PaymentAddress.deleteMany({ debtId: debt._id, userId: req.user._id });
     await debt.deleteOne();
 
     return res.json({ ok: true });
@@ -275,7 +279,19 @@ async function send(req, res) {
     }
 
     const result = await generateReminderForDebt(debt, req.user);
-    const deliveries = await dispatchReminder(result.reminder, debt, req.user, { channels });
+    /**
+     * force: a PERSON pressed send on this exact debt.
+     *
+     * The cadence guard exists to stop the automation emailing a client every
+     * time the loop runs. It should never override a deliberate human action:
+     * without this, a second manual send inside the cadence window came back
+     * "skipped: already sent this cadence window" and looked like email was
+     * broken, which is precisely how it was misread.
+     */
+    const deliveries = await dispatchReminder(result.reminder, debt, req.user, {
+      channels,
+      force: true,
+    });
 
     return res.status(201).json({ ...result, deliveries });
   } catch (err) {

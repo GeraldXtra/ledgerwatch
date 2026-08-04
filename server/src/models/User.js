@@ -45,7 +45,19 @@ const userSchema = new mongoose.Schema({
 
   // Crypto payment rails for invoices.
   crypto: {
-    enabled: { type: Boolean, default: false },
+    // Defaults ON. The flag previously defaulted to false and was enforced
+    // nowhere, so the model claimed the feature was off while it worked
+    // perfectly — a setting that describes nothing is worse than no setting.
+    // Now that it is genuinely enforced, off by default would silently disable a
+    // working feature on every existing account.
+    enabled: { type: Boolean, default: true },
+    // Stamped the first time these settings are normalised or saved. The boot
+    // normalisation keys on this rather than on `enabled`, so a user who
+    // deliberately turns the feature off is never overridden on the next start.
+    configuredAt: { type: Date, default: null },
+    // Per-chain confirmation depth, overriding the env/default table. Clamped on
+    // write — a shallow depth is a real reorg risk, not just a preference.
+    confirmationOverrides: { type: Map, of: Number, default: undefined },
     defaultChainId: { type: Number, default: 84532 }, // Base Sepolia
     expiryHours: { type: Number, default: 72 }, // max 720 (30 days)
     // Monotonic counter for the receivables derivation branch. ONLY ever moved

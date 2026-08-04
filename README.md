@@ -37,7 +37,10 @@ and logged. No VAPID → in-app toasts remain. No Alchemy key → public testnet
 - **AI:** Anthropic API, proxied server-side only — the key never reaches the browser.
   Every AI feature has a no-AI fallback, so the core app works with no key at all.
 - **Prices:** CoinGecko public API (cached + batched, resilient to failures/429s)
-- **Messaging:** Twilio (WhatsApp) + Nodemailer (SMTP email), both lazy + graceful
+- **Messaging:** Twilio (WhatsApp) + Nodemailer (SMTP email), both lazy + graceful. The
+  reminder email is a branded HTML template with the logo and any payment-address QR attached
+  **inline by content id** — Gmail strips `data:` URI images, so an embedded QR would never
+  render for most recipients.
 - **Push:** web-push (VAPID) + a service worker with notification action buttons; PWA manifest
 - **Wallet:** non-custodial ethers v6 wallet; RPC proxied through the backend behind a strict
   method allowlist so the Alchemy key never reaches the browser; testnet chains only
@@ -91,7 +94,7 @@ See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the ~4-minute presentation flow.
 | `TWILIO_WHATSAPP_FROM` | no | `whatsapp:+14155238886` | Twilio sender (sandbox or approved number) |
 | `SMTP_HOST` / `SMTP_PORT` | no | `smtp.gmail.com` / `587` | Email transport; absent → email skipped |
 | `SMTP_USER` / `SMTP_PASS` | no | `you@gmail.com` / App Password | **Gmail needs a 16-char App Password** |
-| `MAIL_FROM` | no | `LedgerWatch <you@gmail.com>` | Email From header |
+| `MAIL_FROM` | no | `LedgerWatch <you@gmail.com>` | Email From header. **Keep the angle brackets** — a bare `LedgerWatch you@gmail.com` still sends, but the display name renders wrongly, so it is normalised on the way out |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | no | from `npx web-push generate-vapid-keys` | Web Push; absent → toasts only |
 | `VAPID_SUBJECT` | no | `mailto:you@example.com` | Web Push contact |
 | `ALCHEMY_API_KEY` | no | — | Testnet RPC; absent → public RPC fallback |
@@ -115,6 +118,12 @@ an **App Password** (Google Account → Security → App passwords). Use that 16
 `SMTP_PASS` with `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER=you@gmail.com`. Your
 normal login password will **not** work.
 
+**One reminder per client per cadence window.** A debt's `reminderCadenceDays` (default 3) also
+acts as an anti-spam guard: the automation will not email the same client twice inside that
+window, and a suppressed send is recorded as `skipped: "Already sent this cadence window"`.
+**Pressing send yourself always sends** — a deliberate human action is never rate limited, and
+neither is tapping an action button on a notification. Only the background pass is throttled.
+
 **Push (VAPID).** Generate the key pair once:
 
 ```bat
@@ -127,9 +136,22 @@ that button press, never on page load). That page also has per-type toggles and 
 notification** button so you can confirm delivery.
 
 ### What notifications actually do, honestly
-- **Foreground vs background.** While a LedgerWatch tab is focused the service worker suppresses
-  the OS notification and the app shows an in-app toast instead, so you are never told the same
-  thing twice. When no window is focused you get a real OS notification.
+- **Foreground vs background.** While a LedgerWatch window is **focused** the service worker
+  suppresses the OS notification and the app shows an in-app toast instead, so you are never told
+  the same thing twice. When no window is focused you get a real OS notification — including when
+  a window is visible on a second monitor but not the one you are working in. The **test
+  notification is the deliberate exception**: it always shows the OS notification, because its
+  only job is to prove OS delivery works.
+- **Nothing is delivered until you subscribe.** Permission alone is not enough — the browser must
+  create a push subscription and the server must store it. Use **Settings → Notifications →
+  Enable notifications**; the browser console logs each stage (`registering`, `activated`,
+  `subscribed`, `stored on the server`) so a failure is visible rather than silent.
+- **Action buttons are capped by the platform.** Chrome on desktop renders **two**
+  (`Notification.maxActions`). A market alert therefore shows **Buy** and **Sell**; Dismiss is
+  included in the payload and appears only where the platform allows three or more.
+- **Windows Focus Assist / Do Not Disturb silently suppresses everything.** If notifications stop
+  appearing with no error anywhere, check this first: Windows Settings → System → Notifications,
+  and confirm your browser is allowed to send them.
 - **Action buttons.** A market alert offers **Buy / Sell / Dismiss**. Dismiss resolves straight
   from the notification. **Buy and Sell deliberately do not trade** — they open the app on that
   alert's trade panel, because the amount and the confirmation step are mandatory. A reminder
@@ -209,13 +231,29 @@ transaction. The debts table marks those invoices with a `USDC` chip. A read-onl
 `GET /api/payment-addresses/quote` backs the dialog so opening and closing it never consumes an
 index.
 
-### Not yet built
-- **Sweeping** derived-address funds to the main wallet (outbound, so it needs password
-  approval and has a native-gas prerequisite on the derived address).
-- **Expiry grace watch** — addresses currently stop being watched at expiry; the
-  low-frequency 30 day grace watch for late payments is not implemented yet.
-- **Settings UI** for the crypto section (enable, default chain, expiry, confirmation
-  depth, sweep destination). The values are configurable via env and the User model today.
+**Sweeping** moves collected funds into your main wallet, from **Wallet → Collected** (review
+and sweep several at once) or from the invoice itself. It is outbound, so it is signed locally
+with your wallet password and never happens automatically. The amount is read live from the
+chain rather than from the recorded total, since the two differ after a previous sweep. A
+derived address holds only stablecoin and no native token, so it cannot pay for its own
+transfer: the main wallet sends it gas first, as a separate transaction you approve in the same
+step, buffered above the estimate so a fee rise cannot strand the funds. Batches are signed one
+at a time because every gas transfer comes from the same wallet and would otherwise collide on
+nonce, and one failed address never aborts the rest.
+
+**Expiry and late payments.** At expiry an address flips to `expired` and stops taking new
+payment, then stays under a **low-frequency grace watch for 30 days** so money sent late is
+still found and credited. The grace watch triggers on a single balance check rather than by
+walking blocks, because the gap since expiry can run to millions of blocks. A late payment
+settles at the **rate snapshotted when the address was issued** — the payer sent exactly what
+they were quoted — and is flagged as late everywhere it appears, so a settlement on an invoice
+that looked closed is never a surprise.
+
+**Settings** live under **Settings → Crypto payments**: turn the feature on or off, choose the
+default network and how long addresses accept payment, set a sweep destination, decide whether
+to be notified on detection as well as settlement, and override the confirmation depth per
+chain. Depths are clamped and the UI warns when you go below the recommended one, since a
+shallow depth can settle an invoice on a transaction a reorg later undoes.
 
 ## Deployment
 See [DEPLOY_CHECKLIST.md](DEPLOY_CHECKLIST.md) for a step-by-step Atlas → Render → Vercel

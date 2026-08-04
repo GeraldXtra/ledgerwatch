@@ -1,9 +1,11 @@
 const PaymentAddress = require("../models/PaymentAddress");
 const Payment = require("../models/Payment");
 const Debt = require("../models/Debt");
+const User = require("../models/User");
 const Reminder = require("../models/Reminder");
 const { getChain } = require("../config/chains");
-const { confirmationsFor } = require("../config/derivation");
+const { GRACE_DAYS, GRACE_SCAN_MINUTES } = require("../config/derivation");
+const { confirmationsFor } = require("./cryptoSettings.service");
 const { recomputeDebtStatus } = require("./receivables.service");
 const { notifyUser } = require("./push.service");
 
@@ -132,6 +134,66 @@ function addressTopic(address) {
   return "0x" + address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 }
 
+/**
+ * Live token balance of an address, as a Number in token units.
+ *
+ * This is the GRACE WATCH'S TRIGGER. Walking block ranges forward cannot work
+ * across a 30 day gap: MAX_BLOCK_SPAN is 4000 blocks and 30 days on Base at
+ * roughly 2s per block is about 1.3 million, so range catch-up would never
+ * converge. One balanceOf call answers "did anything new arrive" for a fraction
+ * of the cost, and only then is a log scan worth running.
+ *
+ * @returns {Promise<number|null>} null when the call fails
+ */
+async function tokenBalance(chain, contract, address, decimals) {
+  const data = "0x70a08231" + address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  const result = await rpc(chain, "eth_call", [{ to: contract, data }, "latest"]);
+  if (!result || result === "0x") return null;
+  try {
+    return unitsToAmount(result, decimals);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * How much SHOULD be sitting at this address, from what we already know: every
+ * transfer we have seen, less anything already swept out. A live balance above
+ * this means money has arrived that we have not recorded yet.
+ */
+function accountedOnChain(pa) {
+  const seen = pa.observed
+    .filter((o) => o.status !== "orphaned")
+    .reduce((sum, o) => sum + unitsToAmount(o.value, pa.tokenDecimals), 0);
+  const swept = (pa.sweeps || []).reduce((sum, s) => sum + (Number(s.amountUsdc) || 0), 0);
+  return Math.max(0, seen - swept);
+}
+
+/**
+ * Flip addresses whose window has closed to `expired`, stamping when it happened.
+ *
+ * NOTHING set this before, so an address stayed `active` in the database forever:
+ * the watcher stopped looking (it filters on expiresAt) but the invoice panel
+ * still read "Awaiting payment" with a countdown frozen at "Expiring now", and
+ * the ledger kept showing its chip. Both of those key off status.
+ *
+ * Deliberately scoped to `active` only — `paid`, `revoked` and `swept` are
+ * terminal states and must never be overwritten by the clock.
+ */
+async function expireDueAddresses({ userId } = {}) {
+  const query = { status: "active", expiresAt: { $lte: new Date() } };
+  if (userId) query.userId = userId;
+  try {
+    const res = await PaymentAddress.updateMany(query, {
+      $set: { status: "expired", expiredAt: new Date() },
+    });
+    return res.modifiedCount || 0;
+  } catch (err) {
+    logOnce("expire due addresses", err);
+    return 0;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // SETTLEMENT
 // ---------------------------------------------------------------------------
@@ -183,10 +245,17 @@ async function settleIfDue(pa, chain) {
   const keyTx = unsettled[unsettled.length - 1];
 
   const overpaidUsdc = fullyPaid ? Math.max(0, totalUsdc - pa.expectedUsdc) : 0;
+  const isLate = unsettled.some((o) => o.late);
   const noteParts = [
     `${totalUsdc.toFixed(2)} ${pa.tokenSymbol} received on ${chain.name}`,
     `rate ${pa.ngnPerUsd.toLocaleString("en-NG")} naira per ${pa.tokenSymbol}`,
   ];
+  if (isLate) {
+    // Settled at the SNAPSHOT rate even though it is late: the payer sent exactly
+    // the amount they were quoted, so honouring that quote is the defensible
+    // outcome however the naira has moved. The note records that it was late.
+    noteParts.push("paid after the address expired");
+  }
   if (overpaidUsdc > 0.004) {
     noteParts.push(
       `overpaid by ${overpaidUsdc.toFixed(2)} ${pa.tokenSymbol} ` +
@@ -240,7 +309,9 @@ async function settleIfDue(pa, chain) {
       title: fullyPaid
         ? `Invoice settled — ${debt.debtorName}`
         : `Part payment received — ${debt.debtorName}`,
-      body: `${totalUsdc.toFixed(2)} ${pa.tokenSymbol} confirmed on ${chain.name}.`,
+      body:
+        `${totalUsdc.toFixed(2)} ${pa.tokenSymbol} confirmed on ${chain.name}.` +
+        (isLate ? " This arrived after the payment address had expired." : ""),
       tag: `pay-${pa._id}`,
       type: "payment",
       url: "/app/receivables",
@@ -255,16 +326,53 @@ async function settleIfDue(pa, chain) {
 // WATCH
 // ---------------------------------------------------------------------------
 
-/** Scan one address for new transfers and advance confirmation states. */
-async function scanAddress(pa, chain, head) {
+/**
+ * Scan one address for new transfers and advance confirmation states.
+ *
+ * @param {"active"|"grace"} mode
+ *   `active` walks block ranges forward from lastScannedBlock, which is exact.
+ *   `grace` cannot: the gap since expiry may be millions of blocks. It instead
+ *   asks for the balance, and only scans a recent window when that balance shows
+ *   money we have not accounted for.
+ */
+async function scanAddress(pa, chain, head, mode = "active") {
   const decimals = await tokenDecimals(chain, pa.tokenContract, pa.tokenDecimals);
   if (decimals !== pa.tokenDecimals) pa.tokenDecimals = decimals;
 
-  const from = pa.lastScannedBlock > 0 ? pa.lastScannedBlock + 1 : Math.max(0, head - MAX_BLOCK_SPAN);
-  const to = Math.min(head, from + MAX_BLOCK_SPAN);
-  let found = 0;
+  pa.lastWatchedAt = new Date();
 
-  if (to >= from) {
+  let from;
+  let to;
+  let scanning = true;
+
+  if (mode === "grace") {
+    const live = await tokenBalance(chain, pa.tokenContract, pa.address, decimals);
+    const expected = accountedOnChain(pa);
+    // One unit at the token's precision, so floating point noise cannot register
+    // as an arrival.
+    const dust = 1 / 10 ** decimals;
+    const hasNewMoney = live !== null && live > expected + dust;
+
+    // Nothing new, and nothing part way to confirming: this address costs one
+    // eth_call an hour and no more.
+    const awaitingConfirmation = pa.observed.some((o) => o.status === "detected");
+    if (!hasNewMoney && !awaitingConfirmation) return { found: 0, newlyConfirmed: 0, late: 0 };
+
+    if (hasNewMoney) {
+      from = Math.max(0, head - MAX_BLOCK_SPAN);
+      to = head;
+    } else {
+      scanning = false; // only advancing confirmations
+    }
+  } else {
+    from = pa.lastScannedBlock > 0 ? pa.lastScannedBlock + 1 : Math.max(0, head - MAX_BLOCK_SPAN);
+    to = Math.min(head, from + MAX_BLOCK_SPAN);
+  }
+
+  let found = 0;
+  let late = 0;
+
+  if (scanning && to >= from) {
     const logs = await rpc(chain, "eth_getLogs", [
       {
         address: pa.tokenContract, // ONLY the configured stablecoin
@@ -277,6 +385,10 @@ async function scanAddress(pa, chain, head) {
     if (Array.isArray(logs)) {
       for (const log of logs) {
         if (pa.observed.some((o) => o.txHash === log.transactionHash)) continue;
+        // Arrived after the address stopped accepting payment. It still settles —
+        // the payer sent what they were quoted — but it is flagged so the owner is
+        // told, rather than an invoice quietly changing after it looked closed.
+        const isLate = pa.expiresAt && Date.now() > new Date(pa.expiresAt).getTime();
         pa.observed.push({
           txHash: log.transactionHash,
           from: "0x" + String(log.topics[1] || "").slice(-40),
@@ -284,15 +396,33 @@ async function scanAddress(pa, chain, head) {
           blockNumber: parseInt(log.blockNumber, 16),
           blockHash: log.blockHash,
           status: "detected",
+          late: isLate,
         });
         found++;
+        if (isLate) late++;
       }
-      pa.lastScannedBlock = to;
+      // Only the forward-walking pass may advance the high-water mark. The grace
+      // scan reads a recent window that says nothing about the blocks in between,
+      // so moving it here would skip everything it never looked at.
+      if (mode === "active") pa.lastScannedBlock = to;
     }
   }
 
-  // Advance detected -> confirmed, and catch reorgs.
-  const needed = confirmationsFor(chain.chainId);
+  // Money is present that no Transfer log in the recent window explains — it
+  // arrived earlier than the window reaches. Flag it rather than leaving a silent
+  // discrepancy: the balance is real and visible on the explorer.
+  if (mode === "grace" && scanning) {
+    if (found === 0) {
+      if (!pa.unidentifiedBalanceAt) pa.unidentifiedBalanceAt = new Date();
+    } else {
+      pa.unidentifiedBalanceAt = null;
+    }
+  }
+
+  // Advance detected -> confirmed, and catch reorgs. Depth honours the owner's
+  // per-chain override when they have set one, clamped where it is read.
+  const owner = await User.findById(pa.userId).select("crypto");
+  const needed = confirmationsFor(chain.chainId, owner);
   let newlyConfirmed = 0;
 
   for (const o of pa.observed) {
@@ -316,7 +446,7 @@ async function scanAddress(pa, chain, head) {
     }
   }
 
-  return { found, newlyConfirmed };
+  return { found, newlyConfirmed, late };
 }
 
 /**
@@ -324,22 +454,54 @@ async function scanAddress(pa, chain, head) {
  * @returns {Promise<{addressesChecked:number, detected:number, confirmed:number, settled:number}>}
  */
 async function runPaymentWatchPass({ userId } = {}) {
-  const query = { status: "active", expiresAt: { $gt: new Date() } };
-  if (userId) query.userId = userId;
+  // Close the window on anything past its expiry BEFORE selecting work, so an
+  // address never sits in a state the rest of the app misreads.
+  const expiredNow = await expireDueAddresses({ userId });
+
+  const now = new Date();
+  const activeQuery = { status: "active", expiresAt: { $gt: now } };
+
+  /**
+   * Grace: expired inside the grace window, and not looked at recently. Money
+   * sent after the deadline must still be found — it is the payer's money and it
+   * really is at that address — but it is neither urgent nor common, so each one
+   * gets a cheap check an hour rather than one a minute for thirty days.
+   */
+  const graceQuery = {
+    status: "expired",
+    expiredAt: { $gte: new Date(Date.now() - GRACE_DAYS * 24 * 60 * 60 * 1000) },
+    $or: [
+      { lastWatchedAt: null },
+      { lastWatchedAt: { $lt: new Date(Date.now() - GRACE_SCAN_MINUTES * 60 * 1000) } },
+    ],
+  };
+
+  if (userId) {
+    activeQuery.userId = userId;
+    graceQuery.userId = userId;
+  }
 
   let addresses;
   try {
-    addresses = await PaymentAddress.find(query).limit(200);
+    const [live, grace] = await Promise.all([
+      PaymentAddress.find(activeQuery).limit(200),
+      PaymentAddress.find(graceQuery).limit(50),
+    ]);
+    addresses = [
+      ...live.map((pa) => ({ pa, mode: "active" })),
+      ...grace.map((pa) => ({ pa, mode: "grace" })),
+    ];
   } catch (err) {
     logOnce("load addresses", err);
-    return { addressesChecked: 0, detected: 0, confirmed: 0, settled: 0 };
+    return { addressesChecked: 0, detected: 0, confirmed: 0, settled: 0, expired: expiredNow };
   }
 
   let detected = 0;
   let confirmed = 0;
   let settled = 0;
+  let lateDetected = 0;
 
-  for (const pa of addresses) {
+  for (const { pa, mode } of addresses) {
     try {
       const chain = getChain(pa.chainId);
       if (!chain) continue;
@@ -347,22 +509,30 @@ async function runPaymentWatchPass({ userId } = {}) {
       const head = await currentBlock(chain);
       if (!head) continue; // RPC down for this chain; try again next pass
 
-      const res = await scanAddress(pa, chain, head);
+      const res = await scanAddress(pa, chain, head, mode);
       detected += res.found;
       confirmed += res.newlyConfirmed;
+      lateDetected += res.late;
 
       if (res.found > 0) {
-        await notifyUser(
-          pa.userId,
-          {
-            title: "Payment detected",
-            body: `${pa.tokenSymbol} arrived on ${chain.name}. Waiting for confirmations.`,
-            tag: `detect-${pa._id}`,
-            type: "payment",
-            url: "/app/receivables",
-          },
-          "txUpdates"
-        ).catch(() => {});
+        const owner = await User.findById(pa.userId).select("crypto");
+        // notifyOnDetected is the user's call: some would rather hear only when
+        // money has actually settled than twice for every payment.
+        if (!owner || owner.crypto?.notifyOnDetected !== false) {
+          await notifyUser(
+            pa.userId,
+            {
+              title: res.late ? "Late payment detected" : "Payment detected",
+              body: res.late
+                ? `${pa.tokenSymbol} arrived on ${chain.name} after this address expired. Waiting for confirmations.`
+                : `${pa.tokenSymbol} arrived on ${chain.name}. Waiting for confirmations.`,
+              tag: `detect-${pa._id}`,
+              type: "payment",
+              url: "/app/receivables",
+            },
+            "txUpdates"
+          ).catch(() => {});
+        }
       }
 
       await pa.save();
@@ -375,13 +545,24 @@ async function runPaymentWatchPass({ userId } = {}) {
     }
   }
 
-  return { addressesChecked: addresses.length, detected, confirmed, settled };
+  return {
+    addressesChecked: addresses.length,
+    detected,
+    confirmed,
+    settled,
+    expired: expiredNow,
+    late: lateDetected,
+  };
 }
 
 module.exports = {
   runPaymentWatchPass,
+  expireDueAddresses,
   settleIfDue,
+  scanAddress,
   unitsToAmount,
+  accountedOnChain,
+  tokenBalance,
   addressTopic,
   TRANSFER_TOPIC,
   TOLERANCE,

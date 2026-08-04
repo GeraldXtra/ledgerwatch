@@ -4,6 +4,9 @@ const express = require("express");
 const cors = require("cors");
 const connectDB = require("./config/db");
 const { startAutomation } = require("./services/automation");
+const { initPush } = require("./services/push.service");
+const { verifyEmail } = require("./services/notify.service");
+const { normalizeCryptoSettings } = require("./services/cryptoSettings.service");
 
 const app = express();
 
@@ -60,7 +63,20 @@ const PORT = process.env.PORT || 5000;
 
 // Connect to MongoDB, then start the server
 connectDB()
-  .then(() => {
+  .then(async () => {
+    // Idempotent, and a no-op after the first run. Must happen before the
+    // automation loop so a pass never reads half-migrated settings.
+    await normalizeCryptoSettings();
+
+    // Report Web Push readiness at boot. Left lazy, a bad or missing VAPID key
+    // stayed invisible until the first notification tried to send and quietly
+    // did nothing.
+    initPush();
+
+    // Confirm SMTP at boot too. Both of these used to be discovered only when a
+    // user was waiting on a message that never came.
+    verifyEmail().catch(() => {});
+
     app.listen(PORT, () => {
       console.log(`🚀 Server on http://localhost:${PORT}`);
     });

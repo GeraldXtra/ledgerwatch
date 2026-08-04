@@ -5,7 +5,15 @@
       "Bash(rm -rf dist)",
       "Bash(node -e ' *)",
       "Bash(curl.exe -s -X POST http://localhost:8000/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"demo@ledgerwatch.app\",\"password\":\"demo1234\"}')",
-      "Bash(curl.exe -s \"http://localhost:8000/api/payment-addresses/quote?debtId=x&chainId=84532\")"
+      "Bash(curl.exe -s \"http://localhost:8000/api/payment-addresses/quote?debtId=x&chainId=84532\")",
+      "Bash(python -)",
+      "Bash(node \"C:/Users/SERIOU~1/AppData/Local/Temp/claude/c--Users-SERIOUS-PC-OneDrive-LedgerWatch/f4fa2786-d978-47a9-a955-611e97fd1c04/scratchpad/send-test-reminder.cjs\")",
+      "Bash(node -e \"const p=require\\('./server/package.json'\\);console.log\\(JSON.stringify\\(p.dependencies,null,1\\)\\)\")",
+      "Bash(npm install *)",
+      "Bash(node -e \"const q=require\\('qrcode'\\);console.log\\('qrcode now resolves server-side, version', require\\('./node_modules/qrcode/package.json'\\).version\\)\")",
+      "Bash(tee /tmp/lw-emp)",
+      "Bash(curl.exe -s http://localhost:8000/api/health)",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);if\\(j.error\\)return console.log\\('ERROR:',j.error\\);console.log\\('deliveries:',JSON.stringify\\(j.deliveries,null,1\\)\\);const m=j.messageText||'';console.log\\('\\\\ncrypto block in the stored message:',/Send USDC ONLY|USDC ONLY to this address/i.test\\(m\\)?'PRESENT':'MISSING'\\);}\\) \")"
     ]
   }
 }

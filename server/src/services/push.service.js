@@ -100,8 +100,23 @@ async function notifyUser(userId, payload, category) {
     return { sent: 0 };
   }
 
+  if (subs.length === 0) {
+    // Worth saying out loud: this is the state where everything else looks
+    // healthy and yet no notification can possibly arrive, because nobody has
+    // subscribed on any device.
+    console.log(`[push] no subscriptions for user ${userId} — nothing to deliver`);
+    return { sent: 0 };
+  }
+
+  /**
+   * Actions are ordered by value BEFORE they reach the browser, because the
+   * service worker has to trim to `Notification.maxActions` (2 on Chrome
+   * desktop) and trims from the end. Ordering here means the button that gets
+   * dropped is always the least important one.
+   */
   const body = JSON.stringify(payload);
   let sent = 0;
+  let pruned = 0;
 
   await Promise.all(
     subs.map(async (sub) => {
@@ -112,6 +127,7 @@ async function notifyUser(userId, payload, category) {
         // 404/410 => the subscription is dead; drop it so we stop retrying.
         if (err.statusCode === 404 || err.statusCode === 410) {
           await PushSubscription.deleteOne({ _id: sub._id }).catch(() => {});
+          pruned++;
         } else {
           console.error("[push] send failed:", err.statusCode || err.message);
         }
@@ -119,7 +135,26 @@ async function notifyUser(userId, payload, category) {
     })
   );
 
-  return { sent };
+  if (pruned) {
+    console.log(`[push] pruned ${pruned} dead subscription(s) for user ${userId}`);
+  }
+  console.log(`[push] delivered ${sent}/${subs.length} for user ${userId}`);
+
+  return { sent, pruned };
+}
+
+/**
+ * Warm the web-push config at boot so a missing or malformed key is reported at
+ * startup rather than being discovered the first time something tries to notify.
+ */
+function initPush() {
+  const wp = getWebPush();
+  console.log(
+    wp
+      ? "[push] Web Push configured and ready."
+      : "[push] Web Push disabled — in-app toasts only."
+  );
+  return Boolean(wp);
 }
 
 module.exports = {
@@ -128,4 +163,5 @@ module.exports = {
   signActionToken,
   verifyActionToken,
   notifyUser,
+  initPush,
 };

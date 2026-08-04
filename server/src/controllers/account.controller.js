@@ -7,6 +7,8 @@ const Watch = require("../models/Watch");
 const Alert = require("../models/Alert");
 const SimTrade = require("../models/SimTrade");
 const Portfolio = require("../models/Portfolio");
+const PaymentAddress = require("../models/PaymentAddress");
+const WalletTx = require("../models/WalletTx");
 const publicUser = require("../utils/publicUser");
 
 const SALT_ROUNDS = 10;
@@ -106,6 +108,11 @@ async function wipeUserData(userId) {
     Alert.deleteMany({ userId }),
     SimTrade.deleteMany({ userId }),
     Portfolio.deleteMany({ userId }),
+    // Payment addresses were missing here, so clearing data or deleting an
+    // account left rows the watch pass kept scanning forever on behalf of a user
+    // that no longer existed.
+    PaymentAddress.deleteMany({ userId }),
+    WalletTx.deleteMany({ userId }),
   ]);
 }
 

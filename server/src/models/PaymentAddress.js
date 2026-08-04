@@ -122,6 +122,11 @@ const paymentAddressSchema = new mongoose.Schema({
   // Last time the watcher looked at this address, of either kind. The grace pass
   // throttles on this so it cannot re-scan every expired address every minute.
   lastWatchedAt: { type: Date, default: null },
+  // Set when the address holds more than every transfer we know about explains,
+  // and the recent-window scan could not find the transaction responsible. The
+  // money is real and visible on the explorer, so this is surfaced as a warning
+  // rather than left as a silent discrepancy. Cleared once it is explained.
+  unidentifiedBalanceAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },
 });
 

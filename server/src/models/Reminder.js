@@ -6,7 +6,13 @@ const deliverySchema = new mongoose.Schema(
     channel: { type: String, enum: ["whatsapp", "email"], required: true },
     status: { type: String, enum: ["queued", "sent", "failed", "skipped"], default: "queued" },
     providerId: { type: String },
+    // Machine-readable cause (auth-rejected, connection-failed, no-address, …)
+    // so the UI can give specific advice instead of echoing a raw SMTP string.
+    reason: { type: String },
     error: { type: String },
+    // Accepted by the mail server but will not arrive — a reserved recipient
+    // domain, for instance. Success and delivery are not the same thing.
+    warning: { type: String },
     at: { type: Date, default: Date.now },
   },
   { _id: false }

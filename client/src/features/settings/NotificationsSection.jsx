@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BellOff, BellRing, Send } from "lucide-react";
+import { BellOff, BellRing, Send, TriangleAlert } from "lucide-react";
 import { Button, useToast } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import {
@@ -84,14 +84,27 @@ export default function NotificationsSection() {
     setMsg("");
     try {
       const res = await enablePush();
+      // Every branch says something specific. This used to have no catch at all,
+      // so a throw anywhere in enablePush left the button silently doing nothing
+      // and made a broken pipeline look like an unresponsive click.
       setMsg(
         res.ok
-          ? "Notifications enabled on this device."
+          ? "Notifications enabled on this device. Send a test below to confirm."
           : res.reason === "denied"
-          ? "Notifications are blocked in your browser settings — in-app alerts still work."
+          ? "Your browser has blocked notifications for this site. See how to re-enable them below."
+          : res.reason === "dismissed"
+          ? "The permission prompt was closed without choosing. Press enable again to retry."
           : res.reason === "not-configured"
-          ? "Push is not configured on the server. In-app alerts still work."
-          : "Could not enable notifications. In-app alerts still work."
+          ? `Push is not configured on the server. ${res.detail || ""}`.trim()
+          : res.reason === "unsupported"
+          ? res.detail || "This browser cannot receive push notifications."
+          : `Could not enable notifications. ${res.detail || ""} In-app alerts still work.`.trim()
+      );
+    } catch (err) {
+      setMsg(
+        `Could not enable notifications: ${
+          err?.response?.data?.error || err.message || "unexpected error"
+        }. In-app alerts still work.`
       );
     } finally {
       setBusy(false);
@@ -137,10 +150,46 @@ export default function NotificationsSection() {
       <div className="settings-section">
         <div className="overline">On this device</div>
 
+        {/* The permission value, stated plainly. Without it "nothing happens when
+            I press enable" is indistinguishable from "the browser blocked this
+            months ago", and the API cannot re-prompt once denied. */}
+        {push && push.supported && (
+          <div className="row space-between perm-row">
+            <span className="muted small">Browser permission</span>
+            <span
+              className={`pill ${
+                push.permission === "granted"
+                  ? "paid"
+                  : push.permission === "denied"
+                  ? "overdue"
+                  : "pending"
+              }`}
+            >
+              {push.permission === "granted"
+                ? "Granted"
+                : push.permission === "denied"
+                ? "Blocked"
+                : "Not asked yet"}
+            </span>
+          </div>
+        )}
+
+        {push && push.permission === "denied" && (
+          <div className="against-note" style={{ marginTop: 10 }}>
+            <TriangleAlert size={15} />
+            <span>
+              Chrome will not ask again once blocked, so this has to be changed by hand: click the
+              icon at the left of the address bar, choose <strong>Site settings</strong>, set{" "}
+              <strong>Notifications</strong> to <strong>Allow</strong>, then reload this page and
+              press enable again.
+            </span>
+          </div>
+        )}
+
         {push && !push.supported ? (
           <p className="muted small" style={{ marginTop: 8 }}>
-            This browser does not support push notifications. In-app alerts still work
-            everywhere.
+            {push.reason ||
+              "This browser does not support push notifications. In-app alerts still work everywhere."}
           </p>
         ) : push && !push.configured ? (
           <p className="muted small" style={{ marginTop: 8 }}>

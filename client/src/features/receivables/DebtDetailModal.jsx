@@ -1,6 +1,7 @@
 import { Suspense, lazy } from "react";
 import { BellRing, Check, Coins, Pencil, Trash2, X } from "lucide-react";
 import { Avatar, Button, Modal, StatusPill } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { ngn, shortDate } from "./format";
 import PaymentPanel from "./PaymentPanel";
 
@@ -25,9 +26,12 @@ export default function DebtDetailModal({
   onCrypto,
   cryptoKey = 0,
 }) {
+  const { user } = useAuth();
   const currency = debt.currency || "NGN";
   const balance = debt.balance != null ? debt.balance : debt.amount;
   const paid = debt.displayStatus === "paid" || balance <= 0;
+  // Absent config reads as enabled, matching the server.
+  const cryptoEnabled = user?.crypto?.enabled !== false;
 
   return (
     <Modal label={`Debt for ${debt.debtorName}`} onClose={onClose} size="lg">
@@ -83,7 +87,10 @@ export default function DebtDetailModal({
         <Button onClick={() => onRemind(debt)}>
           <BellRing size={14} /> Generate reminder
         </Button>
-        {!paid && onCrypto && (
+        {/* Hidden when the account has crypto payments switched off in Settings.
+            The server rejects issuance too, so this is the visible half of one
+            rule rather than the whole of it. */}
+        {!paid && onCrypto && cryptoEnabled && (
           <Button onClick={() => onCrypto(debt)}>
             <Coins size={14} /> Crypto payment
           </Button>

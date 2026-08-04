@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, Eye, RefreshCw, TrendingDown, TrendingUp, Wallet, Zap } from "lucide-react";
+import {
+  Bell,
+  Eye,
+  Info,
+  RefreshCw,
+  TrendingDown,
+  TrendingUp,
+  Wallet,
+  X,
+  Zap,
+} from "lucide-react";
 import http from "../../api/http";
 import {
   Button,
@@ -38,6 +48,8 @@ function MarketWatch() {
   const [trade, setTrade] = useState(null); // { alert, side } -> opens TradePanel
   const [running, setRunning] = useState(false);
   const [detail, setDetail] = useState(null); // selected coinId for the modal
+  // Shown when a notification deep link points at an alert that is already gone.
+  const [deepLinkNote, setDeepLinkNote] = useState("");
 
   // Coins to price = union of watched coins and held coins.
   const coinIds = useMemo(() => {
@@ -49,7 +61,12 @@ function MarketWatch() {
   const { markets, stale, lastFetchedAt } = useMarkets(coinIds);
 
   // Track pending-alert ids to toast when a NEW one fires while on the page.
+  // Stays null until the first load resolves, which also serves as the
+  // "data has arrived" signal for deep linking.
   const knownAlertIds = useRef(null);
+  // Alerts the push bridge has already toasted. Both toast paths below consult
+  // this so a notification and the poll cannot announce the same alert twice.
+  const pushedAlertIds = useRef(new Set());
 
   const loadData = useCallback(async () => {
     setError("");
@@ -67,10 +84,12 @@ function MarketWatch() {
       const nextAlerts = a.data.alerts;
       // Toast on newly-appeared pending alerts (skip the very first load).
       if (knownAlertIds.current) {
-        const fresh = nextAlerts.filter((al) => !knownAlertIds.current.has(al._id));
-        fresh.forEach((al) =>
-          toast(`New alert: ${al.symbol} — ${al.suggestion}`, { type: "info" })
-        );
+        nextAlerts
+          .filter((al) => !knownAlertIds.current.has(al._id))
+          .filter((al) => !pushedAlertIds.current.has(String(al._id)))
+          .forEach((al) =>
+            toast(`New alert: ${al.symbol} — ${al.suggestion}`, { type: "info" })
+          );
       }
       knownAlertIds.current = new Set(nextAlerts.map((al) => al._id));
       setAlerts(nextAlerts);
@@ -83,27 +102,46 @@ function MarketWatch() {
     loadData();
   }, [loadData]);
 
-  // Foreground push -> in-app toast (the SW suppressed the OS notification).
+  /**
+   * A foreground push has already been toasted by the shell-level bridge, so this
+   * only refreshes the data and REMEMBERS the alert id.
+   *
+   * Without that memory the 10 second poll would toast the very same alert a
+   * moment later and the user would be told about it twice.
+   */
   useEffect(() => {
     const onPush = (e) => {
       const p = e.detail || {};
-      toast(p.title || "LedgerWatch", { type: "info" });
+      if (p.alertId) pushedAlertIds.current.add(String(p.alertId));
+      if (p.type === "alert") loadData();
     };
     window.addEventListener("ledgerwatch:push", onPush);
     return () => window.removeEventListener("ledgerwatch:push", onPush);
-  }, [toast]);
+  }, [loadData]);
 
   // Deep link from a notification's Buy/Sell button: /app/market?alert=<id>&side=buy
   // Opens the trade panel for that alert — it never executes anything, the user
   // still sets an amount and confirms.
   useEffect(() => {
-    if (!alerts.length) return;
     const params = new URLSearchParams(window.location.search);
     const alertId = params.get("alert");
     const side = params.get("side");
     if (!alertId) return;
+    // Wait until the first load has actually resolved, or a deep link would be
+    // judged "missing" purely because the list has not arrived yet.
+    if (!knownAlertIds.current) return;
+
     const target = alerts.find((a) => a._id === alertId);
-    if (target) setTrade({ alert: target, side: side === "sell" ? "sell" : "buy" });
+    if (target) {
+      setTrade({ alert: target, side: side === "sell" ? "sell" : "buy" });
+    } else {
+      // Resolved, dismissed or expired between the notification being shown and
+      // the user tapping it. Say so plainly — silently doing nothing looks like
+      // the button is broken.
+      setDeepLinkNote(
+        "That alert has already been handled, so there is nothing left to act on. Any alert still open is listed below."
+      );
+    }
     // Clear the params so a refresh does not reopen the panel.
     window.history.replaceState({}, "", window.location.pathname);
   }, [alerts]);
@@ -119,9 +157,13 @@ function MarketWatch() {
           if (knownAlertIds.current) {
             const fresh = nextAlerts.filter((al) => !knownAlertIds.current.has(al._id));
             if (fresh.length) {
-              fresh.forEach((al) =>
-                toast(`New alert: ${al.symbol} — ${al.suggestion}`, { type: "info" })
-              );
+              fresh
+                // Skip anything the push bridge already announced, so an alert
+                // that arrived as a notification is not toasted a second time.
+                .filter((al) => !pushedAlertIds.current.has(String(al._id)))
+                .forEach((al) =>
+                  toast(`New alert: ${al.symbol} — ${al.suggestion}`, { type: "info" })
+                );
               // a new alert means history/portfolio may change too
               http.get("/api/alerts/history").then((h) => setAlertHistory(h.data.alerts)).catch(() => {});
             }
@@ -305,6 +347,21 @@ function MarketWatch() {
       />
 
       {error && <p className="error-text">{error}</p>}
+
+      {/* A notification pointed at an alert that has since been resolved. This is
+          an ordinary outcome, not an error, so it reads as information and can be
+          dismissed. */}
+      {deepLinkNote && (
+        <div className="row space-between deeplink-note">
+          <span className="row">
+            <Info size={15} />
+            {deepLinkNote}
+          </span>
+          <Button variant="ghost" icon title="Dismiss" onClick={() => setDeepLinkNote("")}>
+            <X size={15} />
+          </Button>
+        </div>
+      )}
 
       {pf === null ? (
         <>
