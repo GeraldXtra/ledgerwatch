@@ -49,6 +49,12 @@ function confirmationsFor(chainId) {
 // never vanish silently — it stays under a low-frequency grace watch this long.
 const GRACE_DAYS = Number(process.env.PAYMENT_GRACE_DAYS || 30);
 
+// How often a single expired address is re-checked during that grace window.
+// The active pass runs every minute; re-scanning every expired address that often
+// for 30 days would be a large, pointless RPC bill, since late payments are rare
+// and not urgent. One cheap balance check an hour is plenty.
+const GRACE_SCAN_MINUTES = Number(process.env.PAYMENT_GRACE_SCAN_MINUTES || 60);
+
 // Guard against derivation-index abuse (each generation burns an index forever).
 const MAX_ADDRESSES_PER_HOUR = Number(process.env.MAX_PAYMENT_ADDRESSES_PER_HOUR || 20);
 
@@ -58,5 +64,6 @@ module.exports = {
   confirmationsFor,
   DEFAULT_CONFIRMATIONS,
   GRACE_DAYS,
+  GRACE_SCAN_MINUTES,
   MAX_ADDRESSES_PER_HOUR,
 };

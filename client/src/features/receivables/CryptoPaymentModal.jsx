@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { Button, Field, Input, Modal, Select, SkeletonLines } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { hasWallet, unlockWallet } from "../wallet/keystore";
 import { canDerive, deriveAddressFromWallet } from "../wallet/derivation";
 import { allocateIndex, createPaymentAddress, fetchChains, fetchQuote } from "./cryptoApi";
@@ -27,6 +28,7 @@ import { agoLabel, ngn, usdc } from "./format";
  * the public address and its index are ever sent to the server.
  */
 export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
+  const { user } = useAuth();
   const [chains, setChains] = useState(null); // null = still loading
   const [chainId, setChainId] = useState(null);
   const [quote, setQuote] = useState(null);
@@ -49,16 +51,21 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
         // Only chains with a configured stablecoin can accept an invoice payment.
         const usable = list.filter((c) => (c.tokens || []).length > 0);
         setChains(usable);
-        // Base Sepolia is the app default and the cheapest to test on; fall back
-        // to whatever is first if it is not enabled.
-        const preferred = usable.find((c) => c.chainId === 84532) || usable[0];
+        // The account's chosen default from Settings, then Base Sepolia (the app
+        // default and cheapest to test on), then whatever is enabled. Hardcoding
+        // a chain here would quietly ignore the preference the user just set.
+        const preferredId = user?.crypto?.defaultChainId || 84532;
+        const preferred =
+          usable.find((c) => c.chainId === preferredId) ||
+          usable.find((c) => c.chainId === 84532) ||
+          usable[0];
         if (preferred) setChainId(preferred.chainId);
       })
       .catch(() => setChains([]));
     return () => {
       active = false;
     };
-  }, []);
+  }, [user?.crypto?.defaultChainId]);
 
   // Re-quote whenever the chain changes. This reserves nothing, so switching
   // networks to compare is free.

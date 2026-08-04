@@ -16,7 +16,32 @@ function publicUser(user) {
     avatarUrl: u.avatarUrl || null,
     companyName: u.companyName || "",
     notifyPrefs: u.notifyPrefs || { marketAlerts: true, remindersDue: true, txUpdates: true },
+    crypto: cryptoSettings(u.crypto),
     createdAt: u.createdAt,
+  };
+}
+
+/**
+ * The settable crypto fields only.
+ *
+ * `nextDerivationIndex` is deliberately withheld: it is an internal monotonic
+ * counter, not a preference, and nothing in the UI should be able to read it and
+ * start reasoning about it.
+ */
+function cryptoSettings(crypto) {
+  const c = crypto || {};
+  const overrides = c.confirmationOverrides;
+  return {
+    enabled: c.enabled !== false,
+    defaultChainId: c.defaultChainId || 84532,
+    expiryHours: c.expiryHours || 72,
+    sweepDestination: c.sweepDestination || null,
+    notifyOnDetected: c.notifyOnDetected !== false,
+    // Mongoose Maps do not survive JSON.stringify as plain objects.
+    confirmationOverrides:
+      overrides && typeof overrides.entries === "function"
+        ? Object.fromEntries(overrides)
+        : overrides || {},
   };
 }
 

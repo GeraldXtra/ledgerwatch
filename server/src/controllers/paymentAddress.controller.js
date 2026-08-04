@@ -1,6 +1,10 @@
 const PaymentAddress = require("../models/PaymentAddress");
+const Debt = require("../models/Debt");
 const { getChain, listChains } = require("../config/chains");
-const { confirmationsFor } = require("../config/derivation");
+const {
+  confirmationsFor,
+  requireCryptoEnabled,
+} = require("../services/cryptoSettings.service");
 const {
   allocateIndex,
   issueAddress,
@@ -9,6 +13,7 @@ const {
 } = require("../services/paymentAddress.service");
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
 /**
  * GET /api/payment-addresses/quote?debtId=&chainId=
@@ -20,6 +25,7 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
  */
 async function quote(req, res) {
   try {
+    requireCryptoEnabled(req.user);
     const result = await quoteForInvoice({
       userId: req.user._id,
       debtId: req.query.debtId,
@@ -43,6 +49,10 @@ async function quote(req, res) {
  */
 async function allocate(req, res) {
   try {
+    // Checked BEFORE an index is reserved: allocation permanently consumes one,
+    // so a disabled account must be turned away before it burns anything.
+    requireCryptoEnabled(req.user);
+
     const chainId = Number(req.body && req.body.chainId);
     const chain = getChain(chainId);
     if (!chain) return res.status(400).json({ error: "Unknown or disabled chain" });
@@ -64,7 +74,8 @@ async function allocate(req, res) {
         testnet: chain.testnet,
       },
       token,
-      confirmations: confirmationsFor(chain.chainId),
+      // The user's own depth if they set one, otherwise the per-chain default.
+      confirmations: confirmationsFor(chain.chainId, req.user),
       rate: { ngnPerToken: rate.rate, fetchedAt: rate.fetchedAt, stale: rate.stale },
     });
   } catch (err) {
@@ -80,6 +91,7 @@ async function allocate(req, res) {
  */
 async function create(req, res) {
   try {
+    requireCryptoEnabled(req.user);
     const { debtId, chainId, address, derivationIndex } = req.body || {};
     if (!ADDRESS_RE.test(address || "")) {
       return res.status(400).json({ error: "Invalid address" });
@@ -125,7 +137,23 @@ async function list(req, res) {
     const query = { userId: req.user._id };
     if (req.query.debtId) query.debtId = req.query.debtId;
     const addresses = await PaymentAddress.find(query).sort({ createdAt: -1 }).limit(100);
-    return res.json({ addresses, chains: listChains() });
+
+    // Attach the debtor name as a SEPARATE field rather than populating `debtId`.
+    // The sweep list needs to say which client an address belongs to, and
+    // populating would turn debtId from an id into an object for every existing
+    // caller.
+    const debts = await Debt.find({
+      _id: { $in: addresses.map((a) => a.debtId) },
+      userId: req.user._id,
+    }).select("debtorName");
+    const nameById = new Map(debts.map((d) => [String(d._id), d.debtorName]));
+
+    const rows = addresses.map((a) => ({
+      ...a.toObject(),
+      debtorName: nameById.get(String(a.debtId)) || null,
+    }));
+
+    return res.json({ addresses: rows, chains: listChains() });
   } catch (err) {
     console.error("list payment addresses error:", err.message);
     return res.status(500).json({ error: "Failed to load payment addresses" });

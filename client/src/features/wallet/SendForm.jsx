@@ -5,6 +5,8 @@ import { Button, Field, Input, Select, useToast } from "../../components/ui";
 import { getProvider, ERC20_ABI } from "./provider";
 import { unlockWallet } from "./keystore";
 import { recordTx, updateTxStatus } from "./walletApi";
+import { NATIVE_TRANSFER_GAS, preflightGas } from "./gas";
+import GasNotice from "./GasNotice";
 
 /**
  * Send flow with a hard human-in-the-loop gate:
@@ -19,6 +21,7 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
   const [amount, setAmount] = useState("");
   const [asset, setAsset] = useState("native"); // "native" | token address
   const [estimate, setEstimate] = useState(null); // { gasLimit, feeEth }
+  const [gasPlan, setGasPlan] = useState(null); // preflightGas result
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -43,20 +46,31 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
     setBusy(true);
     try {
       const provider = getProvider(chain.chainId);
-      let gasLimit;
-      if (selectedToken) {
-        const iface = new ethers.Interface(ERC20_ABI);
-        const data = iface.encodeFunctionData("transfer", [to, value]);
-        gasLimit = await provider.estimateGas({ from: address, to: selectedToken.address, data });
-      } else {
-        gasLimit = await provider.estimateGas({ from: address, to, value });
-      }
-      const fee = await provider.getFeeData();
-      const price = fee.maxFeePerGas || fee.gasPrice || 0n;
-      const feeWei = gasLimit * price;
+
+      // Build the exact transaction, then ask whether it can be paid for BEFORE
+      // showing the confirm step. Previously the fee was estimated and displayed
+      // but never checked against the balance, so a zero-gas wallet only found
+      // out at signing time, after typing a password.
+      const tx = selectedToken
+        ? {
+            to: selectedToken.address,
+            data: new ethers.Interface(ERC20_ABI).encodeFunctionData("transfer", [to, value]),
+          }
+        : { to, value };
+
+      const plan = await preflightGas({
+        provider,
+        from: address,
+        tx,
+        // A native send has to cover the amount AND the fee out of one balance.
+        valueWei: selectedToken ? 0n : value,
+        fallbackGas: selectedToken ? undefined : NATIVE_TRANSFER_GAS,
+      });
+
+      setGasPlan(plan);
       setEstimate({
-        gasLimit: gasLimit.toString(),
-        feeEth: ethers.formatEther(feeWei),
+        gasLimit: plan.gasLimit.toString(),
+        feeEth: ethers.formatEther(plan.feeWei),
       });
       setStep("review");
     } catch (err) {
@@ -146,15 +160,22 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
           <div><dt>Est. network fee</dt><dd className="num">≈ {Number(estimate.feeEth).toFixed(6)} {chain.nativeSymbol}</dd></div>
         </dl>
 
-        <Field label="Wallet password">
-          <Input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoFocus
-            required
-          />
-        </Field>
+        <GasNotice plan={gasPlan} chain={chain} />
+
+        {/* The password field is withheld entirely when the fee cannot be paid.
+            Offering it would invite the user to type a password for a
+            transaction that is guaranteed to fail. */}
+        {gasPlan && gasPlan.ok && (
+          <Field label="Wallet password">
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoFocus
+              required
+            />
+          </Field>
+        )}
 
         {error && <p className="error-text">{error}</p>}
 
@@ -162,8 +183,8 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
           <Button variant="ghost" onClick={() => { setStep("form"); setPassword(""); }} disabled={busy}>
             Back
           </Button>
-          <Button variant="primary" type="submit" disabled={busy}>
-            {busy ? "Signing…" : "Sign & send"}
+          <Button variant="primary" type="submit" disabled={busy || !gasPlan || !gasPlan.ok}>
+            {busy ? "Signing…" : !gasPlan || gasPlan.ok ? "Sign & send" : `Not enough ${chain.nativeSymbol}`}
           </Button>
         </div>
       </form>

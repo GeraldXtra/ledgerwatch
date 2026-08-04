@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import QRCode from "qrcode";
 import {
+  ArrowDownToLine,
   Check,
   Coins,
   Copy,
@@ -10,9 +11,21 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { Button, SkeletonLines } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
+import { getStoredAddress, hasWallet } from "../wallet/keystore";
 import ProgressBar from "./ProgressBar";
+import SweepModal from "./SweepModal";
 import { fetchPaymentAddresses, revokePaymentAddress } from "./cryptoApi";
-import { agoLabel, countdown, dateTime, ngn, shortHash, usdc, usdcAmount } from "./format";
+import {
+  agoLabel,
+  countdown,
+  dateTime,
+  ngn,
+  shortDate,
+  shortHash,
+  usdc,
+  usdcAmount,
+} from "./format";
 
 // Status of the address itself, as a pill tone the design system already knows.
 const STATUS_TONE = {
@@ -43,6 +56,7 @@ const STATUS_LABEL = {
  * being waited for.
  */
 export default function CryptoPaymentPanel({ debt, refreshKey = 0 }) {
+  const { user } = useAuth();
   const [addresses, setAddresses] = useState(null);
   const [chains, setChains] = useState([]);
   const [error, setError] = useState("");
@@ -82,19 +96,30 @@ export default function CryptoPaymentPanel({ debt, refreshKey = 0 }) {
           pa={pa}
           chain={chains.find((c) => c.chainId === pa.chainId) || null}
           onChanged={load}
+          sweepDestination={user?.crypto?.sweepDestination || null}
         />
       ))}
     </div>
   );
 }
 
-function AddressCard({ pa, chain, onChanged }) {
+function AddressCard({ pa, chain, onChanged, sweepDestination }) {
   const [qr, setQr] = useState("");
   const [copied, setCopied] = useState(false);
   const [left, setLeft] = useState(() => countdown(pa.expiresAt));
   const [revoking, setRevoking] = useState(false);
+  const [sweepOpen, setSweepOpen] = useState(false);
 
   const isActive = pa.status === "active";
+
+  // After expiry the address drops to a low-frequency grace watch rather than
+  // being abandoned, so late money is still detected and credited. Mirrors
+  // PAYMENT_GRACE_DAYS on the server.
+  const GRACE_DAYS = 30;
+  const graceUntil = pa.expiredAt
+    ? new Date(new Date(pa.expiredAt).getTime() + GRACE_DAYS * 86400000)
+    : null;
+  const inGrace = pa.status === "expired" && graceUntil && graceUntil > new Date();
 
   useEffect(() => {
     let active = true;
@@ -246,9 +271,27 @@ function AddressCard({ pa, chain, onChanged }) {
                 ) : (
                   dateTime(pa.expiresAt)
                 )}
+                {/* Watching does not stop at expiry. Money sent late is still
+                    found and credited, so say so rather than leaving the payer's
+                    position looking hopeless. */}
+                {inGrace && (
+                  <span className="quote-sub">
+                    still watching for late payments until {shortDate(graceUntil)}
+                  </span>
+                )}
               </dd>
             </div>
           </dl>
+
+          {pa.unidentifiedBalanceAt && (
+            <p className="settings-note danger">
+              <TriangleAlert size={15} />
+              This address is holding more than the transfers listed below account for. The funds
+              are real and visible on the block explorer, but the transaction that sent them is
+              older than the recent window we can search, so it could not be matched
+              automatically.
+            </p>
+          )}
 
           <div className="crypto-progress">
             <div className="row space-between crypto-progress-head">
@@ -340,6 +383,10 @@ function AddressCard({ pa, chain, onChanged }) {
                 </div>
               </div>
               <div className="row">
+                {/* Late money still counts and still settles, at the rate the
+                    payer was originally quoted. Flagged so a settlement on an
+                    invoice that looked closed is never a surprise. */}
+                {t.late && <span className="pill warn">Late</span>}
                 <span className={`pill ${txTone(t.status)}`}>
                   <span className="pill-dot" />
                   {t.status === "confirmed"
@@ -404,12 +451,35 @@ function AddressCard({ pa, chain, onChanged }) {
           or the right token on the wrong network, is lost permanently and cannot be recovered by
           anyone.
         </p>
-        {isActive && (
-          <Button variant="ghost" size="sm" onClick={revoke} disabled={revoking}>
-            <Ban size={14} /> {revoking ? "Revoking…" : "Revoke address"}
-          </Button>
-        )}
+        <div className="row">
+          {/* Sweeping is offered whenever money has actually arrived, whatever the
+              address status: a revoked or expired address can still be holding
+              funds, and stranding them would be the worse outcome. */}
+          {received > 0 && hasWallet() && (
+            <Button variant="secondary" size="sm" onClick={() => setSweepOpen(true)}>
+              <ArrowDownToLine size={14} /> Sweep to wallet
+            </Button>
+          )}
+          {isActive && (
+            <Button variant="ghost" size="sm" onClick={revoke} disabled={revoking}>
+              <Ban size={14} /> {revoking ? "Revoking…" : "Revoke address"}
+            </Button>
+          )}
+        </div>
       </div>
+
+      {sweepOpen && (
+        <SweepModal
+          addresses={[pa]}
+          chains={chain ? [chain] : []}
+          mainAddress={getStoredAddress()}
+          // Settings may name somewhere other than this device's wallet; the
+          // modal warns when the two differ.
+          destination={sweepDestination || getStoredAddress()}
+          onClose={() => setSweepOpen(false)}
+          onDone={onChanged}
+        />
+      )}
     </div>
   );
 }

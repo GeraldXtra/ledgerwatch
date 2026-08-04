@@ -6,9 +6,22 @@ const { buildReminderMessage } = require("../utils/reminderTemplate");
 const { cryptoBlockText, cryptoBlockHtml } = require("../utils/cryptoPaymentBlock");
 const { getChain } = require("../config/chains");
 const { draftReminder } = require("./anthropic.service");
-const { sendWhatsApp, sendEmail, buildReminderEmail } = require("./notify.service");
+const {
+  sendWhatsApp,
+  sendEmail,
+  buildReminderEmail,
+  getLogoAttachment,
+} = require("./notify.service");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** "12 August 2026", or "" when there is no usable date. */
+function formatDueDate(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+}
 
 // Idempotency: has this debt already had a SUCCESSFUL send on `channel` within its
 // current cadence window? Persisted in Mongo, so it survives restarts.
@@ -45,6 +58,14 @@ async function dispatchReminder(reminder, debt, owner, { channels = [], force = 
       // The email gets the richer crypto block: a copyable monospace address plus a
       // scannable QR, so the payer never has to retype 42 characters by hand. The
       // plain-text message already carries the same details for WhatsApp.
+      //
+      // Images are attached INLINE and referenced by content id. Gmail strips
+      // `data:` URI images, so a QR embedded that way is invisible to most
+      // recipients however correct the markup looks.
+      const attachments = [];
+      const logo = getLogoAttachment();
+      if (logo) attachments.push(logo);
+
       let cryptoHtml = "";
       const active = await PaymentAddress.findOne({
         debtId: debt._id,
@@ -54,32 +75,57 @@ async function dispatchReminder(reminder, debt, owner, { channels = [], force = 
       if (active) {
         const chain = getChain(active.chainId);
         if (chain) {
-          let qrDataUrl = null;
+          let qrCid = null;
           try {
             // eslint-disable-next-line global-require
             const QRCode = require("qrcode");
-            qrDataUrl = await QRCode.toDataURL(active.address, {
-              width: 336,
+            const buffer = await QRCode.toBuffer(active.address, {
+              width: 340,
               margin: 1,
+              errorCorrectionLevel: "M",
               color: { dark: "#0a1428", light: "#ffffff" },
             });
-          } catch {
+            qrCid = "payment-address-qr";
+            attachments.push({
+              filename: "payment-address.png",
+              content: buffer,
+              cid: qrCid,
+              contentDisposition: "inline",
+            });
+          } catch (err) {
             // A missing QR must never block the reminder — the address is still
-            // present in text form right above it.
+            // present in text form right above it. But it must not fail SILENTLY
+            // either: `qrcode` was absent from the server's dependencies for a
+            // while and a bare catch here meant no QR ever rendered and nothing
+            // ever said so.
+            console.error("Reminder QR generation failed:", err.message);
           }
-          cryptoHtml = cryptoBlockHtml(active, chain, qrDataUrl);
+          cryptoHtml = cryptoBlockHtml(active, chain, qrCid);
         }
       }
 
+      // Reuse the one balance helper the reminders already quote from, so the
+      // figure in the email header can never disagree with the letter itself.
+      const { balance } = await outstandingBalance(debt);
       const html = buildReminderEmail({
         businessName: owner && owner.name,
+        debtorName: debt.debtorName,
+        amount: balance > 0 ? balance : debt.amount,
+        dueDate: formatDueDate(debt.dueDate),
         // Base text here, not messageText: the crypto details are rendered below
         // as rich HTML, so using the full text would duplicate them.
         messageText: cryptoHtml ? reminder.baseMessageText || reminder.messageText : reminder.messageText,
         bankDetails: (owner && owner.bankDetails) || {},
         cryptoHtml,
+        hasLogo: Boolean(logo),
       });
-      res = await sendEmail(debt.debtorEmail, `Payment reminder from ${(owner && owner.name) || "your supplier"}`, html);
+      res = await sendEmail(
+        debt.debtorEmail,
+        `Payment reminder from ${(owner && owner.name) || "your supplier"}`,
+        html,
+        // The full text version, crypto block included, as the text/plain part.
+        { text: reminder.messageText, attachments }
+      );
     } else {
       continue;
     }
@@ -87,7 +133,12 @@ async function dispatchReminder(reminder, debt, owner, { channels = [], force = 
       channel,
       status: res.ok ? "sent" : res.skipped ? "skipped" : "failed",
       providerId: res.providerId,
+      // `reason` is the machine-readable cause; `error` is what the user reads.
+      // `warning` covers a send that succeeded at the handshake but will not
+      // actually arrive, which used to be indistinguishable from a clean send.
+      reason: res.reason,
       error: res.error,
+      warning: res.warning,
       at: new Date(),
     });
   }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Mail, MessageCircle, Send, X } from "lucide-react";
+import { Mail, MessageCircle, Send, TriangleAlert, X } from "lucide-react";
 import http from "../../api/http";
 import { Button, Modal, SkeletonLines, StatusPill, useToast } from "../../components/ui";
 
@@ -42,6 +42,14 @@ export default function ReminderPanel({ debt, result, onClose }) {
   const [sending, setSending] = useState(null); // which channel-set is in flight
 
   const hasEmail = Boolean(debt.debtorEmail);
+  /**
+   * Reserved, non-routable domains (RFC 2606 / RFC 6761). Mail to these is
+   * accepted at the SMTP handshake and bounced afterwards, so it records as
+   * "sent" while never arriving — the worst of both outcomes. Mirrors the same
+   * check on the server.
+   */
+  const emailUndeliverable =
+    hasEmail && /@([^@]*\.)?(example|test|invalid|localhost)(\.[a-z]{2,})?$/i.test(debt.debtorEmail);
 
   async function loadReminders() {
     setLoading(true);
@@ -88,8 +96,17 @@ export default function ReminderPanel({ debt, result, onClose }) {
       if (sent.length) {
         toast(`Sent via ${sent.map((d) => d.channel).join(" & ")}.`, { type: "success" });
       }
+      // Accepted by the mail server but it will not arrive — a reserved recipient
+      // domain, typically. Reported separately from success, because it looks
+      // exactly like success otherwise.
+      sent
+        .filter((d) => d.warning)
+        .forEach((d) => toast(d.warning, { type: "error", duration: 9000 }));
+
       if (failed.length) {
-        toast(`Failed: ${failed.map((d) => `${d.channel} (${d.error || "error"})`).join(", ")}`, { type: "error" });
+        failed.forEach((d) =>
+          toast(`${d.channel}: ${d.error || "could not be sent"}`, { type: "error", duration: 9000 })
+        );
       }
       if (!sent.length && !failed.length && skipped.length) {
         toast(
@@ -101,7 +118,17 @@ export default function ReminderPanel({ debt, result, onClose }) {
       }
       await loadReminders();
     } catch (err) {
-      toast(err?.response?.data?.error || "Send failed", { type: "error" });
+      // No server response at all means the request never completed: a timeout,
+      // a dropped connection, or the server restarting mid-send. Say which,
+      // rather than the bare "Send failed" that explained nothing.
+      const served = err?.response?.data?.error;
+      toast(
+        served ||
+          (err?.code === "ECONNABORTED"
+            ? "The request timed out before the server answered. The reminder may still have gone out — check the history below before resending."
+            : "Could not reach the server. Check that it is running, then try again."),
+        { type: "error", duration: 9000 }
+      );
     } finally {
       setSending(null);
     }
@@ -174,6 +201,20 @@ export default function ReminderPanel({ debt, result, onClose }) {
               {!hasEmail ? " · no email on file" : ""}
             </span>
           </div>
+
+          {/* Said BEFORE sending, not after. A reserved domain is accepted by the
+              mail server and bounced later, so the send reports success and the
+              client never hears from you. */}
+          {emailUndeliverable && (
+            <div className="against-note">
+              <TriangleAlert size={15} />
+              <span>
+                <strong>{debt.debtorEmail}</strong> uses a reserved domain, so mail to it is
+                accepted and then bounced. It will report as sent and never arrive. Put a real
+                address on this client before relying on email.
+              </span>
+            </div>
+          )}
         </>
       )}
 

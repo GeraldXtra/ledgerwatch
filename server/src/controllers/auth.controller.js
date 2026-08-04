@@ -3,6 +3,7 @@ const User = require("../models/User");
 const Portfolio = require("../models/Portfolio");
 const signToken = require("../utils/token");
 const publicUser = require("../utils/publicUser");
+const { buildCryptoUpdate } = require("../services/cryptoSettings.service");
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SALT_ROUNDS = 10;
@@ -108,7 +109,7 @@ async function me(req, res) {
  */
 async function updateMe(req, res) {
   try {
-    const { name, companyName, bankDetails, autoSend, notifyPrefs } = req.body || {};
+    const { name, companyName, bankDetails, autoSend, notifyPrefs, crypto } = req.body || {};
     const updates = {};
 
     if (typeof name === "string" && name.trim()) {
@@ -142,9 +143,18 @@ async function updateMe(req, res) {
       };
     }
 
+    // Crypto payment settings. Validated and clamped in one place, because a bad
+    // sweep destination or a confirmation depth of zero costs real money — see
+    // buildCryptoUpdate. It uses dotted paths so one field can be saved without
+    // wiping the derivation counter that lives in the same sub-document.
+    if (crypto && typeof crypto === "object") {
+      Object.assign(updates, buildCryptoUpdate(crypto));
+    }
+
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({
-        error: "Nothing to update (provide name, companyName, bankDetails, and/or autoSend)",
+        error:
+          "Nothing to update (provide name, companyName, bankDetails, autoSend, notifyPrefs and/or crypto)",
       });
     }
 
@@ -155,6 +165,10 @@ async function updateMe(req, res) {
 
     return res.status(200).json({ user: publicUser(user) });
   } catch (err) {
+    // Validation failures carry their own status and a message written for the
+    // user. Reporting "a bad sweep address" as a 500 would be both wrong and
+    // unhelpful.
+    if (err && err.status) return res.status(err.status).json({ error: err.message });
     console.error("updateMe error:", err.message);
     return res.status(500).json({ error: "Update failed" });
   }
