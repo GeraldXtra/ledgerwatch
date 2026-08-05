@@ -118,12 +118,20 @@ async function listTxs(req, res) {
 // POST /api/wallet/txs  -> record a broadcast tx (public data only).
 async function recordTx(req, res) {
   try {
-    const { chainId, hash, from, to, value, symbol, tokenAddress, direction } = req.body || {};
+    const {
+      chainId, hash, from, to, value, symbol, tokenAddress, direction,
+      kind, tokenOut, tokenOutSymbol, amountOut, minAmountOut, feeTier,
+      priceImpactPct, side, alertId,
+    } = req.body || {};
     if (!getChain(chainId)) return res.status(400).json({ error: "Unknown or disabled chain" });
     if (!HASH_RE.test(hash || "")) return res.status(400).json({ error: "Invalid tx hash" });
     if (!ADDRESS_RE.test(from || "") || !ADDRESS_RE.test(to || "")) {
       return res.status(400).json({ error: "Invalid address" });
     }
+    if (tokenOut && !ADDRESS_RE.test(tokenOut)) {
+      return res.status(400).json({ error: "Invalid output token address" });
+    }
+
     const tx = await WalletTx.create({
       userId: req.user._id,
       chainId: Number(chainId),
@@ -135,9 +143,27 @@ async function recordTx(req, res) {
       tokenAddress: tokenAddress || null,
       direction: direction === "in" ? "in" : "out",
       status: "pending",
+      // Swap metadata. Absent for ordinary transfers, which keep behaving exactly
+      // as before.
+      kind: ["swap", "approval"].includes(kind) ? kind : "transfer",
+      tokenOut: tokenOut || null,
+      tokenOutSymbol: tokenOutSymbol || null,
+      amountOut: amountOut != null ? String(amountOut) : null,
+      minAmountOut: minAmountOut != null ? String(minAmountOut) : null,
+      feeTier: feeTier != null ? Number(feeTier) : null,
+      priceImpactPct: priceImpactPct != null ? Number(priceImpactPct) : null,
+      side: ["buy", "sell"].includes(side) ? side : null,
+      alertId: alertId || null,
     });
     return res.status(201).json({ tx });
   } catch (err) {
+    // The unique index on `hash` makes a repeat harmless rather than a duplicate
+    // row: return the existing record so the caller carries on normally.
+    if (err.code === 11000) {
+      const existing = await WalletTx.findOne({ hash: req.body.hash, userId: req.user._id });
+      if (existing) return res.status(200).json({ tx: existing });
+      return res.status(409).json({ error: "That transaction is already recorded." });
+    }
     console.error("wallet recordTx error:", err.message);
     return res.status(500).json({ error: "Failed to record transaction" });
   }

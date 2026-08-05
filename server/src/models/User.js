@@ -78,6 +78,20 @@ const userSchema = new mongoose.Schema({
   tradingMode: { type: String, enum: ["paper", "live"], default: "paper" },
 
   /**
+   * Spending caps for LIVE trading. Absent means the built-in defaults apply
+   * (permissive on testnet, materially stricter on mainnet) — there is no
+   * "unlimited" state, because a live trading path with no ceiling is one
+   * mistyped amount away from draining a wallet.
+   */
+  tradingLimits: {
+    perTrade: { type: Number, default: null },
+    perDay: { type: Number, default: null },
+    perSession: { type: Number, default: null },
+    minNativeFloor: { type: Number, default: null },
+    maxPriceImpactPct: { type: Number, default: null },
+  },
+
+  /**
    * ERC-20s the user added by contract address, per chain. `decimals` is stored
    * as READ FROM THE CONTRACT — never inferred from the symbol, because the same
    * symbol carries different decimals on different chains (USDC is 6 on most, 18

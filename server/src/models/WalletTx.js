@@ -14,9 +14,39 @@ const walletTxSchema = new mongoose.Schema({
   tokenAddress: { type: String, default: null }, // null => native transfer
   direction: { type: String, enum: ["out", "in"], default: "out" },
   status: { type: String, enum: ["pending", "confirmed", "failed"], default: "pending" },
+
+  /**
+   * Live DEX swaps are recorded HERE rather than in a parallel collection, so
+   * they inherit the confirmation reconciliation and per-chain explorer links
+   * that already exist, and appear in wallet history like any other transaction.
+   *
+   * `kind` stays "transfer" for everything written before this existed.
+   */
+  kind: { type: String, enum: ["transfer", "swap", "approval"], default: "transfer" },
+
+  // Swap-only. `value`/`symbol` above carry the INPUT side, so a swap reads as an
+  // ordinary outgoing transfer to anything that does not know about swaps.
+  tokenOut: { type: String, default: null },
+  tokenOutSymbol: { type: String, default: null },
+  amountOut: { type: String, default: null }, // decimal string: token amounts exceed IEEE-754
+  minAmountOut: { type: String, default: null },
+  feeTier: { type: Number, default: null }, // the V3 tier actually routed through
+  priceImpactPct: { type: Number, default: null },
+  side: { type: String, enum: ["buy", "sell"], default: null },
+  // The alert that prompted this, when it came from one, so the timeline runs
+  // from suggestion through to settled trade.
+  alertId: { type: mongoose.Schema.Types.ObjectId, ref: "Alert", default: null },
+
   createdAt: { type: Date, default: Date.now },
 });
 
 walletTxSchema.index({ userId: 1, chainId: 1, createdAt: -1 });
+
+/**
+ * One hash, one row. Database-enforced rather than remembered in process, so a
+ * retry, a double click or two open tabs cannot record the same transaction
+ * twice. Mirrors the guard already on Payment.txHash.
+ */
+walletTxSchema.index({ hash: 1 }, { unique: true });
 
 module.exports = mongoose.model("WalletTx", walletTxSchema);
