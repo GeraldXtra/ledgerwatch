@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
 import {
   Copy,
@@ -7,6 +7,7 @@ import {
   History,
   PlusCircle,
   DownloadCloud,
+  Info,
   RefreshCw,
   Trash2,
   TriangleAlert,
@@ -30,9 +31,19 @@ import {
   claimLegacyWallet,
   discardLegacyWallet,
 } from "./keystore";
-import { fetchChains, fetchTxs, clearAddress, updateTxStatus, saveAddress } from "./walletApi";
+import {
+  fetchChains,
+  fetchTxs,
+  clearAddress,
+  updateTxStatus,
+  saveAddress,
+  saveCustomToken,
+} from "./walletApi";
+import NetworkSwitcher, { rememberChain, recallChain } from "./NetworkSwitcher";
+import MainnetBanner from "./MainnetBanner";
 import CreateWalletModal from "./CreateWalletModal";
 import ImportWalletModal from "./ImportWalletModal";
+import AddTokenModal from "./AddTokenModal";
 import SendForm from "./SendForm";
 import ReceivePanel from "./ReceivePanel";
 import CollectedPanel from "./CollectedPanel";
@@ -49,6 +60,8 @@ function WalletInner() {
   const [address, setAddress] = useState(getStoredAddress());
   const [legacy, setLegacy] = useState(() => getLegacyWallet());
   const [claiming, setClaiming] = useState(false);
+  const [hideZero, setHideZero] = useState(false);
+  const [addTokenOpen, setAddTokenOpen] = useState(false);
   const [subtab, setSubtab] = useState("send");
   const [balances, setBalances] = useState(null);
   const [balLoading, setBalLoading] = useState(false);
@@ -63,6 +76,12 @@ function WalletInner() {
   // Surfaced persistently rather than at the moment of signing.
   const noGas = Boolean(
     balances && balances.some((b) => b.native && Number(b.amount) === 0)
+  );
+
+  // The native tile is never hidden — it pays for everything, so a zero there is
+  // the single most important number on this screen.
+  const visibleBalances = (balances || []).filter(
+    (b) => !hideZero || b.native || Number(b.amount) > 0
   );
 
   // Keystores are scoped per account, so switching account changes which wallet
@@ -83,10 +102,22 @@ function WalletInner() {
       .then((d) => {
         const usable = (d.chains || []).filter((c) => c.testnet || d.enableMainnet);
         setChains(usable);
-        if (usable.length) setChainId((prev) => prev || usable[0].chainId);
+        // Restore the chain chosen earlier this session rather than snapping back
+        // to the first in the list on every reload.
+        if (usable.length) setChainId((prev) => prev || recallChain(usable));
       })
       .catch(() => setChains([]));
   }, []);
+
+  // Curated (verified on-chain) tokens for this chain, plus anything the user
+  // added themselves. Custom entries carry the decimals read from their contract.
+  const chainTokens = useMemo(() => {
+    if (!chain) return [];
+    const custom = (user?.customTokens || [])
+      .filter((t) => t.chainId === chain.chainId)
+      .map((t) => ({ ...t, custom: true }));
+    return [...(chain.tokens || []), ...custom];
+  }, [chain, user?.customTokens]);
 
   const loadBalances = useCallback(async () => {
     if (!address || !chain) return;
@@ -95,13 +126,19 @@ function WalletInner() {
       const provider = getProvider(chain.chainId);
       const native = await provider.getBalance(address);
       const rows = [{ symbol: chain.nativeSymbol, amount: ethers.formatEther(native), native: true }];
-      for (const t of chain.tokens || []) {
+      for (const t of chainTokens) {
         try {
           const c = new ethers.Contract(t.address, ERC20_ABI, provider);
           const bal = await c.balanceOf(address);
-          rows.push({ symbol: t.symbol, amount: ethers.formatUnits(bal, t.decimals), native: false });
+          rows.push({
+            symbol: t.symbol,
+            amount: ethers.formatUnits(bal, t.decimals),
+            native: false,
+            custom: Boolean(t.custom),
+            address: t.address,
+          });
         } catch {
-          rows.push({ symbol: t.symbol, amount: "0", native: false });
+          rows.push({ symbol: t.symbol, amount: "0", native: false, custom: Boolean(t.custom) });
         }
       }
       setBalances(rows);
@@ -110,7 +147,7 @@ function WalletInner() {
     } finally {
       setBalLoading(false);
     }
-  }, [address, chain]);
+  }, [address, chain, chainTokens]);
 
   const loadTxs = useCallback(async () => {
     if (!address || !chain) return;
@@ -184,6 +221,23 @@ function WalletInner() {
       /* the panel stays up; the user can create a wallet instead */
     } finally {
       setClaiming(false);
+    }
+  }
+
+  // Persisted against the account rather than this browser, so the token list
+  // follows the user to another device the way their wallet address does.
+  async function addCustomToken(token) {
+    try {
+      await saveCustomToken(token);
+      if (applyUser && user) {
+        applyUser({ ...user, customTokens: [...(user.customTokens || []), token] });
+      }
+      setAddTokenOpen(false);
+      setBalances(null);
+      loadBalances();
+    } catch (err) {
+      /* the modal stays open; the user can retry or cancel */
+      console.error("add token failed:", err?.response?.data?.error || err.message);
     }
   }
 
@@ -319,31 +373,35 @@ function WalletInner() {
     <>
       <PageHeader
         eyebrow="WALLET"
-        title="Testnet wallet"
+        title={chain && !chain.testnet ? "Wallet" : "Testnet wallet"}
         support="Non-custodial · keys encrypted on this device · you approve every transaction."
       />
+
+      <MainnetBanner chain={chain} />
 
       <Card>
         <div className="wallet-head">
           <div className="wallet-head-left">
-            <span className="testnet-badge">TESTNET ONLY</span>
+            {/* The badge has to follow the chain. A hardcoded "TESTNET ONLY"
+                sitting above a mainnet balance would be the most dangerous
+                label in the app. */}
+            {chain && !chain.testnet ? (
+              <span className="mainnet-badge">MAINNET · REAL FUNDS</span>
+            ) : (
+              <span className="testnet-badge">TESTNET ONLY</span>
+            )}
             <button type="button" className="wallet-address-btn" onClick={copyAddr} title="Copy address">
               <span className="num">{shorten(address)}</span>
               {copied ? <Check size={13} /> : <Copy size={13} />}
             </button>
           </div>
           <div className="wallet-head-right">
-            <label className="chain-switcher">
-              <select
-                value={chainId || ""}
-                onChange={(e) => setChainId(Number(e.target.value))}
-                className="select"
-              >
-                {chains.map((c) => (
-                  <option key={c.chainId} value={c.chainId}>{c.name}</option>
-                ))}
-              </select>
-            </label>
+            <NetworkSwitcher
+              chains={chains}
+              chainId={chainId}
+              address={address}
+              onChange={setChainId}
+            />
             <Button variant="ghost" icon title="Refresh balances" onClick={loadBalances}>
               <RefreshCw size={15} />
             </Button>
@@ -353,11 +411,25 @@ function WalletInner() {
           </div>
         </div>
 
+        <div className="row space-between wallet-token-bar">
+          <label className="toggle-inline">
+            <input
+              type="checkbox"
+              checked={hideZero}
+              onChange={(e) => setHideZero(e.target.checked)}
+            />
+            <span className="muted small">Hide zero balances</span>
+          </label>
+          <Button variant="ghost" onClick={() => setAddTokenOpen(true)}>
+            <PlusCircle size={14} /> Add token
+          </Button>
+        </div>
+
         <div className="wallet-balances">
           {balLoading && !balances ? (
             <SkeletonLines count={2} />
           ) : balances ? (
-            balances.map((b) => (
+            visibleBalances.map((b) => (
               <div key={b.symbol} className={`balance-tile${b.native ? " primary" : ""}`}>
                 <span className="balance-amount num">{Number(b.amount).toLocaleString(undefined, { maximumFractionDigits: 6 })}</span>
                 <span className="balance-symbol">
@@ -400,6 +472,14 @@ function WalletInner() {
             <Droplets size={14} /> Need funds? Open the {chain.name} faucet
           </a>
         )}
+
+        {/* Stated rather than implied. Someone holding Bitcoin or Solana will
+            otherwise reasonably assume this wallet covers them. */}
+        <p className="settings-note">
+          <Info size={15} />
+          This wallet is <strong>EVM only</strong> — Ethereum and chains compatible with it. Bitcoin,
+          Solana, Cosmos and TON use different key derivation and signing and are not supported here.
+        </p>
       </Card>
 
       <Card>
@@ -447,6 +527,16 @@ function WalletInner() {
           {subtab === "history" && <TxHistory txs={txs} chain={chain} onReceive={() => setSubtab("receive")} />}
         </div>
       </Card>
+
+      {addTokenOpen && chain && (
+        <AddTokenModal
+          chain={chain}
+          address={address}
+          existing={chainTokens}
+          onClose={() => setAddTokenOpen(false)}
+          onAdd={addCustomToken}
+        />
+      )}
     </>
   );
 }

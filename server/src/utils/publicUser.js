@@ -17,6 +17,8 @@ function publicUser(user) {
     companyName: u.companyName || "",
     notifyPrefs: u.notifyPrefs || { marketAlerts: true, remindersDue: true, txUpdates: true },
     crypto: cryptoSettings(u.crypto),
+    tradingMode: u.tradingMode || "paper",
+    customTokens: u.customTokens || [],
     createdAt: u.createdAt,
   };
 }
