@@ -14,7 +14,7 @@ const QUICK = [0.25, 0.5, 0.75, 1];
  * `portfolio` live portfolio, for balance/position limits
  * `onSubmit`  ({ action, amount, denom }) => Promise
  */
-export default function TradePanel({ side, alert, portfolio, onClose, onSubmit }) {
+export default function TradePanel({ side, alert, portfolio, mode = "paper", onClose, onSubmit }) {
   const price = Number(alert.priceAtAlert) || 0;
   const holding = (portfolio?.holdings || []).find((h) => h.coinId === alert.coinId);
   const heldQty = holding ? holding.qty : 0;
@@ -88,6 +88,14 @@ export default function TradePanel({ side, alert, portfolio, onClose, onSubmit }
         </h3>
         <span className="muted small num">{usd(price)}</span>
       </div>
+
+      {/* The amount step is identical in both modes. This only says which one is
+          about to happen, so nobody spends real funds thinking it was practice. */}
+      {mode === "live" ? (
+        <span className="mainnet-badge">LIVE · real funds</span>
+      ) : (
+        <span className="pill">Paper trade · simulated funds</span>
+      )}
 
       {/* The agent advises; the human decides. Shown in context, never enforced. */}
       <div className="agent-reasoning">

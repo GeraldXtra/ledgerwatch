@@ -33,6 +33,11 @@ import TradePanel from "./TradePanel";
 import AlertHistory from "./AlertHistory";
 import PortfolioPanel from "./PortfolioPanel";
 import TradingModeToggle from "./TradingModeToggle";
+import LiveSwapModal from "./LiveSwapModal";
+import { tradeability } from "./tradeability";
+import { fetchChains } from "../wallet/walletApi";
+import { getStoredAddress } from "../wallet/keystore";
+import { recallChain } from "../wallet/NetworkSwitcher";
 
 const STARTING_CASH = 1000000;
 
@@ -44,6 +49,12 @@ function MarketWatch() {
   // Paper unless the account has deliberately switched. Server is the authority;
   // this mirrors it so the UI does not have to round-trip on every render.
   const [mode, setMode] = useState(user?.tradingMode === "live" ? "live" : "paper");
+  // Live trading needs a chain and the wallet address; both are inert in paper mode.
+  const [liveChains, setLiveChains] = useState([]);
+  const [liveChainId, setLiveChainId] = useState(null);
+  const [liveSwap, setLiveSwap] = useState(null);
+  const liveChain = liveChains.find((c) => c.chainId === liveChainId) || null;
+  const walletAddress = getStoredAddress();
   const toast = useToast();
   const [watches, setWatches] = useState([]);
   const [alerts, setAlerts] = useState([]);
@@ -107,6 +118,18 @@ function MarketWatch() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Chain list only matters in live mode; the same registry the wallet uses.
+  useEffect(() => {
+    if (mode !== "live" || liveChains.length) return;
+    fetchChains()
+      .then((d) => {
+        const usable = (d.chains || []).filter((c) => c.testnet || d.enableMainnet);
+        setLiveChains(usable);
+        if (usable.length) setLiveChainId((p) => p || recallChain(usable));
+      })
+      .catch(() => setLiveChains([]));
+  }, [mode, liveChains.length]);
 
   /**
    * A foreground push has already been toasted by the shell-level bridge, so this
@@ -228,9 +251,35 @@ function MarketWatch() {
     setTrade({ alert, side });
   }
 
-  // Called by TradePanel once the user has confirmed a specific amount.
+  /**
+   * Called by TradePanel once the user has confirmed a specific amount.
+   *
+   * The amount panel is identical in both modes — this is the ONLY place the two
+   * diverge. Paper posts to the simulated portfolio; live hands off to the swap
+   * modal, which quotes, checks and asks for a signature.
+   */
   async function submitTrade({ action, amount, denom }) {
     const alert = trade.alert;
+
+    if (mode === "live") {
+      const t = tradeability(liveChain, { coinId: alert.coinId, symbol: alert.symbol }, user?.customTokens);
+      if (!t.live) {
+        toast(t.reason, { type: "info", duration: 9000 });
+        return;
+      }
+      // Amount is denominated in the stablecoin for a buy, in the asset for a sell.
+      setLiveSwap({
+        side: action,
+        coin: { coinId: alert.coinId, symbol: alert.symbol },
+        token: t.token,
+        cash: t.cash,
+        amountDisplay: denom === "quote" ? amount : amount,
+        alertId: alert._id,
+      });
+      setTrade(null);
+      return;
+    }
+
     setBusyId(alert._id);
     try {
       const { data } = await http.post(`/api/alerts/${alert._id}/act`, {
@@ -509,8 +558,28 @@ function MarketWatch() {
           side={trade.side}
           alert={trade.alert}
           portfolio={pf}
+          mode={mode}
           onClose={() => setTrade(null)}
           onSubmit={submitTrade}
+        />
+      )}
+
+      {/* Live mode only. The amount is already chosen; this quotes it, runs the
+          preflight checks and takes the signature. */}
+      {liveSwap && liveChain && walletAddress && (
+        <LiveSwapModal
+          chain={liveChain}
+          address={walletAddress}
+          side={liveSwap.side}
+          coin={liveSwap.coin}
+          token={liveSwap.token}
+          cash={liveSwap.cash}
+          amountDisplay={liveSwap.amountDisplay}
+          alertId={liveSwap.alertId}
+          spentToday={0}
+          limitOverrides={user?.tradingLimits}
+          onClose={() => setLiveSwap(null)}
+          onDone={() => loadData()}
         />
       )}
     </>
