@@ -69,6 +69,36 @@ const userSchema = new mongoose.Schema({
     sweepDestination: { type: String, default: null },
     notifyOnDetected: { type: Boolean, default: true },
   },
+
+  /**
+   * Paper vs live trading. PAPER FOR EVERYONE BY DEFAULT — live mode spends real
+   * (testnet) funds through a DEX, so it is opted into deliberately, never
+   * arrived at by accident.
+   */
+  tradingMode: { type: String, enum: ["paper", "live"], default: "paper" },
+
+  /**
+   * ERC-20s the user added by contract address, per chain. `decimals` is stored
+   * as READ FROM THE CONTRACT — never inferred from the symbol, because the same
+   * symbol carries different decimals on different chains (USDC is 6 on most, 18
+   * on BNB Chain) and getting it wrong misreads balances by 10^12.
+   *
+   * Stored server-side rather than in localStorage so the list survives a device
+   * change, matching how the wallet address itself is handled.
+   */
+  customTokens: {
+    type: [
+      {
+        _id: false,
+        chainId: { type: Number, required: true },
+        address: { type: String, required: true },
+        symbol: { type: String, required: true },
+        decimals: { type: Number, required: true },
+      },
+    ],
+    default: [],
+  },
+
   createdAt: { type: Date, default: Date.now },
 });
 

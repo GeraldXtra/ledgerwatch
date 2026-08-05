@@ -25,6 +25,26 @@ export async function recordTx(tx) {
   return data.tx;
 }
 
+/**
+ * Persist a user-added ERC-20. `decimals` must be the value read from the
+ * contract — the server validates the range but cannot know the true value.
+ */
+export async function saveCustomToken({ chainId, address, symbol, decimals }) {
+  const { data } = await http.post("/api/trading/tokens", { chainId, address, symbol, decimals });
+  return data.tokens;
+}
+
+export async function removeCustomToken({ chainId, address }) {
+  const { data } = await http.delete("/api/trading/tokens", { data: { chainId, address } });
+  return data.tokens;
+}
+
+/** Switch between paper and live trading. Server rejects live for the demo account. */
+export async function setTradingMode(mode) {
+  const { data } = await http.patch("/api/trading/mode", { mode });
+  return data.user;
+}
+
 export async function updateTxStatus(id, status) {
   const { data } = await http.patch(`/api/wallet/txs/${id}`, { status });
   return data.tx;

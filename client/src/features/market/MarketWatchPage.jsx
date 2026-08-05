@@ -11,6 +11,7 @@ import {
   Zap,
 } from "lucide-react";
 import http from "../../api/http";
+import { useAuth } from "../../context/AuthContext";
 import {
   Button,
   Card,
@@ -31,6 +32,7 @@ import AlertsList from "./AlertsList";
 import TradePanel from "./TradePanel";
 import AlertHistory from "./AlertHistory";
 import PortfolioPanel from "./PortfolioPanel";
+import TradingModeToggle from "./TradingModeToggle";
 
 const STARTING_CASH = 1000000;
 
@@ -38,6 +40,10 @@ const STARTING_CASH = 1000000;
 const ALLOC_COLORS = ["var(--accent-500)", "var(--accent-400)", "#8FA0B8", "#C7A98F", "#7FB39B", "#B0899E"];
 
 function MarketWatch() {
+  const { user } = useAuth();
+  // Paper unless the account has deliberately switched. Server is the authority;
+  // this mirrors it so the UI does not have to round-trip on every render.
+  const [mode, setMode] = useState(user?.tradingMode === "live" ? "live" : "paper");
   const toast = useToast();
   const [watches, setWatches] = useState([]);
   const [alerts, setAlerts] = useState([]);
@@ -333,7 +339,11 @@ function MarketWatch() {
     <>
       <PageHeader
         title="Market Watch"
-        support="A human-in-the-loop crypto agent: live prices, alerts you approve, and a fully simulated portfolio."
+        support={
+          mode === "live"
+            ? "A human-in-the-loop crypto agent: live prices, alerts you approve, and real swaps you sign yourself."
+            : "A human-in-the-loop crypto agent: live prices, alerts you approve, and a fully simulated portfolio."
+        }
         action={
           <>
             <Button onClick={runPass} loading={running}>
@@ -345,6 +355,8 @@ function MarketWatch() {
           </>
         }
       />
+
+      <TradingModeToggle mode={mode} onChange={setMode} />
 
       {error && <p className="error-text">{error}</p>}
 

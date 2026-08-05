@@ -57,6 +57,7 @@ app.use("/api/alerts", require("./routes/alerts.routes"));
 app.use("/api/portfolio", require("./routes/portfolio.routes"));
 app.use("/api/push", require("./routes/push.routes"));
 app.use("/api/wallet", require("./routes/wallet.routes"));
+app.use("/api/trading", require("./routes/trading.routes"));
 app.use("/api/payment-addresses", require("./routes/paymentAddresses.routes"));
 
 const PORT = process.env.PORT || 5000;

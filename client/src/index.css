@@ -4489,3 +4489,147 @@ input[type="checkbox"] {
   text-transform: none;
   margin-top: 1px;
 }
+
+/* ============================================================
+   NETWORK SWITCHER (3B)
+   Testnets and mainnets are visually separated on purpose — they
+   are one careless click apart otherwise.
+   ============================================================ */
+.net-switcher { position: relative; }
+.net-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.net-trigger:hover { border-color: var(--navy-600); }
+.net-trigger.mainnet {
+  border-color: var(--warn-text);
+  color: var(--warn-text);
+  background: var(--warn-bg);
+}
+.net-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  width: 320px;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: var(--sh-modal);
+}
+.net-group + .net-group { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.net-group.danger { border-radius: 9px; background: var(--warn-bg); padding: 8px; }
+.net-group-head { display: flex; flex-direction: column; gap: 1px; padding: 2px 6px 6px; }
+.net-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.net-item:hover { background: var(--well); }
+.net-item.active { background: var(--navy-50); font-weight: 600; }
+.net-item-name { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.net-item-bal { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.net-dex-chip {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--navy-100);
+  color: var(--navy-700);
+}
+.net-note {
+  margin: 10px 4px 2px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.net-confirm { display: flex; flex-direction: column; gap: 10px; }
+
+/* Mainnet is never implied — it is stated, in the warning tone, persistently. */
+.mainnet-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--warn-text);
+  border-radius: 10px;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.mainnet-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--warn-text);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+/* Token list controls above the balance tiles. */
+.wallet-token-bar { margin-top: 14px; }
+.toggle-inline { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+
+/* ---- Paper vs live trading toggle (3D) ---- */
+.mode-toggle-wrap { display: flex; flex-direction: column; gap: 8px; }
+.mode-toggle {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--well);
+  width: fit-content;
+}
+.mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mode-btn:hover:not(:disabled) { color: var(--ink); }
+.mode-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.mode-btn.active { background: var(--card); color: var(--ink); box-shadow: var(--sh-1); }
+.mode-btn.active.live { color: var(--warn-text); }
+.mode-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.mode-note.danger { color: var(--warn-text); font-weight: 500; }
