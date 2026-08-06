@@ -49,3 +49,38 @@ export async function updateTxStatus(id, status) {
   const { data } = await http.patch(`/api/wallet/txs/${id}`, { status });
   return data.tx;
 }
+
+/**
+ * OPTIONAL extra verification before revealing wallet secrets.
+ *
+ * Only the PROMPTS cross the wire — never an answer hash, and never anything
+ * derived from the wallet itself. The recovery phrase and private key are
+ * decrypted in the browser and are not part of any request here or anywhere.
+ */
+export async function getSecurityQuestions() {
+  const { data } = await http.get("/api/wallet/security");
+  return data;
+}
+
+/** Enable or disable the extra layer. Answers are hashed server-side with bcrypt. */
+export async function saveSecurityQuestions({ enabled, answers }) {
+  const { data } = await http.put("/api/wallet/security", { enabled, answers });
+  return data;
+}
+
+/**
+ * Check the answers. Returns `{ verified }` rather than throwing on a mismatch,
+ * so the caller can show the remaining-attempts message the server sends back.
+ * The rate limit is enforced server-side, which is the only place it holds.
+ */
+export async function verifySecurityAnswers(answers) {
+  try {
+    const { data } = await http.post("/api/wallet/security/verify", { answers });
+    return data;
+  } catch (err) {
+    return {
+      verified: false,
+      error: err?.response?.data?.error || "Could not verify your answers.",
+    };
+  }
+}

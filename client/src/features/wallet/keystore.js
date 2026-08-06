@@ -180,3 +180,85 @@ export async function unlockWallet(password, onProgress) {
   if (!json) throw new Error("No wallet on this device for this account");
   return ethers.Wallet.fromEncryptedJson(json, password, onProgress);
 }
+
+/**
+ * Reveal the wallet's secret material for BACKUP.
+ *
+ * Goes through `unlockWallet` — the same and only decryption path the signing
+ * flow uses. There is deliberately no second way to decrypt a keystore in this
+ * codebase.
+ *
+ * NOTHING HERE TOUCHES THE NETWORK. The phrase and the private key are derived
+ * in this tab, handed to the caller, and are expected to be discarded the moment
+ * the reveal closes. They must never be logged, put in a request body, or
+ * written to storage.
+ *
+ * A wallet imported from a private key has NO mnemonic — that is not a bug or a
+ * missing feature, it is arithmetic: a bare key carries no seed to reconstruct.
+ * `mnemonic` comes back null and the caller offers the key instead.
+ *
+ * Verified against ethers v6: `encrypt()` writes the phrase into the keystore's
+ * `x-ethers.mnemonicCiphertext`, so a wallet created in this app round-trips to
+ * a byte-identical phrase.
+ *
+ * @returns {Promise<{address:string, mnemonic:string|null, privateKey:string}>}
+ */
+export async function revealSecrets(password, onProgress) {
+  const wallet = await unlockWallet(password, onProgress);
+  return {
+    address: wallet.address,
+    mnemonic: wallet.mnemonic ? wallet.mnemonic.phrase : null,
+    privateKey: wallet.privateKey,
+  };
+}
+
+/**
+ * Import from an encrypted keystore JSON plus its password.
+ *
+ * The third accepted form alongside a phrase and a private key. Restoring the
+ * keystore preserves the mnemonic when the original had one, so a wallet backed
+ * up this way can still derive invoice addresses afterwards.
+ */
+export async function importFromKeystore(json, password, onProgress) {
+  const text = typeof json === "string" ? json.trim() : "";
+  if (!text) throw new Error("Paste or upload the keystore JSON file.");
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("That is not valid JSON. Upload the keystore file you downloaded.");
+  }
+  if (!parsed || !parsed.Crypto && !parsed.crypto) {
+    throw new Error("That JSON is not an encrypted keystore — it has no Crypto section.");
+  }
+  const wallet = await ethers.Wallet.fromEncryptedJson(text, password, onProgress);
+  return { wallet, address: wallet.address };
+}
+
+/**
+ * Has this wallet's phrase ever been acknowledged as written down?
+ *
+ * Stored per account and per wallet address, so importing a different wallet
+ * asks again rather than inheriting the previous one's answer.
+ */
+const BACKUP_KEY = "ledgerwatch.wallet.backedUp";
+
+export function isBackedUp() {
+  const address = getStoredAddress();
+  if (!address) return true; // no wallet, nothing to warn about
+  try {
+    return localStorage.getItem(`${BACKUP_KEY}.${address.toLowerCase()}`) === "1";
+  } catch {
+    return true; // storage unavailable — do not nag about something unreadable
+  }
+}
+
+export function markBackedUp() {
+  const address = getStoredAddress();
+  if (!address) return;
+  try {
+    localStorage.setItem(`${BACKUP_KEY}.${address.toLowerCase()}`, "1");
+  } catch {
+    /* storage unavailable — the reminder simply reappears, which is harmless */
+  }
+}

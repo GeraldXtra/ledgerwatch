@@ -3799,6 +3799,154 @@ input[type="checkbox"] {
   font-weight: 600;
 }
 
+/* ---- Wallet backup and secret reveal ---------------------------------------
+   The most dangerous screen in the app: what it shows hands over total control
+   of the funds. Styled to slow the user down rather than to look slick. */
+
+.reveal-warning {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--neg-bg);
+  border: 1px solid #f2c9c3;
+  color: var(--neg-text);
+}
+.reveal-warning.warn {
+  background: var(--warn-bg);
+  border-color: var(--gold-200);
+  color: var(--warn-text);
+}
+.reveal-warning svg { flex: none; margin-top: 2px; }
+.reveal-warn-lead { margin: 0 0 8px; font-size: 14px; font-weight: 700; }
+.reveal-warn-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.65; }
+.reveal-warn-list li { margin-bottom: 4px; }
+
+/* The concealed state. A full-size target, because revealing must be a
+   deliberate act and never something brushed by accident. */
+.reveal-cover {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 168px;
+  padding: 24px;
+  border-radius: 12px;
+  border: 1px dashed var(--border);
+  background: var(--well);
+  color: var(--muted);
+  cursor: pointer;
+  text-align: center;
+  font: inherit;
+}
+.reveal-cover:hover { border-color: var(--navy-100); background: var(--navy-50); }
+.reveal-cover-title { font-size: 14px; font-weight: 650; color: var(--ink); }
+
+/* Numbered grid. Order is part of the secret, so the numbers are not decoration. */
+.phrase-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 14px;
+  list-style: none;
+  border-radius: 12px;
+  background: var(--well);
+  border: 1px solid var(--border);
+  counter-reset: none;
+}
+@media (max-width: 520px) {
+  .phrase-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.phrase-word {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  /* A phrase that wraps mid-word is a phrase transcribed wrong. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.phrase-num {
+  flex: none;
+  min-width: 18px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: right;
+}
+
+.reveal-key {
+  display: block;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--well);
+  border: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink);
+  word-break: break-all;
+}
+
+.backup-options { display: flex; flex-direction: column; gap: 10px; }
+.backup-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--well);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.backup-option:hover { border-color: var(--navy-100); background: var(--navy-50); }
+.backup-option-title {
+  display: block;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+
+/* Sits above the balances, because a wallet with no backup is a more urgent
+   fact than what is currently in it. */
+.backup-reminder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 13px 16px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  background: var(--warn-bg);
+  border: 1px solid var(--gold-200);
+  color: var(--warn-text);
+}
+.backup-reminder svg { flex: none; }
+.backup-reminder strong { display: block; font-size: 14px; margin-bottom: 2px; }
+.backup-reminder .muted { color: var(--warn-text); opacity: 0.85; }
+
+.security-questions {
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--well);
+}
+
 /* ---- Live portfolio states -------------------------------------------------
    Live mode must never fall back to a paper figure, so every failure and empty
    case gets a designed answer instead of a blank or a zero. */

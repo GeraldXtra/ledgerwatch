@@ -2,7 +2,12 @@ import { useState } from "react";
 import { ShieldCheck, X } from "lucide-react";
 import { Button, Field, Input, Segmented } from "../../components/ui";
 import { Modal } from "../../components/ui";
-import { importFromMnemonic, importFromPrivateKey, encryptAndStore } from "./keystore";
+import {
+  importFromMnemonic,
+  importFromPrivateKey,
+  importFromKeystore,
+  encryptAndStore,
+} from "./keystore";
 import { saveAddress } from "./walletApi";
 
 /**
@@ -10,7 +15,7 @@ import { saveAddress } from "./walletApi";
  * with a password and store only the ciphertext (same guarantee as create).
  */
 export default function ImportWalletModal({ onClose, onDone }) {
-  const [mode, setMode] = useState("phrase"); // phrase | key
+  const [mode, setMode] = useState("phrase"); // phrase | key | keystore
   const [secret, setSecret] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -21,24 +26,67 @@ export default function ImportWalletModal({ onClose, onDone }) {
   async function submit(e) {
     e.preventDefault();
     setError("");
-    if (!secret.trim()) return setError("Enter your recovery phrase or private key.");
-    if (password.length < 8) return setError("Use at least 8 characters.");
-    if (password !== confirm) return setError("Passwords do not match.");
+    if (!secret.trim()) {
+      return setError(
+        mode === "keystore"
+          ? "Upload or paste your keystore JSON file."
+          : "Enter your recovery phrase or private key."
+      );
+    }
+    if (!password) return setError("Enter the password.");
+    /**
+     * A keystore already HAS a password — the one it was encrypted with. Asking
+     * the user to invent a new one and confirm it would be nonsense, and getting
+     * it wrong would produce a file they cannot open. So the confirm step, and
+     * the minimum length, apply only when a NEW encryption password is being set.
+     */
+    if (mode !== "keystore") {
+      if (password.length < 8) return setError("Use at least 8 characters.");
+      if (password !== confirm) return setError("Passwords do not match.");
+    }
 
     setBusy(true);
     try {
-      const { wallet, address } =
-        mode === "phrase" ? importFromMnemonic(secret) : importFromPrivateKey(secret);
+      let wallet;
+      let address;
+      if (mode === "keystore") {
+        // Decrypting here also PROVES the password is right before anything is
+        // stored — an imported keystore that cannot be opened is worse than a
+        // failed import, because it looks like a working wallet.
+        ({ wallet, address } = await importFromKeystore(secret, password, (p) =>
+          setProgress(Math.round(p * 100))
+        ));
+      } else {
+        ({ wallet, address } =
+          mode === "phrase" ? importFromMnemonic(secret) : importFromPrivateKey(secret));
+      }
       await encryptAndStore(wallet, password, (p) => setProgress(Math.round(p * 100)));
       await saveAddress(address);
       onDone(address);
     } catch (err) {
+      const msg = (err && (err.shortMessage || err.message)) || "";
       setError(
         err?.response?.data?.error ||
-          (mode === "phrase" ? "Invalid recovery phrase." : "Invalid private key.")
+          (mode === "keystore"
+            ? /password|decrypt|invalid/i.test(msg)
+              ? "That password does not open this keystore file."
+              : msg || "That is not a valid keystore file."
+            : mode === "phrase"
+              ? "Invalid recovery phrase."
+              : "Invalid private key.")
       );
       setBusy(false);
     }
+  }
+
+  /** Read an uploaded .json keystore into the same field a paste would fill. */
+  function onFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setSecret(String(reader.result || ""));
+    reader.onerror = () => setError("Could not read that file.");
+    reader.readAsText(file);
   }
 
   return (
@@ -62,21 +110,51 @@ export default function ImportWalletModal({ onClose, onDone }) {
           options={[
             { id: "phrase", label: "Recovery phrase" },
             { id: "key", label: "Private key" },
+            { id: "keystore", label: "Keystore file" },
           ]}
         />
-        <Field label={mode === "phrase" ? "12 or 24-word recovery phrase" : "Private key (0x…)"}>
+
+        {mode === "keystore" && (
+          <div className="stack-sm">
+            <p className="muted small" style={{ margin: 0 }}>
+              The encrypted JSON you downloaded from Settings → Wallet backup. It opens with the
+              password it was created with. Importing it keeps the recovery phrase, so this wallet
+              can still derive invoice payment addresses afterwards.
+            </p>
+            <input type="file" accept="application/json,.json" onChange={onFile} className="input" />
+          </div>
+        )}
+
+        <Field
+          label={
+            mode === "phrase"
+              ? "12 or 24-word recovery phrase"
+              : mode === "key"
+                ? "Private key (0x…)"
+                : "Keystore JSON"
+          }
+        >
           <textarea
             className="input"
-            rows={3}
+            rows={mode === "keystore" ? 5 : 3}
             value={secret}
             onChange={(e) => setSecret(e.target.value)}
-            placeholder={mode === "phrase" ? "word1 word2 word3 …" : "0x…"}
+            placeholder={
+              mode === "phrase"
+                ? "word1 word2 word3 …"
+                : mode === "key"
+                  ? "0x…"
+                  : '{"address":"…","crypto":{…}}'
+            }
             autoFocus
             style={{ resize: "vertical", fontFamily: "inherit" }}
           />
         </Field>
-        <div className="grid2">
-          <Field label="Password">
+        {/* A keystore brings its own password, so there is nothing to confirm —
+            asking would invite the user to "set" a password the file does not
+            have and then wonder why it will not open. */}
+        <div className={mode === "keystore" ? "" : "grid2"}>
+          <Field label={mode === "keystore" ? "Keystore password" : "Password"}>
             <Input
               type="password"
               value={password}
@@ -84,14 +162,16 @@ export default function ImportWalletModal({ onClose, onDone }) {
               required
             />
           </Field>
-          <Field label="Confirm password">
-            <Input
-              type="password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              required
-            />
-          </Field>
+          {mode !== "keystore" && (
+            <Field label="Confirm password">
+              <Input
+                type="password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                required
+              />
+            </Field>
+          )}
         </div>
         {busy && progress > 0 && (
           <div className="encrypt-progress">

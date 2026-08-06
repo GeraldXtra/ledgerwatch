@@ -113,6 +113,38 @@ const userSchema = new mongoose.Schema({
     default: [],
   },
 
+  /**
+   * OPTIONAL extra verification before the wallet reveals its recovery phrase or
+   * private key.
+   *
+   * Explicitly NOT a password recovery mechanism. This wallet is
+   * non-custodial: the server has never seen the wallet password and cannot
+   * reset it. Answering these questions proves nothing about who you are to the
+   * key — it only adds a second thing an attacker at an unlocked machine must
+   * also know. The password remains the primary and indispensable gate.
+   *
+   * Answers are bcrypt hashed, never stored or logged in plaintext, and the
+   * prompts are returned without them.
+   */
+  walletSecurity: {
+    enabled: { type: Boolean, default: false },
+    questions: {
+      type: [
+        {
+          _id: false,
+          id: { type: String, required: true },
+          prompt: { type: String, required: true },
+          answerHash: { type: String, required: true },
+        },
+      ],
+      default: [],
+    },
+    // Server-side throttle state. A client-side counter is decorative — anyone
+    // with devtools skips it — so the limit that matters lives here.
+    failedAttempts: { type: Number, default: 0 },
+    lockedUntil: { type: Date, default: null },
+  },
+
   customTokens: {
     type: [
       {
