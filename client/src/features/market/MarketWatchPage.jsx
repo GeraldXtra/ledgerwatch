@@ -325,6 +325,22 @@ function MarketWatch() {
     await http.patch(`/api/watches/${watch._id}`, payload);
     await loadData();
   }
+  /**
+   * Which tokens a live trade would actually move for the open alert: the
+   * stablecoin spent on a buy, the asset sold on a sell. Resolved from the same
+   * `tradeability` helper the execution path uses, so the balance shown in the
+   * panel is for the token that will really be debited.
+   */
+  const tradeTokens = useMemo(() => {
+    if (mode !== "live" || !trade || !liveChain) return { token: null, cash: null };
+    const t = tradeability(
+      liveChain,
+      { coinId: trade.alert.coinId, symbol: trade.alert.symbol },
+      user?.customTokens
+    );
+    return { token: t.token || null, cash: t.cash || null };
+  }, [mode, trade, liveChain, user?.customTokens]);
+
   // Opens the trade panel; nothing executes here. The user sets the amount and
   // confirms inside the panel.
   function openTrade(alert, side) {
@@ -731,8 +747,15 @@ function MarketWatch() {
         <TradePanel
           side={trade.side}
           alert={trade.alert}
-          portfolio={pf}
+          /* NULL in live mode. Simulated money must never size a real trade —
+             this panel used to receive the paper portfolio in both modes, so a
+             live buy was bounded by the $1,000,000 paper cash. */
+          portfolio={mode === "live" ? null : pf}
           mode={mode}
+          chain={liveChain}
+          address={walletAddress}
+          token={tradeTokens.token}
+          cashToken={tradeTokens.cash}
           onClose={() => setTrade(null)}
           onSubmit={submitTrade}
         />

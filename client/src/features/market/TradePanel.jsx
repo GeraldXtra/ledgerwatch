@@ -1,6 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ethers } from "ethers";
 import { AlertTriangle, ArrowLeft, Lightbulb, TrendingDown, TrendingUp } from "lucide-react";
 import { Button, Field, Input, Modal } from "../../components/ui";
+import { getProvider, ERC20_ABI, rpcErrorReason } from "../wallet/provider";
 import { usd } from "./format";
 
 const QUICK = [0.25, 0.5, 0.75, 1];
@@ -11,18 +13,103 @@ const QUICK = [0.25, 0.5, 0.75, 1];
  *
  * `side`      "buy" | "sell" (chosen by the user before opening this)
  * `alert`     the alert being acted on
- * `portfolio` live portfolio, for balance/position limits
+ * `portfolio` PAPER portfolio, for balance/position limits. Null in live mode —
+ *              simulated money must never bound a real trade.
+ * `chain`/`address`/`token`/`cashToken` live mode only: what to read on chain.
  * `onSubmit`  ({ action, amount, denom }) => Promise
  */
-export default function TradePanel({ side, alert, portfolio, mode = "paper", onClose, onSubmit }) {
+export default function TradePanel({
+  side,
+  alert,
+  portfolio,
+  mode = "paper",
+  chain = null,
+  address = null,
+  token = null,
+  cashToken = null,
+  onClose,
+  onSubmit,
+}) {
+  const isLive = mode === "live";
   const price = Number(alert.priceAtAlert) || 0;
+
+  /**
+   * REAL on-chain balance, live mode only.
+   *
+   * This panel used to take the paper portfolio in BOTH modes, so a live trade
+   * was sized against the simulated $1,000,000 — the user picked an amount they
+   * did not have, and only found out at the signing step. Buying spends the
+   * stablecoin; selling spends the asset, so the relevant token differs by side.
+   *
+   * Goes through `getProvider`, the same proxied path as every other balance
+   * read, so it inherits the endpoint fallback, timeout and concurrency cap.
+   */
+  const spendToken = side === "buy" ? cashToken : token;
+  const [live, setLive] = useState({ loading: isLive, balance: null, error: "" });
+
+  useEffect(() => {
+    if (!isLive || !chain || !address || !spendToken) {
+      setLive({ loading: false, balance: null, error: "" });
+      return undefined;
+    }
+    let alive = true;
+    setLive({ loading: true, balance: null, error: "" });
+    (async () => {
+      try {
+        const c = new ethers.Contract(spendToken.address, ERC20_ABI, getProvider(chain.chainId));
+        const raw = await c.balanceOf(address);
+        if (alive) {
+          setLive({
+            loading: false,
+            balance: Number(ethers.formatUnits(raw, spendToken.decimals)),
+            error: "",
+          });
+        }
+      } catch (err) {
+        // Unknown, NOT zero. A zero here would silently cap the trade at nothing
+        // and read as an empty wallet.
+        if (alive) {
+          setLive({
+            loading: false,
+            balance: null,
+            error: rpcErrorReason(err) || "balance could not be read",
+          });
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [isLive, chain, address, spendToken]);
+
   const holding = (portfolio?.holdings || []).find((h) => h.coinId === alert.coinId);
   const heldQty = holding ? holding.qty : 0;
   const cash = portfolio?.cashBalance || 0;
 
-  // The ceiling for this side: cash to spend on a buy, tokens held on a sell.
-  const maxQuote = side === "buy" ? cash : heldQty * price;
-  const maxToken = side === "buy" ? (price > 0 ? cash / price : 0) : heldQty;
+  /**
+   * The ceiling for this side. In live mode it comes from the chain; when that
+   * read failed the ceiling is 0 so no maximum is offered — better to withhold
+   * the shortcut than to suggest an amount that may not exist.
+   */
+  const liveBal = live.balance;
+  const maxQuote = isLive
+    ? side === "buy"
+      ? liveBal || 0
+      : (liveBal || 0) * price
+    : side === "buy"
+      ? cash
+      : heldQty * price;
+  const maxToken = isLive
+    ? side === "buy"
+      ? price > 0
+        ? (liveBal || 0) / price
+        : 0
+      : liveBal || 0
+    : side === "buy"
+      ? price > 0
+        ? cash / price
+        : 0
+      : heldQty;
 
   const [denom, setDenom] = useState(side === "buy" ? "quote" : "token");
   const [raw, setRaw] = useState("");
@@ -158,16 +245,41 @@ export default function TradePanel({ side, alert, portfolio, mode = "paper", onC
           </Field>
 
           <div className="row wrap">
-            {QUICK.map((p) => (
-              <Button key={p} size="sm" onClick={() => setPct(p)}>
-                {p === 1 ? "MAX" : `${p * 100}%`}
-              </Button>
-            ))}
+            {/* The percentage shortcuts are percentages OF THE BALANCE, so they
+                are withheld when the balance is unknown rather than computed
+                from a zero that only means "we could not read it". */}
+            {(!isLive || live.balance != null) &&
+              QUICK.map((p) => (
+                <Button key={p} size="sm" onClick={() => setPct(p)}>
+                  {p === 1 ? "MAX" : `${p * 100}%`}
+                </Button>
+              ))}
             <span className="muted small" style={{ marginLeft: "auto" }}>
-              Available:{" "}
-              <span className="num">
-                {side === "buy" ? usd(cash) : `${heldQty.toFixed(6)} ${alert.symbol}`}
-              </span>
+              {isLive ? (
+                live.loading ? (
+                  <>Reading your balance on {chain ? chain.name : "chain"}…</>
+                ) : live.error ? (
+                  /* Never a number we did not read, and never the paper figure. */
+                  <span className="value-neg">Balance unavailable: {live.error}</span>
+                ) : (
+                  <>
+                    In your wallet:{" "}
+                    <span className="num">
+                      {Number(live.balance || 0).toLocaleString(undefined, {
+                        maximumFractionDigits: 6,
+                      })}{" "}
+                      {spendToken ? spendToken.symbol : ""}
+                    </span>
+                  </>
+                )
+              ) : (
+                <>
+                  Available:{" "}
+                  <span className="num">
+                    {side === "buy" ? usd(cash) : `${heldQty.toFixed(6)} ${alert.symbol}`}
+                  </span>
+                </>
+              )}
             </span>
           </div>
 
