@@ -12,6 +12,7 @@ const {
   withDerived,
   recomputeDebtStatus,
 } = require("../services/receivables.service");
+const { resyncActivePaymentAddress } = require("../services/paymentAddress.service");
 
 // ---- validation helpers ---------------------------------------------------
 
@@ -221,6 +222,9 @@ async function markPaid(req, res) {
     }
 
     const totalPaid = await recomputeDebtStatus(debt); // sets paid + cancels reminders
+    // Force-settling closes any active crypto address, so it stops quoting an
+    // amount for an invoice that is already paid.
+    await resyncActivePaymentAddress(debt._id);
     return res.json({ debt: withDerived(debt, totalPaid) });
   } catch (err) {
     console.error("markPaid error:", err.message);

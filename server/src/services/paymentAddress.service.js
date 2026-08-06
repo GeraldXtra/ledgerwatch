@@ -84,6 +84,49 @@ function usdcForNgn(ngnAmount, ngnPerUsd) {
 }
 
 /**
+ * Which stablecoin this address will accept.
+ *
+ * FROM `chain.stables`, NEVER `chain.tokens`. `tokens` also carries the wrapped
+ * native (WETH), and offering that as an invoice currency would be wrong twice
+ * over: it is volatile, and every naira conversion here treats one token as
+ * exactly one US dollar. An invoice quoted in WETH at a 1:1 USD rate would be
+ * off by a factor of thousands.
+ *
+ * No symbol given means the chain's first stablecoin, so existing callers keep
+ * working unchanged.
+ *
+ * On the currently enabled TESTNETS this offers USDC alone, because Tether has
+ * never deployed an official USDT to any of them — the registry records that
+ * explicitly. Inventing an address to make a second option appear would risk
+ * sending real money somewhere unrecoverable, so the list stays honest and
+ * simply grows on its own when chains with a verified USDT are enabled.
+ */
+function pickStablecoin(chain, symbol) {
+  const stables = chain.stables || [];
+  if (!stables.length) throw httpError(400, `No stablecoin configured for ${chain.name}`);
+  if (!symbol) return stables[0];
+
+  const found = stables.find((t) => t.symbol.toLowerCase() === String(symbol).toLowerCase());
+  if (!found) {
+    // Names what IS available rather than failing blankly.
+    throw httpError(
+      400,
+      `${symbol} is not available on ${chain.name}. Accepted here: ${stables
+        .map((t) => t.symbol)
+        .join(", ")}.`
+    );
+  }
+  return found;
+}
+
+/** The stablecoins an invoice can be issued in, for a chain. */
+function stablecoinsFor(chainId) {
+  const chain = getChain(chainId);
+  if (!chain) return [];
+  return (chain.stables || []).map((t) => ({ symbol: t.symbol, name: t.name, decimals: t.decimals }));
+}
+
+/**
  * Read-only preview of what issuing an address would ask for.
  *
  * Exists so the confirmation screen can show the real balance, USDC amount, rate
@@ -94,12 +137,11 @@ function usdcForNgn(ngnAmount, ngnPerUsd) {
  *
  * Deliberately does not reserve anything and does not write.
  */
-async function quoteForInvoice({ userId, debtId, chainId }) {
+async function quoteForInvoice({ userId, debtId, chainId, tokenSymbol }) {
   const chain = getChain(chainId);
   if (!chain) throw httpError(400, "Unknown or disabled chain");
 
-  const token = (chain.tokens || [])[0];
-  if (!token) throw httpError(400, `No stablecoin configured for ${chain.name}`);
+  const token = pickStablecoin(chain, tokenSymbol);
 
   const debt = await Debt.findOne({ _id: debtId, userId });
   if (!debt) throw httpError(404, "Invoice not found");
@@ -135,12 +177,11 @@ async function quoteForInvoice({ userId, debtId, chainId }) {
  * never sees a key or a seed. This function owns the index allocation, the rate
  * snapshot and the expiry, and validates that the caller owns the invoice.
  */
-async function issueAddress({ userId, debtId, chainId, address, derivationIndex }) {
+async function issueAddress({ userId, debtId, chainId, address, derivationIndex, tokenSymbol }) {
   const chain = getChain(chainId);
   if (!chain) throw httpError(400, "Unknown or disabled chain");
 
-  const token = (chain.tokens || [])[0];
-  if (!token) throw httpError(400, `No stablecoin configured for ${chain.name}`);
+  const token = pickStablecoin(chain, tokenSymbol);
 
   const debt = await Debt.findOne({ _id: debtId, userId });
   if (!debt) throw httpError(404, "Invoice not found");
@@ -172,6 +213,36 @@ async function issueAddress({ userId, debtId, chainId, address, derivationIndex 
   const user = await User.findById(userId).select("crypto");
   const hours = Math.min(720, Math.max(1, (user?.crypto?.expiryHours) || 72));
 
+  /**
+   * DECIMALS READ FROM THE CONTRACT, not trusted from config.
+   *
+   * The same symbol carries different decimals on different chains — USDC is 6
+   * almost everywhere but 18 on BNB Chain, and USDT likewise. Getting it wrong
+   * misreads every amount by a factor of 10^12, which is the classic and very
+   * expensive version of this bug. Falls back to the configured value if the
+   * call fails, and the watcher re-reads it on every scan regardless.
+   */
+  let decimals = token.decimals;
+  try {
+    // eslint-disable-next-line global-require
+    const { rpcCall } = require("./rpc.service");
+    const res = await rpcCall(chain, "eth_call", [{ to: token.address, data: "0x313ce567" }, "latest"]);
+    if (res && res !== "0x") {
+      const onChain = parseInt(res, 16);
+      if (Number.isInteger(onChain) && onChain >= 0 && onChain <= 36) {
+        if (onChain !== token.decimals) {
+          console.warn(
+            `[paymentAddress] ${token.symbol} on ${chain.name} reports ${onChain} decimals, ` +
+              `config says ${token.decimals}. Using the contract.`
+          );
+        }
+        decimals = onChain;
+      }
+    }
+  } catch (err) {
+    console.warn(`[paymentAddress] could not read ${token.symbol} decimals: ${err.message}`);
+  }
+
   const record = await PaymentAddress.create({
     userId,
     debtId,
@@ -180,7 +251,7 @@ async function issueAddress({ userId, debtId, chainId, address, derivationIndex 
     address,
     tokenSymbol: token.symbol,
     tokenContract: token.address,
-    tokenDecimals: token.decimals, // provisional; the watcher reads it on chain
+    tokenDecimals: decimals,
     invoiceBalanceNgn: balance,
     expectedUsdc: usdcForNgn(balance, rate),
     ngnPerUsd: rate,
@@ -194,4 +265,93 @@ async function issueAddress({ userId, debtId, chainId, address, derivationIndex 
   return { paymentAddress: record, chain, rateStale: stale };
 }
 
-module.exports = { allocateIndex, issueAddress, getNgnRate, usdcForNgn, quoteForInvoice };
+/**
+ * Settlement tolerance, shared with the watch pass. A payer within this fraction
+ * of the asked amount has paid in full; it absorbs rounding and fee dust.
+ */
+const TOLERANCE = Number(process.env.USDC_SETTLEMENT_TOLERANCE || 0.005);
+
+/**
+ * RESTATE WHAT AN ACTIVE PAYMENT ADDRESS IS STILL ASKING FOR.
+ *
+ * Call this after ANY change to what an invoice owes — a bank payment recorded,
+ * a payment deleted, an invoice force-marked paid, or a crypto part-payment.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * The address stores `expectedUsdc`, computed when it was issued. Only the crypto
+ * settlement path ever updated it. So an invoice for ₦100,000 quoting 60 USDC
+ * still quoted 60 USDC after ₦50,000 arrived by bank transfer — the debtor would
+ * pay roughly double, and `fullyPaid` was being decided against that stale
+ * figure. It also made the reminder look stale: the reminder body recomposes
+ * correctly every time, but the crypto amount inside it is read from here.
+ *
+ * THE RATE NEVER MOVES
+ * --------------------
+ * Recomputed at the address's OWN stored `ngnPerUsd` snapshot, never a live rate.
+ * The payer was quoted at that rate; requoting them as the naira moves would mean
+ * someone who paid exactly what was asked could still be shown as owing money.
+ *
+ * Never throws — the ledger is already correct by the time this runs, and a
+ * failure to restate a quote must not undo a recorded payment.
+ *
+ * @returns {Promise<{updated:boolean, expectedUsdc?:number, remainingNgn?:number, closed?:boolean}>}
+ */
+async function resyncActivePaymentAddress(debtId) {
+  try {
+    // eslint-disable-next-line global-require
+    const PaymentAddress = require("../models/PaymentAddress");
+    // eslint-disable-next-line global-require
+    const Payment = require("../models/Payment");
+    // eslint-disable-next-line global-require
+    const Debt = require("../models/Debt");
+
+    const pa = await PaymentAddress.findOne({ debtId, status: "active" });
+    if (!pa) return { updated: false };
+
+    const debt = await Debt.findById(debtId);
+    if (!debt) return { updated: false };
+
+    // COMBINED total across every method — bank, cash, crypto, manual. The whole
+    // point is that one method's payment changes what the other must ask for.
+    const rows = await Payment.aggregate([
+      { $match: { debtId: pa.debtId } },
+      { $group: { _id: null, paid: { $sum: "$amount" } } },
+    ]);
+    const paid = rows.length ? rows[0].paid : 0;
+    const remainingNgn = Math.max(0, (debt.amount || 0) - paid);
+
+    // Settled within tolerance: stop quoting entirely rather than asking for a
+    // few kobo. Marked `paid` so the watcher stops scanning it and the UI stops
+    // showing an amount due.
+    if (remainingNgn <= (debt.amount || 0) * TOLERANCE || remainingNgn <= 0) {
+      pa.expectedUsdc = 0;
+      pa.status = "paid";
+      await pa.save();
+      return { updated: true, expectedUsdc: 0, remainingNgn: 0, closed: true };
+    }
+
+    const expectedUsdc = usdcForNgn(remainingNgn, pa.ngnPerUsd);
+    if (expectedUsdc === pa.expectedUsdc) return { updated: false, expectedUsdc, remainingNgn };
+
+    pa.expectedUsdc = expectedUsdc;
+    pa.invoiceBalanceNgn = remainingNgn;
+    await pa.save();
+    return { updated: true, expectedUsdc, remainingNgn, closed: false };
+  } catch (err) {
+    console.error("[paymentAddress] resync failed:", err.message);
+    return { updated: false };
+  }
+}
+
+module.exports = {
+  allocateIndex,
+  issueAddress,
+  getNgnRate,
+  usdcForNgn,
+  quoteForInvoice,
+  resyncActivePaymentAddress,
+  pickStablecoin,
+  stablecoinsFor,
+  TOLERANCE,
+};

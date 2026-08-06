@@ -8,7 +8,8 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "seed:demo": "node src/seed/seed.js",
-    "dedupe-alerts": "node src/scripts/dedupe-alerts.js"
+    "dedupe-alerts": "node src/scripts/dedupe-alerts.js",
+    "lint": "eslint src"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
@@ -24,5 +25,10 @@
     "qrcode": "^1.5.4",
     "twilio": "^6.0.2",
     "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^17.9.0"
   }
 }

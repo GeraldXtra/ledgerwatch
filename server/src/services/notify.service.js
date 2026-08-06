@@ -269,23 +269,47 @@ async function sendEmail(to, subject, html, opts = {}) {
  */
 let logoAttachment;
 function getLogoAttachment() {
-  if (logoAttachment !== undefined) return logoAttachment;
-  try {
-    // eslint-disable-next-line global-require
-    const fs = require("fs");
-    // eslint-disable-next-line global-require
-    const path = require("path");
-    const file = path.resolve(__dirname, "../../../client/public/icon-192.png");
-    logoAttachment = {
-      filename: "ledgerwatch.png",
-      content: fs.readFileSync(file),
-      cid: "ledgerwatch-logo",
-      contentDisposition: "inline",
-    };
-  } catch {
-    logoAttachment = null;
+  // Only a SUCCESSFUL read is cached. The previous version cached the failure
+  // too and did so silently, so a single bad read — a different working
+  // directory at boot, a file briefly locked by a sync client, this repo living
+  // in OneDrive — meant every email for the entire life of the process went out
+  // with no logo, and nothing anywhere said why. A retry costs one small file
+  // read.
+  if (logoAttachment) return logoAttachment;
+
+  const candidates = [
+    // Normal layout: server/src/services -> repo root -> client/public
+    require("path").resolve(__dirname, "../../../client/public/icon-192.png"),
+    // Deployed layouts where the client is built alongside the server.
+    require("path").resolve(process.cwd(), "../client/public/icon-192.png"),
+    require("path").resolve(process.cwd(), "client/public/icon-192.png"),
+    require("path").resolve(process.cwd(), "public/icon-192.png"),
+  ];
+
+  // eslint-disable-next-line global-require
+  const fs = require("fs");
+  for (const file of candidates) {
+    try {
+      const content = fs.readFileSync(file);
+      if (content && content.length > 0) {
+        logoAttachment = {
+          filename: "ledgerwatch.png",
+          content,
+          cid: "ledgerwatch-logo",
+          contentDisposition: "inline",
+        };
+        return logoAttachment;
+      }
+    } catch {
+      // Try the next candidate path.
+    }
   }
-  return logoAttachment;
+
+  // Says so, every time, rather than failing silently forever.
+  console.warn(
+    `[email] logo not found — emails will send without it. Looked in: ${candidates.join(" | ")}`
+  );
+  return null;
 }
 
 /**

@@ -3791,6 +3791,14 @@ input[type="checkbox"] {
   color: var(--warn-text);
 }
 
+/* How far today's rate has moved from the one this invoice was quoted at. Muted
+   on purpose: it is information, not a problem — the invoice still settles at
+   its own snapshot rate, which is the whole point of taking one. */
+.quote-sub.rate-drift {
+  color: var(--warn-text);
+  font-weight: 600;
+}
+
 /* ---- Live portfolio states -------------------------------------------------
    Live mode must never fall back to a paper figure, so every failure and empty
    case gets a designed answer instead of a blank or a zero. */

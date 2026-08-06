@@ -32,6 +32,7 @@ function ngn(amount) {
 function buildPaymentReceiptEmail({
   businessName,
   debtorName,
+  method = "crypto",
   amountUsdc,
   tokenSymbol,
   creditNgn,
@@ -40,25 +41,53 @@ function buildPaymentReceiptEmail({
   fullyPaid,
   isLate,
   remainingNgn,
+  // Partial payments only: what is STILL needed, recalculated from the new
+  // balance at the original snapshot rate, plus where to send it. Repeated here
+  // so the payer never has to dig out the first email to finish paying.
+  stillOwedToken,
+  stillOwedSymbol,
+  payToAddress,
+  payToChainName,
   hasLogo,
 }) {
   const supplier = esc(businessName || "your supplier");
   const explorer = chain && chain.explorer && txHash ? `${chain.explorer}/tx/${txHash}` : null;
+  const isCrypto = method === "crypto" && amountUsdc != null && tokenSymbol;
 
   const headline = fullyPaid
     ? "Your payment has been received in full"
     : "Your payment has been received";
 
+  // Describes what actually happened. A bank payment has no token, no chain and
+  // no transaction hash, and saying otherwise would be plainly wrong.
+  const receivedLine = isCrypto
+    ? `We have received your payment of ${Number(amountUsdc).toFixed(2)} ${tokenSymbol} on ${
+        chain ? chain.name : "chain"
+      }, which is ${ngn(creditNgn)} naira.`
+    : `We have received your payment of ${ngn(creditNgn)} naira.`;
+
   const lines = [
     `Hello ${debtorName || "there"},`,
     "",
-    `We have received your payment of ${Number(amountUsdc).toFixed(2)} ${tokenSymbol} on ${chain.name}, ` +
-      `which is ${ngn(creditNgn)} naira.`,
+    receivedLine,
     "",
     fullyPaid
       ? "That settles your account with us in full. Thank you, and we appreciate you sorting it out."
       : `Thank you. There is ${ngn(remainingNgn)} naira still outstanding on this invoice.`,
   ];
+
+  if (!fullyPaid && stillOwedToken > 0 && payToAddress) {
+    lines.push(
+      "",
+      `To settle the rest in ${stillOwedSymbol}, send ${Number(stillOwedToken).toFixed(2)} ${stillOwedSymbol}` +
+        (payToChainName ? ` on ${payToChainName}` : "") +
+        ` to:`,
+      payToAddress,
+      "",
+      "That amount already reflects what you have just paid, and is held at the rate you were originally quoted."
+    );
+  }
+
   if (isLate) {
     lines.push("", "This arrived after the payment window had closed, and it has still been credited to you in full.");
   }
@@ -80,7 +109,11 @@ function buildPaymentReceiptEmail({
 </head>
 <body style="margin:0;padding:0;background:#eef2f8;-webkit-text-size-adjust:100%">
 <div style="display:none;font-size:1px;color:#eef2f8;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${esc(
-    `${Number(amountUsdc).toFixed(2)} ${tokenSymbol} received by ${supplier}`
+    // Preheader — the line mail clients show beside the subject. Unguarded it
+    // rendered "NaN undefined received by …" on every bank receipt.
+    isCrypto
+      ? `${Number(amountUsdc).toFixed(2)} ${tokenSymbol} received by ${supplier}`
+      : `${ngn(creditNgn)} naira received by ${supplier}`
   )}</div>
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef2f8;padding:28px 12px">
@@ -112,8 +145,18 @@ function buildPaymentReceiptEmail({
                style="background:${WELL};border:1px solid ${LINE};border-radius:12px">
           <tr><td style="padding:16px 18px">
             <div style="font:600 11px ${FONT};letter-spacing:.08em;text-transform:uppercase;color:${MUTED}">Amount received</div>
-            <div style="font:700 24px ${FONT};color:${INK};padding-top:5px">${Number(amountUsdc).toFixed(2)} ${esc(tokenSymbol)}</div>
-            <div style="font:400 13px ${FONT};color:${MUTED};padding-top:4px">&#8358;${ngn(creditNgn)} &middot; ${esc(chain.name)}</div>
+            <!-- Bank payments have no token and no chain. Reading chain.name
+                 unguarded here would throw on every bank receipt. -->
+            <div style="font:700 24px ${FONT};color:${INK};padding-top:5px">${
+              isCrypto
+                ? `${Number(amountUsdc).toFixed(2)} ${esc(tokenSymbol)}`
+                : `&#8358;${ngn(creditNgn)}`
+            }</div>
+            <div style="font:400 13px ${FONT};color:${MUTED};padding-top:4px">${
+              isCrypto
+                ? `&#8358;${ngn(creditNgn)} &middot; ${esc(chain ? chain.name : "")}`
+                : "Bank transfer"
+            }</div>
           </td></tr>
         </table>
       </td></tr>
@@ -129,7 +172,38 @@ function buildPaymentReceiptEmail({
                <div style="padding:12px 16px;border-radius:10px;background:${WELL};font:400 14px ${FONT};color:${BODY}">
                  <strong style="color:${INK}">&#8358;${ngn(remainingNgn)}</strong> is still outstanding on this invoice.
                </div>
+             </td></tr>${
+               /* Everything needed to finish paying, repeated. The amount is
+                  RECALCULATED from the new balance at the rate originally
+                  quoted, so it already accounts for what was just paid — the
+                  payer never has to work it out or find the first email. */
+               stillOwedToken > 0 && payToAddress
+                 ? `<tr><td style="padding:12px 28px 4px">
+               <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                      style="background:${WELL};border:1px solid ${LINE};border-radius:12px">
+                 <tr><td style="padding:16px 18px">
+                   <div style="font:600 11px ${FONT};letter-spacing:.08em;text-transform:uppercase;color:${MUTED}">To settle the rest in ${esc(
+                     stillOwedSymbol || ""
+                   )}</div>
+                   <div style="font:700 20px ${FONT};color:${INK};padding-top:5px">${Number(
+                     stillOwedToken
+                   ).toFixed(2)} ${esc(stillOwedSymbol || "")}</div>
+                   ${
+                     payToChainName
+                       ? `<div style="font:400 13px ${FONT};color:${MUTED};padding-top:4px">on ${esc(
+                           payToChainName
+                         )} &mdash; this network only</div>`
+                       : ""
+                   }
+                   <div style="font:600 11px ${FONT};letter-spacing:.08em;text-transform:uppercase;color:${MUTED};padding-top:12px">Send to</div>
+                   <div style="font:400 13px/1.5 ${FONT};color:${INK};word-break:break-all;padding-top:4px">${esc(
+                     payToAddress
+                   )}</div>
+                 </td></tr>
+               </table>
              </td></tr>`
+                 : ""
+             }`
       }
 
       ${
