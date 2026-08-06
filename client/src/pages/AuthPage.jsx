@@ -14,7 +14,7 @@ import LogoMark from "../components/LogoMark";
 import DashboardMockup from "../components/landing/DashboardMockup";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const DEMO = { email: "demo@ledgerwatch.app", password: "leobl4ze" };
+const DEMO = { email: "demo@ledgerwatch.app", password: "demo1234" };
 
 export default function AuthPage() {
   const { login, register } = useAuth();

@@ -1,0 +1,168 @@
+/**
+ * The receipt a payer gets when their crypto payment settles.
+ *
+ * Same table-based, inline-styled construction as the reminder email, and the
+ * same CID logo attachment, because Gmail strips `data:` images. Built
+ * programmatically and never model-generated: it states amounts and a
+ * transaction hash, and those must be exact.
+ *
+ * House style: warm, plain, and free of hyphens and dashes.
+ */
+
+const FONT = "'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+const INK = "#0a1428";
+const GOLD = "#c0a053";
+const BODY = "#3a4658";
+const MUTED = "#64748b";
+const LINE = "#e1e7f0";
+const WELL = "#f4f7fa";
+const POS = "#1c7a52";
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(
+    /[<>&"]/g,
+    (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c])
+  );
+}
+
+function ngn(amount) {
+  return Number(amount || 0).toLocaleString("en-NG", { maximumFractionDigits: 2 });
+}
+
+function buildPaymentReceiptEmail({
+  businessName,
+  debtorName,
+  amountUsdc,
+  tokenSymbol,
+  creditNgn,
+  chain,
+  txHash,
+  fullyPaid,
+  isLate,
+  remainingNgn,
+  hasLogo,
+}) {
+  const supplier = esc(businessName || "your supplier");
+  const explorer = chain && chain.explorer && txHash ? `${chain.explorer}/tx/${txHash}` : null;
+
+  const headline = fullyPaid
+    ? "Your payment has been received in full"
+    : "Your payment has been received";
+
+  const lines = [
+    `Hello ${debtorName || "there"},`,
+    "",
+    `We have received your payment of ${Number(amountUsdc).toFixed(2)} ${tokenSymbol} on ${chain.name}, ` +
+      `which is ${ngn(creditNgn)} naira.`,
+    "",
+    fullyPaid
+      ? "That settles your account with us in full. Thank you, and we appreciate you sorting it out."
+      : `Thank you. There is ${ngn(remainingNgn)} naira still outstanding on this invoice.`,
+  ];
+  if (isLate) {
+    lines.push("", "This arrived after the payment window had closed, and it has still been credited to you in full.");
+  }
+  if (txHash) lines.push("", `Transaction: ${txHash}`);
+  lines.push("", `Warm regards,`, businessName || "");
+
+  const text = lines.join("\n");
+
+  const logoCell = hasLogo
+    ? `<img src="cid:ledgerwatch-logo" width="36" height="36" alt="" style="display:block;border:0;border-radius:9px" />`
+    : "";
+
+  const html = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<title>Payment received</title>
+</head>
+<body style="margin:0;padding:0;background:#eef2f8;-webkit-text-size-adjust:100%">
+<div style="display:none;font-size:1px;color:#eef2f8;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${esc(
+    `${Number(amountUsdc).toFixed(2)} ${tokenSymbol} received by ${supplier}`
+  )}</div>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef2f8;padding:28px 12px">
+  <tr><td align="center">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
+           style="width:100%;max-width:600px;background:#ffffff;border:1px solid ${LINE};border-radius:16px;overflow:hidden">
+
+      <tr><td style="height:4px;background:${GOLD};line-height:4px;font-size:0">&nbsp;</td></tr>
+
+      <tr><td style="padding:24px 28px 18px;border-bottom:1px solid ${LINE}">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+          ${logoCell ? `<td style="padding-right:12px;vertical-align:middle">${logoCell}</td>` : ""}
+          <td style="vertical-align:middle">
+            <div style="font:700 19px ${FONT};color:${INK};letter-spacing:-.2px">Ledger<span style="color:${GOLD}">Watch</span></div>
+            <div style="font:400 12px ${FONT};color:${MUTED};padding-top:2px">Payment receipt from ${supplier}</div>
+          </td>
+        </tr></table>
+      </td></tr>
+
+      <tr><td style="padding:24px 28px 4px">
+        <div style="font:600 17px ${FONT};color:${POS};padding-bottom:12px">${headline}</div>
+        <p style="margin:0 0 14px;font:400 15px/1.7 ${FONT};color:${BODY}">
+          Hello ${esc(debtorName || "there")}, thank you. We have received your payment and credited it to your account.
+        </p>
+      </td></tr>
+
+      <tr><td style="padding:0 28px 4px">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+               style="background:${WELL};border:1px solid ${LINE};border-radius:12px">
+          <tr><td style="padding:16px 18px">
+            <div style="font:600 11px ${FONT};letter-spacing:.08em;text-transform:uppercase;color:${MUTED}">Amount received</div>
+            <div style="font:700 24px ${FONT};color:${INK};padding-top:5px">${Number(amountUsdc).toFixed(2)} ${esc(tokenSymbol)}</div>
+            <div style="font:400 13px ${FONT};color:${MUTED};padding-top:4px">&#8358;${ngn(creditNgn)} &middot; ${esc(chain.name)}</div>
+          </td></tr>
+        </table>
+      </td></tr>
+
+      ${
+        fullyPaid
+          ? `<tr><td style="padding:16px 28px 4px">
+               <div style="padding:12px 16px;border-radius:10px;background:#e6f4ee;font:600 14px ${FONT};color:${POS}">
+                 This settles your account in full. Nothing further is outstanding.
+               </div>
+             </td></tr>`
+          : `<tr><td style="padding:16px 28px 4px">
+               <div style="padding:12px 16px;border-radius:10px;background:${WELL};font:400 14px ${FONT};color:${BODY}">
+                 <strong style="color:${INK}">&#8358;${ngn(remainingNgn)}</strong> is still outstanding on this invoice.
+               </div>
+             </td></tr>`
+      }
+
+      ${
+        isLate
+          ? `<tr><td style="padding:12px 28px 0"><p style="margin:0;font:400 13px/1.6 ${FONT};color:${MUTED}">
+               This arrived after the payment window had closed, and it has still been credited to you in full.
+             </p></td></tr>`
+          : ""
+      }
+
+      ${
+        explorer
+          ? `<tr><td style="padding:16px 28px 4px">
+               <div style="font:600 11px ${FONT};letter-spacing:.08em;text-transform:uppercase;color:${MUTED};padding-bottom:6px">Transaction</div>
+               <div style="font:600 12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;word-break:break-all;color:${INK}">${esc(txHash)}</div>
+               <a href="${explorer}" style="display:inline-block;margin-top:8px;font:600 13px ${FONT};color:#22406f;text-decoration:underline">View it on the blockchain explorer</a>
+             </td></tr>`
+          : ""
+      }
+
+      <tr><td style="padding:22px 28px 24px">
+        <div style="border-top:1px solid ${LINE};padding-top:16px;font:400 12px/1.6 ${FONT};color:${MUTED}">
+          Reply to this email if anything here looks wrong to you.<br>
+          Sent with <span style="color:${BODY};font-weight:600">LedgerWatch</span>.
+        </div>
+      </td></tr>
+
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
+
+  return { html, text };
+}
+
+module.exports = { buildPaymentReceiptEmail };

@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { ethers } from "ethers";
-import { ShieldCheck } from "lucide-react";
+import { Network, ShieldCheck } from "lucide-react";
 import { Button, Field, Input, Select, useToast } from "../../components/ui";
 import { getProvider, ERC20_ABI } from "./provider";
 import { unlockWallet } from "./keystore";
 import { recordTx, updateTxStatus } from "./walletApi";
 import { NATIVE_TRANSFER_GAS, preflightGas } from "./gas";
 import GasNotice from "./GasNotice";
+import NetworkScopeNotice from "./NetworkScopeNotice";
 
 /**
  * Send flow with a hard human-in-the-loop gate:
@@ -31,10 +32,26 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
   const symbol = selectedToken ? selectedToken.symbol : chain.nativeSymbol;
   const decimals = selectedToken ? selectedToken.decimals : chain.decimals;
 
+  /**
+   * Sending to your own address is ALWAYS a no-op that costs a fee — the funds
+   * leave and come straight back on the same network. It is also the exact
+   * signature of someone trying to move assets to another chain, because the
+   * address is identical everywhere so it looks like the natural way to do it.
+   *
+   * This is caught BEFORE gas estimation, so the mistake costs nothing at all.
+   */
+  const isSelfSend = Boolean(
+    to && address && ethers.isAddress(to) && to.toLowerCase() === address.toLowerCase()
+  );
+
   async function review(e) {
     e.preventDefault();
     setError("");
     if (!ethers.isAddress(to)) return setError("Enter a valid recipient address.");
+    // Blocked outright rather than warned-and-allowed: there is no legitimate
+    // reason to pay a fee to send funds to yourself on the same chain, so a
+    // "proceed anyway" option would only ever help someone make the mistake.
+    if (isSelfSend) return setStep("self");
     let value;
     try {
       value = ethers.parseUnits(String(amount), decimals);
@@ -125,7 +142,10 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
           .catch(() => {});
       }
 
-      toast(`Sent ${amount} ${symbol}. Track it in history.`, { type: "success" });
+      // NAMES THE CHAIN. "Sent 80 USDC" alone is what let a same-chain transfer
+      // read as a completed cross-chain move; the network is the one fact that
+      // makes the outcome unambiguous.
+      toast(`Sent ${amount} ${symbol} on ${chain.name}. Track it in history.`, { type: "success" });
       onSent(txResp);
     } catch (err) {
       setError(friendly(err));
@@ -142,6 +162,50 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
     return msg;
   }
 
+  /**
+   * The blocked self-send. Deliberately explains rather than just refusing —
+   * someone who lands here is almost certainly trying to bridge, and "invalid
+   * recipient" would teach them nothing and leave them to try again.
+   */
+  if (step === "self") {
+    return (
+      <div className="stack">
+        <div>
+          <h3 className="section-title">This would not move your funds</h3>
+          <p className="muted small" style={{ margin: "4px 0 0" }}>
+            That is your own address, on {chain.name}.
+          </p>
+        </div>
+
+        <div className="self-send-block">
+          <p>
+            Sending {amount || "funds"} {symbol} to yourself on {chain.name} would succeed, appear
+            in your history as a completed transfer, and leave your balance exactly where it
+            started — minus the network fee. Nothing would arrive on any other network.
+          </p>
+        </div>
+
+        <NetworkScopeNotice chain={chain} tone="warning" />
+
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <Button variant="ghost" onClick={() => { setStep("form"); setTo(""); }}>
+            Change recipient
+          </Button>
+          {chain.bridge && (
+            <a
+              className="btn btn-primary"
+              href={chain.bridge.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open {chain.bridge.name}
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (step === "review") {
     return (
       <form className="stack" onSubmit={confirmSend}>
@@ -152,8 +216,18 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
           </p>
         </div>
 
+        {/* The network leads the summary and is emphasised: it is the field
+            most likely to be assumed rather than read, and the only one whose
+            misreading cannot be undone after signing. */}
+        <div className="review-chain-banner">
+          <Network size={15} />
+          <span>
+            Sending on <strong>{chain.name}</strong> — the funds stay on this network
+          </span>
+        </div>
+
         <dl className="tx-summary">
-          <div><dt>Network</dt><dd>{chain.name}</dd></div>
+          <div><dt>Network</dt><dd><strong>{chain.name}</strong></dd></div>
           <div><dt>Asset</dt><dd>{symbol}</dd></div>
           <div><dt>To</dt><dd className="num">{to}</dd></div>
           <div><dt>Amount</dt><dd className="num">{amount} {symbol}</dd></div>
@@ -194,15 +268,29 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
   return (
     <form className="stack" onSubmit={review}>
       <div>
-        <h3 className="section-title">Send</h3>
+        <h3 className="section-title row">
+          Send
+          <span className="chain-chip">
+            <Network size={12} /> {chain.name}
+          </span>
+        </h3>
         <p className="muted small" style={{ margin: "4px 0 0" }}>
-          On {chain.name} · testnet funds only.
+          Testnet funds only. This transfer stays on {chain.name}.
         </p>
       </div>
 
       <Field label="Recipient address">
         <Input value={to} onChange={(e) => setTo(e.target.value)} placeholder="0x…" required />
       </Field>
+
+      {/* Caught at typing time as well as at submit, so the explanation arrives
+          before the user commits to the idea rather than after. */}
+      {isSelfSend && (
+        <p className="inline-warn">
+          That is your own address. Sending to yourself stays on {chain.name} and moves nothing
+          between networks.
+        </p>
+      )}
       <div className="grid2">
         <Field label="Amount">
           <Input
@@ -223,6 +311,8 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
           </Select>
         </Field>
       </div>
+
+      <NetworkScopeNotice chain={chain} />
 
       <div className="wallet-guarantee subtle">
         <ShieldCheck size={15} />

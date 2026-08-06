@@ -100,6 +100,19 @@ const userSchema = new mongoose.Schema({
    * Stored server-side rather than in localStorage so the list survives a device
    * change, matching how the wallet address itself is handled.
    */
+  /**
+   * How far the inbound-transfer scan has read, per chain.
+   *
+   * Deliberately stored rather than derived from the newest recorded
+   * transaction: a wallet that has received NOTHING has no rows to derive from,
+   * so it would re-walk the whole lookback on every History load, forever. That
+   * is the normal state of a new wallet, and it cost nine seconds a load.
+   */
+  walletHistoryCursors: {
+    type: [{ _id: false, chainId: { type: Number, required: true }, block: { type: Number, required: true } }],
+    default: [],
+  },
+
   customTokens: {
     type: [
       {

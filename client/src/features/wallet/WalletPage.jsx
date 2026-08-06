@@ -22,7 +22,7 @@ import {
   ToastProvider,
 } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
-import { getProvider, ERC20_ABI } from "./provider";
+import { getProvider, ERC20_ABI, rpcErrorReason } from "./provider";
 import {
   hasWallet,
   getStoredAddress,
@@ -65,6 +65,9 @@ function WalletInner() {
   const [subtab, setSubtab] = useState("send");
   const [balances, setBalances] = useState(null);
   const [balLoading, setBalLoading] = useState(false);
+  // Why the last balance read failed, when it did. Shown instead of a bare
+  // "try refresh", which gives the user nothing to act on.
+  const [balError, setBalError] = useState(null);
   const [txs, setTxs] = useState([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -73,15 +76,19 @@ function WalletInner() {
   const chain = chains.find((c) => c.chainId === chainId) || null;
 
   // A zero native balance means nothing can be sent from this chain at all.
-  // Surfaced persistently rather than at the moment of signing.
+  // Surfaced persistently rather than at the moment of signing. An UNKNOWN
+  // balance is not a zero one — warning "no gas" when the figure simply could
+  // not be read would be a guess presented as a fact.
   const noGas = Boolean(
-    balances && balances.some((b) => b.native && Number(b.amount) === 0)
+    balances && balances.some((b) => b.native && !b.unknown && Number(b.amount) === 0)
   );
 
   // The native tile is never hidden — it pays for everything, so a zero there is
-  // the single most important number on this screen.
+  // the single most important number on this screen. Unknown balances are never
+  // hidden either: "hide zero" must not quietly swallow a figure we failed to
+  // read, since that is the one the user most needs to see.
   const visibleBalances = (balances || []).filter(
-    (b) => !hideZero || b.native || Number(b.amount) > 0
+    (b) => !hideZero || b.native || b.unknown || Number(b.amount) > 0
   );
 
   // Keystores are scoped per account, so switching account changes which wallet
@@ -137,13 +144,33 @@ function WalletInner() {
             custom: Boolean(t.custom),
             address: t.address,
           });
-        } catch {
-          rows.push({ symbol: t.symbol, amount: "0", native: false, custom: Boolean(t.custom) });
+        } catch (tokenErr) {
+          /**
+           * UNKNOWN, not zero. This previously pushed "0", which renders exactly
+           * like a genuine empty balance — so an RPC failure looked identical to
+           * having spent everything. Someone could reasonably conclude their
+           * funds were gone. An unread balance says so.
+           *
+           * The reason is carried on the ROW: a token-only failure never reaches
+           * the outer catch, so without this the tile said "could not be read"
+           * and gave no clue why.
+           */
+          rows.push({
+            symbol: t.symbol,
+            amount: null,
+            unknown: true,
+            reason: rpcErrorReason(tokenErr),
+            native: false,
+            custom: Boolean(t.custom),
+            address: t.address,
+          });
         }
       }
       setBalances(rows);
-    } catch {
+      setBalError(null);
+    } catch (err) {
       setBalances(null);
+      setBalError(rpcErrorReason(err));
     } finally {
       setBalLoading(false);
     }
@@ -430,19 +457,35 @@ function WalletInner() {
             <SkeletonLines count={2} />
           ) : balances ? (
             visibleBalances.map((b) => (
-              <div key={b.symbol} className={`balance-tile${b.native ? " primary" : ""}`}>
-                <span className="balance-amount num">{Number(b.amount).toLocaleString(undefined, { maximumFractionDigits: 6 })}</span>
+              <div
+                key={b.symbol}
+                className={`balance-tile${b.native ? " primary" : ""}${b.unknown ? " unknown" : ""}`}
+              >
+                <span className="balance-amount num">
+                  {b.unknown
+                    ? "—"
+                    : Number(b.amount).toLocaleString(undefined, { maximumFractionDigits: 6 })}
+                </span>
                 <span className="balance-symbol">
                   {b.symbol}
                   {/* The native token is what pays for every transaction, so it
                       is labelled as such and its emptiness is called out here
                       rather than discovered at signing time. */}
                   {b.native && <span className="balance-role">pays network fees</span>}
+                  {/* Says "we could not read this", never a number. A failed read
+                      shown as 0 would look exactly like an emptied wallet. */}
+                  {b.unknown && (
+                    <span className="balance-role" title={b.reason || undefined}>
+                      {b.reason ? `unreadable: ${b.reason}` : "could not be read"}
+                    </span>
+                  )}
                 </span>
               </div>
             ))
           ) : (
-            <p className="muted small">Could not load balances. Try refresh.</p>
+            <p className="muted small">
+              Could not load balances{balError ? `: ${balError}` : ""}. Try refresh.
+            </p>
           )}
         </div>
 
@@ -524,7 +567,9 @@ function WalletInner() {
               }}
             />
           )}
-          {subtab === "history" && <TxHistory txs={txs} chain={chain} onReceive={() => setSubtab("receive")} />}
+          {subtab === "history" && (
+            <TxHistory txs={txs} chain={chain} chains={chains} onReceive={() => setSubtab("receive")} />
+          )}
         </div>
       </Card>
 

@@ -17,6 +17,43 @@ export function getProvider(chainId) {
   });
 }
 
+/**
+ * Pull the human reason out of a failed RPC call.
+ *
+ * The proxy answers a dead upstream with 502 and a body naming what actually
+ * went wrong — `{ chain, reason, code, endpointsTried }` — because "fetch failed"
+ * on its own names nothing. ethers wraps that response several layers deep, so
+ * this digs the body back out and falls back to its own message when the failure
+ * came from somewhere else entirely.
+ *
+ * @returns {string|null} a short reason suitable for showing to the user
+ */
+export function rpcErrorReason(err) {
+  if (!err) return null;
+
+  const candidates = [
+    err?.info?.response?.bodyText,
+    err?.info?.responseBody,
+    err?.response?.bodyText,
+    err?.body,
+  ];
+
+  for (const raw of candidates) {
+    if (typeof raw !== "string" || !raw.trim().startsWith("{")) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.reason) {
+        return parsed.chain ? `${parsed.chain}: ${parsed.reason}` : parsed.reason;
+      }
+      if (parsed.error) return parsed.error;
+    } catch {
+      // Not JSON after all — keep looking rather than throwing from an error handler.
+    }
+  }
+
+  return err.shortMessage || err.message || null;
+}
+
 // Minimal ERC-20 ABI for balances + transfers.
 export const ERC20_ABI = [
   "function balanceOf(address owner) view returns (uint256)",

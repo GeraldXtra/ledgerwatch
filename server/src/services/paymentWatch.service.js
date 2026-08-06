@@ -8,6 +8,7 @@ const { GRACE_DAYS, GRACE_SCAN_MINUTES } = require("../config/derivation");
 const { confirmationsFor } = require("./cryptoSettings.service");
 const { recomputeDebtStatus } = require("./receivables.service");
 const { notifyUser } = require("./push.service");
+const { rpcCall } = require("./rpc.service");
 
 /**
  * PAYMENT WATCH — detects inbound stablecoin transfers to invoice addresses and
@@ -31,7 +32,20 @@ const TRANSFER_TOPIC =
 const TOLERANCE = Number(process.env.USDC_SETTLEMENT_TOLERANCE || 0.005);
 
 // Never ask an RPC for an unbounded range; testnet nodes reject huge spans.
-const MAX_BLOCK_SPAN = Number(process.env.PAYMENT_WATCH_BLOCK_SPAN || 4000);
+/**
+ * Blocks per eth_getLogs query.
+ *
+ * MUST STAY UNDER THE NARROWEST RPC LIMIT of any chain in the registry. This was
+ * 4000, and Base Sepolia's public RPC caps the range at 2000 — so EVERY log query
+ * was rejected, on every pass, for every address. Because `rpc()` never throws it
+ * returned null quietly, and since the high-water mark is only advanced inside the
+ * success branch, `lastScannedBlock` stayed at 0 forever. The watcher looked
+ * perfectly healthy while detecting nothing, and no payment could ever settle.
+ *
+ * 1500 leaves headroom under that 2000 cap. Raise it only after checking the
+ * limit on every enabled chain, not just the one being tested.
+ */
+const MAX_BLOCK_SPAN = Number(process.env.PAYMENT_WATCH_BLOCK_SPAN || 1500);
 
 // ---- shared caches / single-flight -----------------------------------------
 const blockCache = new Map(); // chainId -> { block, ts }
@@ -60,21 +74,18 @@ function logOnce(scope, err) {
   console.error(`[paymentWatch] ${scope}:`, (err && err.message) || err);
 }
 
-/** Minimal JSON-RPC call against a chain's upstream node. Never throws. */
+/**
+ * JSON-RPC against a chain. Never throws; null means the call did not succeed.
+ *
+ * Delegates to the shared rpc service rather than calling `fetch` directly, so
+ * this watcher gets the endpoint fallback and the request timeout for free and
+ * there is only one place where "how do we reach a chain" is decided. Without
+ * that, a chain whose primary endpoint is refusing calls — which is exactly what
+ * Alchemy was doing for every network except Ethereum — would silently detect no
+ * payments at all while appearing to run normally.
+ */
 async function rpc(chain, method, params) {
-  try {
-    const res = await fetch(chain.rpc, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    });
-    const json = await res.json();
-    if (json.error) throw new Error(json.error.message || "rpc error");
-    return json.result;
-  } catch (err) {
-    logOnce(`${method} on ${chain.name}`, err);
-    return null;
-  }
+  return rpcCall(chain, method, params);
 }
 
 async function currentBlock(chain) {
@@ -138,7 +149,7 @@ function addressTopic(address) {
  * Live token balance of an address, as a Number in token units.
  *
  * This is the GRACE WATCH'S TRIGGER. Walking block ranges forward cannot work
- * across a 30 day gap: MAX_BLOCK_SPAN is 4000 blocks and 30 days on Base at
+ * across a 30 day gap: MAX_BLOCK_SPAN is 1500 blocks and 30 days on Base at
  * roughly 2s per block is about 1.3 million, so range catch-up would never
  * converge. One balanceOf call answers "did anything new arrive" for a fraction
  * of the cost, and only then is a log scan worth running.
@@ -303,6 +314,26 @@ async function settleIfDue(pa, chain) {
   // manual payment: status, history and reminder cancellation all identical.
   await recomputeDebtStatus(debt);
 
+  /**
+   * ONE EVENT, THREE CONSEQUENCES.
+   *
+   * The Payment record, the owner's push and the payer's receipt all fire from
+   * this single point. Scattering them would let a settlement exist that nobody
+   * was told about, or an email claiming a payment that was never recorded —
+   * the three can now only ever agree.
+   */
+  await onInvoiceSettled({ pa, chain, debt, payment, totalUsdc, creditNgn, fullyPaid, isLate });
+
+  return { payment, fullyPaid, totalUsdc, creditNgn };
+}
+
+/**
+ * Everything that must happen when an invoice settles in crypto. Never throws:
+ * the money has already arrived and the ledger is already correct, so a failed
+ * notification must not undo a successful settlement.
+ */
+async function onInvoiceSettled({ pa, chain, debt, payment, totalUsdc, creditNgn, fullyPaid, isLate }) {
+  // 1. Tell the owner.
   await notifyUser(
     pa.userId,
     {
@@ -319,7 +350,52 @@ async function settleIfDue(pa, chain) {
     "txUpdates"
   ).catch(() => {});
 
-  return { payment, fullyPaid, totalUsdc, creditNgn };
+  // 2. Send the payer a receipt, if we have somewhere to send it.
+  try {
+    if (debt.debtorEmail) {
+      // eslint-disable-next-line global-require
+      const { sendEmail, getLogoAttachment, isNonRoutableEmail } = require("./notify.service");
+      // eslint-disable-next-line global-require
+      const { buildPaymentReceiptEmail } = require("../utils/paymentReceipt");
+      // eslint-disable-next-line global-require
+      const User = require("../models/User");
+
+      if (isNonRoutableEmail(debt.debtorEmail)) {
+        console.warn(
+          `[paymentWatch] receipt not sent: ${debt.debtorEmail} is a reserved domain and would bounce.`
+        );
+      } else {
+        const owner = await User.findById(pa.userId).select("name bankDetails");
+        const logo = getLogoAttachment();
+        const { html, text } = buildPaymentReceiptEmail({
+          businessName: owner && owner.name,
+          debtorName: debt.debtorName,
+          amountUsdc: totalUsdc,
+          tokenSymbol: pa.tokenSymbol,
+          creditNgn,
+          chain,
+          txHash: (pa.observed.find((o) => o.settledPaymentId) || {}).txHash,
+          fullyPaid,
+          isLate,
+          remainingNgn: Math.max(0, (debt.amount || 0) - (creditNgn + ((debt.amountPaid || 0)))),
+          hasLogo: Boolean(logo),
+        });
+        const res = await sendEmail(
+          debt.debtorEmail,
+          fullyPaid
+            ? `Payment received in full — thank you`
+            : `Payment received — thank you`,
+          html,
+          { text, attachments: logo ? [logo] : [] }
+        );
+        if (!res.ok) {
+          console.error(`[paymentWatch] receipt email failed: ${res.error}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[paymentWatch] receipt email error:", err.message);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +481,22 @@ async function scanAddress(pa, chain, head, mode = "active") {
       // scan reads a recent window that says nothing about the blocks in between,
       // so moving it here would skip everything it never looked at.
       if (mode === "active") pa.lastScannedBlock = to;
+    } else {
+      /**
+       * The query failed. This is the branch that hid a total detection outage:
+       * `rpc()` never throws, so a rejected query is indistinguishable from a
+       * quiet chain unless it is said out loud. An active address whose
+       * high-water mark is still 0 after being watched has NEVER succeeded, and
+       * that is a broken watcher rather than an absence of payments.
+       */
+      if (mode === "active" && pa.lastScannedBlock === 0) {
+        console.error(
+          `[paymentWatch] ${chain.name}: log query FAILED for ${pa.address} over ` +
+            `${to - from + 1} blocks and has never succeeded. Payments to this address ` +
+            `cannot be detected. If this repeats, PAYMENT_WATCH_BLOCK_SPAN (${MAX_BLOCK_SPAN}) ` +
+            `is likely above this RPC's range limit.`
+        );
+      }
     }
   }
 

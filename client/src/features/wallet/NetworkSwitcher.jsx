@@ -59,27 +59,59 @@ export default function NetworkSwitcher({ chains, chainId, address, onChange }) 
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  // Native balance per chain, so the switcher answers "where are my funds?"
-  // without visiting each network. Best effort: a chain whose RPC is unwell
-  // simply shows no figure rather than blocking the menu.
+  /**
+   * Native balance per chain, so the switcher answers "where are my funds?"
+   * without visiting each network. Best effort: a chain whose RPC is unwell
+   * simply shows no figure rather than blocking the menu.
+   *
+   * REQUESTED ONCE PER CHAIN. This effect previously listed `balances` as a
+   * dependency while also calling `setBalances`, so every arriving balance
+   * re-ran it — and a chain still IN FLIGHT has no entry in `balances` yet, so
+   * the `!== undefined` guard missed and fired a duplicate request. Five chains
+   * trickling in issued up to 5+4+3+2+1 calls instead of 5.
+   *
+   * That was not merely wasteful. Measured against the live endpoints, this
+   * machine serves 8 concurrent RPC connections comfortably but fails ALL of
+   * them at twelve — Alchemy, Cloudflare and publicnode timing out at the TCP
+   * connect layer simultaneously, which is a local connection ceiling rather
+   * than three providers rate-limiting at once. The storm put the switcher
+   * squarely in that range, and is the likeliest source of the intermittent
+   * "fetch failed".
+   *
+   * `requested` is a ref, not state: it must be updated the moment a request
+   * STARTS, and a state update would not be visible to the other iterations of
+   * this same pass.
+   */
+  const requested = useRef(new Set());
+
+  // A different wallet means the cached figures belong to somebody else.
+  useEffect(() => {
+    requested.current = new Set();
+    setBalances({});
+  }, [address]);
+
   useEffect(() => {
     if (!open || !address) return;
     let live = true;
     chains.forEach(async (c) => {
-      if (balances[c.chainId] !== undefined) return;
+      if (requested.current.has(c.chainId)) return;
+      requested.current.add(c.chainId);
       try {
         const wei = await getProvider(c.chainId).getBalance(address);
         if (live) {
           setBalances((b) => ({ ...b, [c.chainId]: ethers.formatEther(wei) }));
         }
       } catch {
+        // Allow a retry on the next open: a failure here is usually transient,
+        // and leaving it marked as requested would show a permanent blank.
+        requested.current.delete(c.chainId);
         if (live) setBalances((b) => ({ ...b, [c.chainId]: null }));
       }
     });
     return () => {
       live = false;
     };
-  }, [open, address, chains, balances]);
+  }, [open, address, chains]);
 
   function pick(chain) {
     // Switching to real money is a decision, not a menu selection.
@@ -171,9 +203,20 @@ export default function NetworkSwitcher({ chains, chainId, address, onChange }) 
                   balanceLabel={balanceLabel}
                 />
               )}
+              {/* BOTH HALVES, ALWAYS TOGETHER.
+                  This said only the first sentence, and a user reasonably
+                  concluded that because the address is the same everywhere,
+                  sending to it would let them choose the destination network.
+                  They sent 80 USDC to their own address expecting it to land on
+                  another chain; it stayed put and cost a fee. The second
+                  sentence is the part that was missing. */}
               <p className="net-note">
                 One address, every network. Your wallet address is the same on all of these — you do
-                not need a separate wallet per chain, only funds on the chain you want to use.
+                not need a separate wallet per chain.
+                <br />
+                <strong>Balances are per network and do not move between them.</strong> Funds shown
+                on one chain stay there; sending to your own address will not carry them across.
+                Moving assets between networks needs a bridge.
               </p>
             </>
           )}
