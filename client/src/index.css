@@ -3697,8 +3697,165 @@ input[type="checkbox"] {
   background: var(--navy-50);
   border-color: var(--navy-100);
 }
+/* A balance that could not be READ, which is not the same as a balance of zero.
+   Deliberately muted and dashed rather than styled as an alert: nothing is
+   necessarily wrong with the wallet, we just have no figure to show, and
+   dressing that up as an error would be its own kind of lie. */
+.balance-tile.unknown {
+  border-style: dashed;
+  background: transparent;
+}
+.balance-tile.unknown .balance-amount { color: var(--muted); }
 .balance-amount { font-size: 22px; font-weight: 690; letter-spacing: -0.5px; color: var(--ink); }
 .balance-symbol { font-size: 12px; font-weight: 600; color: var(--muted); }
+
+/* ---- Network scoping: assets live on ONE chain ---------------------------
+   Added after a user sent 80 USDC to their own address expecting it to cross
+   chains. Everything here exists to make the active network impossible to
+   overlook, so it is stated plainly rather than tucked into fine print. */
+
+.chain-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 10px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--navy-50);
+  border: 1px solid var(--navy-100);
+  color: var(--navy-700, var(--ink));
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.review-chain-banner {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  background: var(--navy-50);
+  border: 1px solid var(--navy-100);
+  color: var(--ink);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.net-scope-notice {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--well);
+  border: 1px solid var(--border);
+}
+/* The blocked-send variant. The gold warn family rather than red: the user has
+   done nothing wrong and lost nothing — they are being stopped before they can,
+   so this is a caution, not an error. */
+.net-scope-notice.warning {
+  background: var(--warn-bg);
+  border-color: var(--gold-200);
+}
+.net-scope-icon { flex: none; margin-top: 2px; color: var(--muted); }
+.net-scope-lead { margin: 0 0 5px; font-size: 13px; font-weight: 650; color: var(--ink); }
+.net-scope-body { margin: 0 0 5px; font-size: 12.5px; line-height: 1.55; color: var(--muted); }
+.net-scope-body:last-child { margin-bottom: 0; }
+.net-scope-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 650;
+  color: var(--accent-600);
+  text-decoration: none;
+}
+.net-scope-link:hover { text-decoration: underline; }
+
+.self-send-block {
+  padding: 13px 15px;
+  border-radius: 10px;
+  background: var(--well);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.self-send-block p { margin: 0; }
+
+.inline-warn {
+  margin: -4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--warn-text);
+}
+
+/* ---- Live portfolio states -------------------------------------------------
+   Live mode must never fall back to a paper figure, so every failure and empty
+   case gets a designed answer instead of a blank or a zero. */
+.live-read-error {
+  display: flex;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--warn-bg);
+  border: 1px solid var(--gold-200);
+  color: var(--warn-text);
+}
+.live-read-error svg { flex: none; margin-top: 2px; }
+
+.live-zero-state {
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--well);
+  border: 1px solid var(--border);
+}
+.live-deposit {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.live-qr {
+  width: 120px;
+  height: 120px;
+  border-radius: 10px;
+  background: #fff;
+  padding: 6px;
+  border: 1px solid var(--border);
+}
+.live-deposit .wallet-address {
+  display: block;
+  margin: 4px 0 10px;
+  word-break: break-all;
+}
+
+/* Chain attribution on every history row. */
+.tx-chain-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 3px;
+}
+.tx-chain {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.tx-selfsend {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--warn-bg);
+  border: 1px solid var(--gold-200);
+  color: var(--warn-text);
+}
 
 .faucet-link {
   display: inline-flex;
@@ -4633,3 +4790,6 @@ input[type="checkbox"] {
   color: var(--muted);
 }
 .mode-note.danger { color: var(--warn-text); font-weight: 500; }
+
+/* Live positions total — same figure treatment as the other oversized numbers. */
+.live-total { display: flex; flex-direction: column; gap: 2px; margin: 14px 0 6px; }

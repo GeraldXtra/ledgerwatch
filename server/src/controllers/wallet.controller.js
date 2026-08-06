@@ -1,6 +1,7 @@
 const User = require("../models/User");
 const WalletTx = require("../models/WalletTx");
 const { listChains, getChain } = require("../config/chains");
+const { sendToChain } = require("../services/rpc.service");
 
 // Strict allowlist: read methods + raw-tx broadcast + receipt polling. Notably it
 // does NOT (and cannot) include any signing method — the server never holds a key.
@@ -55,19 +56,47 @@ async function rpc(req, res) {
       }
     }
 
-    const upstream = await fetch(chain.rpc, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    // Walks the chain's verified endpoint list, with a timeout, and forwards the
+    // first real answer. See rpc.service.js for what does and does not warrant
+    // trying the next endpoint — notably, a JSON-RPC error inside a 200 is the
+    // chain's genuine answer and is forwarded untouched.
+    const upstream = await sendToChain(chain, body);
 
-    const text = await upstream.text();
+    if (!upstream.ok) {
+      /**
+       * Report WHY. The previous version logged `err.message`, which for any
+       * undici transport failure is the fixed string "fetch failed" — the same
+       * five characters whether DNS failed, the host refused the connection, TLS
+       * broke or the request timed out. That message could not distinguish the
+       * two real causes here (Alchemy returning 403 for networks not enabled on
+       * the app, and a dead public endpoint), so it named neither.
+       *
+       * Hosts only, never URLs: the Alchemy key lives in the path.
+       */
+      const detail = upstream.attempts.map((a) => `${a.host} -> ${a.reason}`).join(" | ");
+      console.error(
+        `wallet rpc proxy: ${chain.name} failed on all ${upstream.total} endpoint(s): ${detail}`
+      );
+
+      const first = upstream.attempts[0] || {};
+      return res.status(502).json({
+        error: "RPC upstream failed",
+        // Surfaced so the wallet can say "Base Sepolia RPC unreachable (403)"
+        // rather than showing an empty balance with no explanation.
+        chain: chain.name,
+        reason: first.reason || "unknown",
+        code: first.code || null,
+        endpointsTried: upstream.total,
+      });
+    }
+
     res.status(upstream.status);
     res.set("Content-Type", "application/json");
-    return res.send(text);
+    return res.send(upstream.text);
   } catch (err) {
-    console.error("wallet rpc proxy error:", err.message);
-    return res.status(502).json({ error: "RPC upstream failed" });
+    // Anything not already handled above — a bug here, not an upstream fault.
+    console.error("wallet rpc proxy error:", err.message, err.cause ? `cause=${err.cause.code || err.cause.message}` : "");
+    return res.status(502).json({ error: "RPC upstream failed", reason: err.message });
   }
 }
 
@@ -107,6 +136,22 @@ async function listTxs(req, res) {
   try {
     const query = { userId: req.user._id };
     if (req.query.chainId) query.chainId = Number(req.query.chainId);
+
+    /**
+     * Pick up anything that ARRIVED without the app sending it, before listing.
+     * Without this, History only ever showed outgoing transactions the app
+     * itself initiated, so a wallet that had genuinely received funds looked
+     * empty. Never throws: a failed sync should still return the known rows.
+     */
+    if (req.query.chainId && req.user.walletAddress) {
+      const { syncInboundTransfers } = require("../services/walletHistory.service");
+      await syncInboundTransfers({
+        userId: req.user._id,
+        chainId: Number(req.query.chainId),
+        address: req.user.walletAddress,
+      }).catch((err) => console.error("[wallet] inbound sync failed:", err.message));
+    }
+
     const txs = await WalletTx.find(query).sort({ createdAt: -1 }).limit(100);
     return res.json({ txs });
   } catch (err) {

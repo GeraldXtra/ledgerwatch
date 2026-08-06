@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { Check, Copy, Droplets } from "lucide-react";
+import { Check, Copy, Droplets, Network } from "lucide-react";
 import { Button } from "../../components/ui";
+import NetworkScopeNotice from "./NetworkScopeNotice";
 
 // Receive screen: address, a scannable QR, copy-to-clipboard, and the chain faucet.
 export default function ReceivePanel({ address, chain }) {
@@ -34,9 +35,19 @@ export default function ReceivePanel({ address, chain }) {
   return (
     <div className="stack">
       <div>
-        <h3 className="section-title">Receive {chain?.nativeSymbol}</h3>
+        <h3 className="section-title row">
+          Receive
+          <span className="chain-chip">
+            <Network size={12} /> {chain?.name}
+          </span>
+        </h3>
         <p className="muted small" style={{ margin: "4px 0 0" }}>
-          Share this address to receive testnet funds on {chain?.name}.
+          {/* Names the network explicitly. The same address is valid on every
+              chain, so "here is my address" is ambiguous without it — and a
+              sender who picks the wrong network delivers to a balance the
+              recipient is not looking at. */}
+          Share this address to receive testnet funds <strong>on {chain?.name}</strong>. Anything
+          sent on a different network will not appear here.
         </p>
       </div>
 
@@ -48,6 +59,8 @@ export default function ReceivePanel({ address, chain }) {
           {copied ? "Copied" : "Copy address"}
         </Button>
       </div>
+
+      <NetworkScopeNotice chain={chain} />
 
       {chain?.faucet && (
         <a className="faucet-link" href={chain.faucet} target="_blank" rel="noopener noreferrer">

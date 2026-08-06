@@ -61,8 +61,18 @@ export function ToastProvider({ children }) {
   );
 }
 
+/**
+ * Stable no-op for consumers rendered outside the provider.
+ *
+ * Module-level ON PURPOSE. This used to be an inline `() => {}`, which is a NEW
+ * function on every render — so any `useCallback(fn, [toast])` or
+ * `useEffect(..., [toast])` downstream would see a changed dependency every
+ * single render and re-run forever. A fallback meant to do nothing would have
+ * become an infinite fetch loop.
+ */
+const NOOP_TOAST = () => {};
+
 export function useToast() {
   const ctx = useContext(ToastContext);
-  // No-op fallback if a consumer is rendered outside the provider.
-  return ctx || (() => {});
+  return ctx || NOOP_TOAST;
 }

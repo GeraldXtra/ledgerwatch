@@ -34,6 +34,7 @@ import AlertHistory from "./AlertHistory";
 import PortfolioPanel from "./PortfolioPanel";
 import TradingModeToggle from "./TradingModeToggle";
 import LiveSwapModal from "./LiveSwapModal";
+import LivePortfolioPanel from "./LivePortfolioPanel";
 import { tradeability } from "./tradeability";
 import { fetchChains } from "../wallet/walletApi";
 import { getStoredAddress } from "../wallet/keystore";
@@ -77,6 +78,17 @@ function MarketWatch() {
 
   const { markets, stale, lastFetchedAt } = useMarkets(coinIds);
 
+  // Symbol -> coinId, built from what is already watched. Lets the live panel
+  // price on-chain holdings from the SAME cached market data, with no second fetch.
+  const coinIdBySymbol = useMemo(() => {
+    const map = {};
+    watches.forEach((w) => { map[String(w.symbol).toUpperCase()] = w.coinId; });
+    Object.values(markets).forEach((m) => {
+      if (m && m.symbol) map[String(m.symbol).toUpperCase()] = m.id;
+    });
+    return map;
+  }, [watches, markets]);
+
   // Track pending-alert ids to toast when a NEW one fires while on the page.
   // Stays null until the first load resolves, which also serves as the
   // "data has arrived" signal for deep linking.
@@ -88,17 +100,38 @@ function MarketWatch() {
   const loadData = useCallback(async () => {
     setError("");
     try {
-      const [w, a, p, h] = await Promise.all([
+      /**
+       * allSettled, NOT all.
+       *
+       * With Promise.all, ONE failing endpoint rejected the whole batch, so
+       * `setPortfolio` never ran, `pf` stayed null, and the page rendered
+       * skeletons forever — taking the watch form, the agent and the watch list
+       * down with it. A failed alert-history call has no business blanking the
+       * screen you add watches from. Each panel now succeeds or fails alone.
+       */
+      const [w, a, p, h] = await Promise.allSettled([
         http.get("/api/watches"),
         http.get("/api/alerts"),
         http.get("/api/portfolio"),
         http.get("/api/alerts/history"),
       ]);
-      setWatches(w.data.watches);
-      setPortfolio(p.data.portfolio);
-      setAlertHistory(h.data.alerts);
 
-      const nextAlerts = a.data.alerts;
+      const failed = [];
+      if (w.status === "fulfilled") setWatches(w.value.data.watches);
+      else failed.push("watches");
+      if (p.status === "fulfilled") setPortfolio(p.value.data.portfolio);
+      else failed.push("portfolio");
+      if (h.status === "fulfilled") setAlertHistory(h.value.data.alerts);
+      else failed.push("alert history");
+      if (a.status !== "fulfilled") failed.push("alerts");
+
+      // Named, so a partial failure is visible rather than looking like empty data.
+      if (failed.length) {
+        setError(`Could not load ${failed.join(", ")}. The rest of the page still works.`);
+      }
+      if (a.status !== "fulfilled") return;
+
+      const nextAlerts = a.value.data.alerts;
       // Toast on newly-appeared pending alerts (skip the very first load).
       if (knownAlertIds.current) {
         nextAlerts
@@ -424,7 +457,11 @@ function MarketWatch() {
         </div>
       )}
 
-      {pf === null ? (
+      {/* Only PAPER mode waits on the paper portfolio. It used to gate the entire
+          page, so a slow or failed /api/portfolio call left live mode showing
+          skeletons forever — live holdings come from the chain and have nothing
+          to do with the simulated portfolio loading. */}
+      {mode === "paper" && pf === null ? (
         <>
           <SkeletonBlock height={150} />
           <div className="kpi-row">
@@ -437,7 +474,17 @@ function MarketWatch() {
         </>
       ) : (
         <>
-          {/* HERO — live portfolio value + P/L + real holdings allocation */}
+          {/*
+            PAPER ONLY. This hero had NO mode guard at all: it rendered in live
+            mode too, so switching to Live wallet still showed "Simulated
+            portfolio" and the $1,000,000 paper start sitting above real funds.
+            A simulated figure presented while the user believes they are looking
+            at real holdings is the most dangerous thing this screen can do —
+            every decision made from it would be based on money that does not
+            exist. In live mode the live panel below is the ONLY portfolio shown,
+            and it states its own failures rather than falling back to anything.
+          */}
+          {mode === "paper" && (
           <Card hero eyebrow="Portfolio" title="Simulated portfolio" subtitle="Paper trading only. Values update live as prices move.">
             <div className="hero-grid">
               <div className="hero-figure">
@@ -498,20 +545,45 @@ function MarketWatch() {
               </div>
             </div>
           </Card>
+          )}
+
+          {/* LIVE ONLY, and rendered UNCONDITIONALLY in live mode. It previously
+              required `liveChain && walletAddress`, so a user with neither saw
+              nothing live and only the paper hero above — which is exactly how a
+              paper figure ended up representing a live wallet. The panel now owns
+              its own "no wallet" / "no chain" / "unreadable" states. */}
+          {mode === "live" && (
+            <LivePortfolioPanel
+              chain={liveChain}
+              chains={liveChains}
+              address={walletAddress}
+              markets={markets}
+              coinIdBySymbol={coinIdBySymbol}
+              onPickChain={setLiveChainId}
+            />
+          )}
 
           <div className="kpi-row">
             {/* Cash / watches / alerts only change on a trade or a fired alert, so they
                 count up. Total P/L is recomputed on every 10s price poll — animating it
                 would restart the count from zero each tick, so it stays a plain value. */}
-            <StatCard label="Cash balance" countTo={pf.cashBalance} format={usd} icon={<Wallet size={17} />} hint="Uninvested simulated cash" />
-            <StatCard
-              label="Total P/L"
-              value={signedUsd(pf.totalPnl)}
-              tone={up ? "pos" : "neg"}
-              icon={up ? <TrendingUp size={17} /> : <TrendingDown size={17} />}
-              iconTone={up ? "pos" : "neg"}
-              hint="Against the 1,000,000 start"
-            />
+            {/* The two money tiles are PAPER figures — simulated cash and P/L
+                against the 1,000,000 start. They are meaningless in live mode and
+                actively misleading next to real holdings, so they are withheld
+                rather than relabelled. Watches and alerts apply to both modes. */}
+            {mode === "paper" && (
+              <>
+                <StatCard label="Cash balance" countTo={pf.cashBalance} format={usd} icon={<Wallet size={17} />} hint="Uninvested simulated cash" />
+                <StatCard
+                  label="Total P/L"
+                  value={signedUsd(pf.totalPnl)}
+                  tone={up ? "pos" : "neg"}
+                  icon={up ? <TrendingUp size={17} /> : <TrendingDown size={17} />}
+                  iconTone={up ? "pos" : "neg"}
+                  hint="Against the 1,000,000 start"
+                />
+              </>
+            )}
             <StatCard label="Active watches" countTo={activeWatchCount} icon={<Eye size={17} />} hint="Checked on every pass" />
             <StatCard
               label="Pending alerts"
@@ -529,7 +601,11 @@ function MarketWatch() {
                 onSelect={(m) => setDetail(m.id)}
                 live={{ lastFetchedAt, stale }}
               />
-              <PortfolioPanel portfolio={pf} onSelect={(coinId) => setDetail(coinId)} />
+              {/* "Simulated positions" — paper only, for the same reason as the
+                  hero. Live holdings are shown by LivePortfolioPanel above. */}
+              {mode === "paper" && (
+                <PortfolioPanel portfolio={pf} onSelect={(coinId) => setDetail(coinId)} />
+              )}
               <AlertsList alerts={alerts} onTrade={openTrade} onDismiss={dismiss} busyId={busyId} />
               <AlertHistory alerts={alertHistory} />
             </div>
@@ -552,6 +628,10 @@ function MarketWatch() {
           onRemoveWatch={removeWatch}
         />
       )}
+
+      {/* The live panel now renders once, near the top, where the paper hero sits
+          in paper mode — so the two can never appear together and live mode can
+          never fall through to a simulated figure. */}
 
       {trade && (
         <TradePanel

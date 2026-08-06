@@ -24,6 +24,14 @@ const walletTxSchema = new mongoose.Schema({
    */
   kind: { type: String, enum: ["transfer", "swap", "approval"], default: "transfer" },
 
+  /**
+   * Block this was mined in. Doubles as the incremental-sync cursor: the inbound
+   * discovery scan resumes from max(blockNumber) for a user and chain, so it only
+   * ever re-reads new blocks rather than re-walking the same window on every
+   * History load.
+   */
+  blockNumber: { type: Number, default: null },
+
   // Swap-only. `value`/`symbol` above carry the INPUT side, so a swap reads as an
   // ordinary outgoing transfer to anything that does not know about swaps.
   tokenOut: { type: String, default: null },

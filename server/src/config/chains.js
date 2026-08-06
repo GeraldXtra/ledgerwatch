@@ -38,6 +38,28 @@
  * RPC URLs come from Alchemy when ALCHEMY_API_KEY is set (kept server-side and
  * proxied so the key never reaches the browser), otherwise a public RPC.
  * Everything is read from process.env at call time so dotenv is always applied.
+ *
+ * EACH CHAIN CARRIES AN ORDERED LIST OF ENDPOINTS, NOT ONE.
+ * The previous single-URL form (`alchemy(x) || publicNode`) picked its endpoint
+ * once, at module load, and had nowhere to go when that endpoint failed. That is
+ * exactly what broke the wallet: the Alchemy app behind this key has only the two
+ * Ethereum networks switched on, so Base Sepolia — the DEFAULT wallet chain —
+ * answered `403 BASE_SEPOLIA is not enabled for this app` on every single call,
+ * permanently, while a perfectly healthy public node sat unused in the `||`.
+ *
+ * EVERY FALLBACK BELOW WAS VERIFIED, not assumed. Each was required to answer
+ * `eth_chainId` with the CORRECT id — a fallback silently pointing at another
+ * network would broadcast a signed transaction onto the wrong chain — and to
+ * accept the same filtered `eth_getLogs` span the watchers use, since an endpoint
+ * that serves balances but refuses log queries would leave payment detection
+ * quietly broken while everything looked fine.
+ *
+ * Rejected during that pass, recorded so they are not retried:
+ *   - https://rpc.sepolia.org           returns an HTML error page, not JSON.
+ *   - https://1rpc.io/sepolia           caps eth_getLogs at 50 blocks (need 1500).
+ *   - https://rpc-amoy.polygon.technology  dead host; this is the origin of the
+ *     "fetch failed" in the logs — undici reports a connect failure with that
+ *     bare string and hides the real reason on `err.cause`.
  */
 
 function alchemy(subdomain) {
@@ -45,7 +67,39 @@ function alchemy(subdomain) {
   return key ? `https://${subdomain}.g.alchemy.com/v2/${key}` : null;
 }
 
+/**
+ * Ordered endpoints for one chain, best first. Nulls drop out, so an absent
+ * Alchemy key simply promotes the public node to primary instead of leaving a
+ * hole. Order is preference, not fallback-only: every entry must be a fully
+ * working endpoint for that chain on its own.
+ */
+function rpcList(...urls) {
+  return urls.filter(Boolean);
+}
+
 const token = (symbol, name, address, decimals) => ({ symbol, name, address, decimals });
+
+/**
+ * How to move funds ONTO this chain from its L1.
+ *
+ * LedgerWatch does not and will not bridge. This is a signpost only: a plain
+ * ERC-20 transfer cannot cross chains, and a user who tries anyway (by sending
+ * to their own address, which is the natural guess since the address is the same
+ * everywhere) burns gas and moves nothing. Pointing at the real tool is the
+ * honest answer to "how do I get my USDC onto Base?".
+ *
+ * URLs VERIFIED REACHABLE, not recalled:
+ *   - bridge.base.org is RETIRED. Both the bare host and /deposit now redirect to
+ *     docs.base.org/base-chain/network-information/ecosystem — a documentation
+ *     page, not a bridge. Superbridge is what actually serves a Base Sepolia
+ *     bridge UI (72KB of app, HTTP 200).
+ *   - portal.arbitrum.io/bridge answers a scripted request with a Cloudflare
+ *     challenge (HTTP 403, 5.5KB). That is bot protection rather than a dead
+ *     link, and bridge.arbitrum.io redirects to it, which is what identifies it
+ *     as canonical. Flagged here because it is asserted, not proven, unlike the
+ *     others.
+ */
+const bridge = (name, url) => ({ name, url });
 
 // Uniswap V3 deploys SwapRouter02 and QuoterV2 at the same canonical addresses
 // on Ethereum, Arbitrum, Optimism and Polygon. Base uses its own.
@@ -61,6 +115,12 @@ const UNIV3_CANONICAL = {
 function buildRegistry() {
   const mainnetEnabled = process.env.ENABLE_MAINNET === "true";
 
+  // `rpc` stays as the preferred endpoint so every existing caller keeps working
+  // unchanged; `rpcs` is the full ordered list for callers that can retry.
+  return rawRegistry(mainnetEnabled).map((c) => ({ ...c, rpc: c.rpcs[0] }));
+}
+
+function rawRegistry(mainnetEnabled) {
   return [
     // ======================= TESTNETS (enabled) =======================
     // NOTE: there is no official USDT on any of these testnets. Tether has not
@@ -70,13 +130,19 @@ function buildRegistry() {
       key: "sepolia",
       name: "Ethereum Sepolia",
       chainId: 11155111,
-      rpc: alchemy("eth-sepolia") || "https://ethereum-sepolia-rpc.publicnode.com",
+      // publicnode answers, but timed out past 15s on a filtered getLogs over
+      // 1500 blocks, so it is a genuine last resort here rather than a peer.
+      rpcs: rpcList(alchemy("eth-sepolia"), "https://ethereum-sepolia-rpc.publicnode.com"),
       explorer: "https://sepolia.etherscan.io",
       nativeSymbol: "ETH",
       decimals: 18,
       testnet: true,
       enabled: true,
       faucet: "https://www.alchemy.com/faucets/ethereum-sepolia",
+      // The L1 every other testnet here bridges FROM, so there is no "bridge
+      // onto Sepolia" route to offer. Returning to it is done through the
+      // destination chain's own bridge, in the withdraw direction.
+      bridge: null,
       stables: [token("USDC", "USD Coin (test)", "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", 6)],
       wrappedNative: token("WETH", "Wrapped Ether", "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14", 18),
       // I assumed the canonical Uniswap V3 router and quoter were deployed here.
@@ -89,13 +155,20 @@ function buildRegistry() {
       key: "base-sepolia",
       name: "Base Sepolia",
       chainId: 84532,
-      rpc: alchemy("base-sepolia") || "https://sepolia.base.org",
+      // Both public nodes verified: correct chainId, and an identical 5,137 logs
+      // for the same filtered 1500-block query. Alchemy 403s for this key today.
+      rpcs: rpcList(
+        alchemy("base-sepolia"),
+        "https://sepolia.base.org",
+        "https://base-sepolia-rpc.publicnode.com"
+      ),
       explorer: "https://sepolia.basescan.org",
       nativeSymbol: "ETH",
       decimals: 18,
       testnet: true,
       enabled: true,
       faucet: "https://www.alchemy.com/faucets/base-sepolia",
+      bridge: bridge("Superbridge", "https://superbridge.app/base-sepolia"),
       stables: [token("USDC", "USD Coin (test)", "0x036CbD53842c5426634e7929541eC2318f3dCF7e", 6)],
       // 0x42...06 is the OP-stack WETH predeploy, identical across OP chains.
       wrappedNative: token("WETH", "Wrapped Ether", "0x4200000000000000000000000000000000000006", 18),
@@ -123,13 +196,19 @@ function buildRegistry() {
       key: "arbitrum-sepolia",
       name: "Arbitrum Sepolia",
       chainId: 421614,
-      rpc: alchemy("arb-sepolia") || "https://sepolia-rollup.arbitrum.io/rpc",
+      // Both verified, 42 logs each on the same filtered query.
+      rpcs: rpcList(
+        alchemy("arb-sepolia"),
+        "https://sepolia-rollup.arbitrum.io/rpc",
+        "https://arbitrum-sepolia-rpc.publicnode.com"
+      ),
       explorer: "https://sepolia.arbiscan.io",
       nativeSymbol: "ETH",
       decimals: 18,
       testnet: true,
       enabled: true,
       faucet: "https://www.alchemy.com/faucets/arbitrum-sepolia",
+      bridge: bridge("Arbitrum Bridge", "https://portal.arbitrum.io/bridge"),
       stables: [token("USDC", "USD Coin (test)", "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d", 6)],
       wrappedNative: token("WETH", "Wrapped Ether", "0x980B62Da83eFf3D4576C647993b0c1D7faf17c73", 18),
       dex: null,
@@ -138,13 +217,19 @@ function buildRegistry() {
       key: "optimism-sepolia",
       name: "Optimism Sepolia",
       chainId: 11155420,
-      rpc: alchemy("opt-sepolia") || "https://sepolia.optimism.io",
+      // Both verified, 152 logs each on the same filtered query.
+      rpcs: rpcList(
+        alchemy("opt-sepolia"),
+        "https://sepolia.optimism.io",
+        "https://optimism-sepolia-rpc.publicnode.com"
+      ),
       explorer: "https://sepolia-optimism.etherscan.io",
       nativeSymbol: "ETH",
       decimals: 18,
       testnet: true,
       enabled: true,
       faucet: "https://www.alchemy.com/faucets/optimism-sepolia",
+      bridge: bridge("Optimism Bridge", "https://app.optimism.io/bridge"),
       stables: [token("USDC", "USD Coin (test)", "0x5fd84259d66Cd46123540766Be93DFE6D43130D7", 6)],
       wrappedNative: token("WETH", "Wrapped Ether", "0x4200000000000000000000000000000000000006", 18),
       dex: null,
@@ -156,13 +241,18 @@ function buildRegistry() {
       // rpc-amoy.polygon.technology is unreachable (verified: fetch fails
       // outright, not a rate limit). publicnode answers and confirms the USDC
       // contract below, so it is the fallback.
-      rpc: alchemy("polygon-amoy") || "https://polygon-amoy-bor-rpc.publicnode.com",
+      // Only one verified public node. Amoy's documented endpoint
+      // (rpc-amoy.polygon.technology) is dead — it is the source of the bare
+      // "fetch failed" this work started from. Not listed rather than listed and
+      // broken.
+      rpcs: rpcList(alchemy("polygon-amoy"), "https://polygon-amoy-bor-rpc.publicnode.com"),
       explorer: "https://amoy.polygonscan.com",
       nativeSymbol: "POL",
       decimals: 18,
       testnet: true,
       enabled: true,
       faucet: "https://www.alchemy.com/faucets/polygon-amoy",
+      bridge: bridge("Polygon Portal", "https://portal.polygon.technology"),
       stables: [token("USDC", "USD Coin (test)", "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582", 6)],
       wrappedNative: null, // no verified wrapped-native deployment on Amoy
       dex: null,
@@ -173,7 +263,10 @@ function buildRegistry() {
       key: "ethereum",
       name: "Ethereum",
       chainId: 1,
-      rpc: alchemy("eth-mainnet") || "https://ethereum-rpc.publicnode.com",
+      // Mainnet endpoints are single-entry: they are disabled, so none of these
+      // were put through the fallback verification the testnets got, and an
+      // unverified real-money endpoint is worse than no fallback at all.
+      rpcs: rpcList(alchemy("eth-mainnet"), "https://ethereum-rpc.publicnode.com"),
       explorer: "https://etherscan.io",
       nativeSymbol: "ETH",
       decimals: 18,
@@ -191,7 +284,7 @@ function buildRegistry() {
       key: "base",
       name: "Base",
       chainId: 8453,
-      rpc: alchemy("base-mainnet") || "https://mainnet.base.org",
+      rpcs: rpcList(alchemy("base-mainnet"), "https://mainnet.base.org"),
       explorer: "https://basescan.org",
       nativeSymbol: "ETH",
       decimals: 18,
@@ -213,7 +306,7 @@ function buildRegistry() {
       key: "arbitrum",
       name: "Arbitrum One",
       chainId: 42161,
-      rpc: alchemy("arb-mainnet") || "https://arbitrum-one-rpc.publicnode.com",
+      rpcs: rpcList(alchemy("arb-mainnet"), "https://arbitrum-one-rpc.publicnode.com"),
       explorer: "https://arbiscan.io",
       nativeSymbol: "ETH",
       decimals: 18,
@@ -235,7 +328,7 @@ function buildRegistry() {
       key: "optimism",
       name: "OP Mainnet",
       chainId: 10,
-      rpc: alchemy("opt-mainnet") || "https://optimism-rpc.publicnode.com",
+      rpcs: rpcList(alchemy("opt-mainnet"), "https://optimism-rpc.publicnode.com"),
       explorer: "https://optimistic.etherscan.io",
       nativeSymbol: "ETH",
       decimals: 18,
@@ -253,7 +346,7 @@ function buildRegistry() {
       key: "polygon",
       name: "Polygon",
       chainId: 137,
-      rpc: alchemy("polygon-mainnet") || "https://polygon-bor-rpc.publicnode.com",
+      rpcs: rpcList(alchemy("polygon-mainnet"), "https://polygon-bor-rpc.publicnode.com"),
       explorer: "https://polygonscan.com",
       nativeSymbol: "POL",
       decimals: 18,
@@ -271,7 +364,7 @@ function buildRegistry() {
       key: "bnb",
       name: "BNB Chain",
       chainId: 56,
-      rpc: "https://bsc-rpc.publicnode.com",
+      rpcs: rpcList("https://bsc-rpc.publicnode.com"),
       explorer: "https://bscscan.com",
       nativeSymbol: "BNB",
       decimals: 18,
@@ -291,7 +384,7 @@ function buildRegistry() {
       key: "avalanche",
       name: "Avalanche C-Chain",
       chainId: 43114,
-      rpc: "https://avalanche-c-chain-rpc.publicnode.com",
+      rpcs: rpcList("https://avalanche-c-chain-rpc.publicnode.com"),
       explorer: "https://snowtrace.io",
       nativeSymbol: "AVAX",
       decimals: 18,
@@ -317,15 +410,20 @@ function tokensFor(chain) {
   return [...(chain.stables || []), ...(chain.wrappedNative ? [chain.wrappedNative] : [])];
 }
 
-// Chains exposed to the client — enabled only, and WITHOUT the rpc URL (which may
-// embed the Alchemy key). The client talks to chains exclusively via the proxy.
+// Chains exposed to the client — enabled only, and WITHOUT any RPC URL. BOTH
+// `rpc` and `rpcs` are stripped: the list carries the same Alchemy key the single
+// URL did, so exposing it would leak the key just as surely. The client talks to
+// chains exclusively via the proxy.
 function listChains() {
   return buildRegistry()
     .filter((c) => c.enabled)
-    .map(({ rpc, ...pub }) => ({
+    .map(({ rpc, rpcs, ...pub }) => ({
       ...pub,
       tokens: tokensFor(pub),
       hasKey: Boolean(process.env.ALCHEMY_API_KEY),
+      // How many endpoints back this chain, so the UI can say "1 of 3 tried"
+      // without ever seeing a URL.
+      endpointCount: rpcs.length,
     }));
 }
 
