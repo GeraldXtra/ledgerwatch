@@ -118,6 +118,42 @@ an **App Password** (Google Account → Security → App passwords). Use that 16
 `SMTP_PASS` with `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER=you@gmail.com`. Your
 normal login password will **not** work.
 
+### Email deliverability — read this before relying on it
+
+**Reminders sent from a `@gmail.com` address will often land in spam, and no amount of
+application-level work fixes that.** The reason is alignment: a receiving server checks
+whether the domain in the `From:` header authorised the server that sent the message. Mail
+claiming to be from `gmail.com` but relayed on your behalf does not align, so it is treated
+with suspicion no matter how well-formed it is.
+
+What LedgerWatch already does (all of it verified in the generated MIME):
+
+- `Message-ID`, `Date`, `MIME-Version` — generated to spec by nodemailer
+- `List-Unsubscribe` with **both** an `https:` one-click and a `mailto:` form, plus
+  `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
+- `Auto-Submitted: auto-generated`, `Precedence: bulk`, `X-Auto-Response-Suppress`
+- A genuine `text/plain` alternative whose figures, address and network **match the HTML**
+- Inline `cid:` images only — the logo is ~0.7 KB and the QR ~1.6 KB, so a reminder is
+  around 9 KB with text outweighing images several times over
+- Measured, unhurried subject lines and body copy: no all-caps, no exclamation stacking,
+  no urgency language
+- **No tracking pixels and no redirect links**, deliberately
+
+**What still requires a custom domain.** Point a domain you control at your mail provider
+and publish these three records. Until then, expect inconsistent placement:
+
+| Type | Host | Value |
+|---|---|---|
+| `TXT` | `@` | `v=spf1 include:_spf.google.com ~all` (use your provider's include) |
+| `TXT` | `<selector>._domainkey` | the DKIM public key your provider generates |
+| `TXT` | `_dmarc` | `v=DMARC1; p=none; rua=mailto:dmarc@yourdomain.com; adkim=s; aspf=s` |
+
+Start DMARC at `p=none` and read the aggregate reports for a week or two before moving to
+`p=quarantine` and then `p=reject`. Tightening it before SPF and DKIM both pass will send
+your own legitimate mail to the bin. Then set `MAIL_FROM` to an address at that domain —
+alignment is what actually moves the needle, and it only works once the `From:` domain is
+one whose DNS you publish.
+
 **One reminder per client per cadence window.** A debt's `reminderCadenceDays` (default 3) also
 acts as an anti-spam guard: the automation will not email the same client twice inside that
 window, and a suppressed send is recorded as `skipped: "Already sent this cadence window"`.
