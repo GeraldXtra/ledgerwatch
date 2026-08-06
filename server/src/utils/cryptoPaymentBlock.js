@@ -76,7 +76,7 @@ function cryptoBlockText(pa, chain) {
  * @param {object} chain   { name } from the chain config
  * @param {string|null} qrCid  content id of the attached QR, or null for no QR
  */
-function cryptoBlockHtml(pa, chain, qrCid) {
+function cryptoBlockHtml(pa, chain, qrCid, hasLogo = false) {
   if (!pa || !chain) return "";
 
   const FONT = "'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
@@ -91,7 +91,15 @@ function cryptoBlockHtml(pa, chain, qrCid) {
                   style="display:block;border:0;width:170px;height:170px" />
            </td></tr>
            <tr><td style="padding-top:8px;font:400 12px ${FONT};color:#64748b" align="center">
-             Scan with your wallet app
+             ${
+               /* The mark sits beside the caption rather than over the QR
+                  itself — anything overlapping the code risks the scan, and the
+                  point of the QR is that it reads first time. */
+               hasLogo
+                 ? `<img src="cid:ledgerwatch-logo" width="14" height="14" alt=""
+                         style="display:inline-block;border:0;border-radius:3px;vertical-align:-3px;margin-right:5px" />`
+                 : ""
+             }Scan with your wallet app
            </td></tr>
          </table>
        </td></tr>`

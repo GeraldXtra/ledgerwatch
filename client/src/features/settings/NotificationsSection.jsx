@@ -298,6 +298,22 @@ export default function NotificationsSection() {
           </span>
         </label>
 
+        {/* Said plainly, because a reminder silently sitting in a spam folder
+            looks identical to one that was never sent — and the user would
+            reasonably blame the app rather than their DNS. */}
+        {autoSend.enabled && autoSend.email && (
+          <p className="muted small settings-note">
+            <strong>About spam folders.</strong> Reminders sent from a personal Gmail address
+            frequently land in spam, and this is not something the app can fix from its side.
+            Mail providers check whether the sending domain authorised the message; a
+            gmail.com sender relayed on your behalf does not match, so it is treated with
+            suspicion however well the email is put together. LedgerWatch already does the
+            rest — a proper plain-text alternative, unsubscribe headers, light inline images
+            and no tracking. Reliable inbox delivery needs a domain you own with SPF, DKIM and
+            DMARC records; the README lists the exact records.
+          </p>
+        )}
+
         {error && <p className="error-text">{error}</p>}
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <Button variant="primary" type="submit" disabled={busy}>

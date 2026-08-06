@@ -79,8 +79,12 @@ async function dispatchReminder(reminder, debt, owner, { channels = [], force = 
           try {
             // eslint-disable-next-line global-require
             const QRCode = require("qrcode");
+            // 220px, not 340. It renders at 170px in the email, so 340 was
+            // paying for pixels nobody sees — and image weight against text is
+            // one of the things spam filters actually score. Error correction
+            // stays at M so the code still reads from a phone screen.
             const buffer = await QRCode.toBuffer(active.address, {
-              width: 340,
+              width: 220,
               margin: 1,
               errorCorrectionLevel: "M",
               color: { dark: "#0a1428", light: "#ffffff" },
@@ -100,7 +104,7 @@ async function dispatchReminder(reminder, debt, owner, { channels = [], force = 
             // ever said so.
             console.error("Reminder QR generation failed:", err.message);
           }
-          cryptoHtml = cryptoBlockHtml(active, chain, qrCid);
+          cryptoHtml = cryptoBlockHtml(active, chain, qrCid, Boolean(logo));
         }
       }
 
