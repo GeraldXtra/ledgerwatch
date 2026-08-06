@@ -12,7 +12,9 @@ import {
   Trash2,
   TriangleAlert,
   Wallet as WalletIcon,
+  X,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import {
   Button,
   Card,
@@ -30,6 +32,7 @@ import {
   getLegacyWallet,
   claimLegacyWallet,
   discardLegacyWallet,
+  isBackedUp,
 } from "./keystore";
 import {
   fetchChains,
@@ -61,6 +64,10 @@ function WalletInner() {
   const [legacy, setLegacy] = useState(() => getLegacyWallet());
   const [claiming, setClaiming] = useState(false);
   const [hideZero, setHideZero] = useState(false);
+  // Re-read rather than captured once: revealing the phrase in Settings flips
+  // this, and coming back to the wallet should not still be nagging.
+  const [backedUp, setBackedUp] = useState(() => isBackedUp());
+  const [backupDismissed, setBackupDismissed] = useState(false);
   const [addTokenOpen, setAddTokenOpen] = useState(false);
   const [subtab, setSubtab] = useState("send");
   const [balances, setBalances] = useState(null);
@@ -224,6 +231,10 @@ function WalletInner() {
   useEffect(() => {
     loadBalances();
     loadTxs();
+    // Backup state can change on another screen (Settings → Wallet backup), so
+    // it is re-read whenever this page becomes active rather than trusted from
+    // the first render.
+    setBackedUp(isBackedUp());
   }, [loadBalances, loadTxs]);
 
   function onWalletReady(addr) {
@@ -405,6 +416,32 @@ function WalletInner() {
       />
 
       <MainnetBanner chain={chain} />
+
+      {/* A wallet whose phrase was never written down is one cleared browser
+          away from being unrecoverable — not stolen, just gone, with the owner
+          never having been given the thing that would have saved it. Dismissible
+          per session, because nagging that cannot be silenced gets ignored, but
+          it returns on the next visit until the phrase has actually been seen. */}
+      {address && !backedUp && !backupDismissed && (
+        <div className="backup-reminder">
+          <TriangleAlert size={17} />
+          <div className="grow">
+            <strong>Back up this wallet</strong>
+            <span className="muted small">
+              You have not viewed your recovery phrase yet. Without it, clearing this browser or
+              losing this device means the funds cannot be recovered — by you or by us.
+            </span>
+          </div>
+          <div className="row">
+            <Link className="btn btn-primary btn-sm" to="/app/settings?section=wallet-backup">
+              Back up now
+            </Link>
+            <Button variant="ghost" icon title="Dismiss" onClick={() => setBackupDismissed(true)}>
+              <X size={15} />
+            </Button>
+          </div>
+        </div>
+      )}
 
       <Card>
         <div className="wallet-head">
