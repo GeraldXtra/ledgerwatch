@@ -4,6 +4,7 @@ import { FlaskConical, Lock, TriangleAlert, Wallet } from "lucide-react";
 import { Button, useToast } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { hasWallet } from "../wallet/keystore";
+import { useChain } from "../../context/ChainContext";
 import { setTradingMode } from "../wallet/walletApi";
 
 /**
@@ -23,7 +24,15 @@ export default function TradingModeToggle({ mode, onChange }) {
   const [busy, setBusy] = useState(false);
 
   const walletReady = hasWallet();
-  const isDemo = String(user?.email || "").toLowerCase() === "demo@ledgerwatch.app";
+  const { chain } = useChain();
+  /**
+   * The SERVER decides who may trade live; this only mirrors it. It used to
+   * compare against a hardcoded "demo@ledgerwatch.app" here, which duplicated a
+   * policy the API owns and would have silently disagreed with it the moment
+   * that policy changed. Defaults to allowed so a stale user object cannot lock
+   * someone out of their own wallet — the API refuses regardless.
+   */
+  const canTradeLive = user?.canTradeLive !== false;
 
   async function choose(next) {
     if (next === mode || busy) return;
@@ -68,14 +77,14 @@ export default function TradingModeToggle({ mode, onChange }) {
           type="button"
           className={mode === "live" ? "mode-btn active live" : "mode-btn"}
           onClick={() => choose("live")}
-          disabled={busy || isDemo}
-          title={isDemo ? "The shared demo account is limited to paper trading" : undefined}
+          disabled={busy || !canTradeLive}
+          title={!canTradeLive ? "The shared demo account is limited to paper trading" : undefined}
         >
-          {isDemo ? <Lock size={14} /> : <Wallet size={14} />} Live wallet
+          {!canTradeLive ? <Lock size={14} /> : <Wallet size={14} />} Live wallet
         </button>
       </div>
 
-      {isDemo && (
+      {!canTradeLive && (
         <p className="mode-note">
           <Lock size={13} />
           The shared demo account is permanently limited to paper trading, so anyone can explore it
@@ -83,7 +92,7 @@ export default function TradingModeToggle({ mode, onChange }) {
         </p>
       )}
 
-      {!isDemo && !walletReady && (
+      {canTradeLive && !walletReady && (
         <p className="mode-note">
           <Wallet size={13} />
           Live trading needs a wallet that can sign. <Link to="/app/wallet">Create or import one</Link>{" "}
@@ -91,11 +100,30 @@ export default function TradingModeToggle({ mode, onChange }) {
         </p>
       )}
 
-      {mode === "live" && (
+      {/* CHAIN-AWARE, deliberately. This said "Live mode spends real funds"
+          regardless of network — false on a testnet, where the funds are
+          worthless, and dangerously mild if a mainnet were ever selected. What
+          "live" actually means is REAL SIGNING rather than a simulation; whether
+          real money is involved is a separate question, answered by the chain. */}
+      {mode === "live" && chain && !chain.testnet && (
         <p className="mode-note danger">
           <TriangleAlert size={13} />
-          Live mode spends real funds from your wallet. Every trade is quoted, checked and signed by
-          you individually.
+          <span>
+            <strong>{chain.name} is a real-money network.</strong> Trades spend real funds from
+            your wallet and cannot be reversed. Every one is quoted, checked and signed by you
+            individually.
+          </span>
+        </p>
+      )}
+      {mode === "live" && chain && chain.testnet && (
+        <p className="mode-note">
+          <TriangleAlert size={13} />
+          <span>
+            Live mode signs <strong>real transactions</strong> on <strong>{chain.name}</strong> with
+            your own wallet — nothing here is simulated. {chain.name} is a test network, so the
+            funds have <strong>no monetary value</strong>. Real-money networks are a separately
+            gated step and are not enabled in this build.
+          </span>
         </p>
       )}
     </div>

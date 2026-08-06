@@ -210,6 +210,17 @@ export default function NetworkSwitcher({ chains, chainId, address, onChange }) 
                   They sent 80 USDC to their own address expecting it to land on
                   another chain; it stayed put and cost a fee. The second
                   sentence is the part that was missing. */}
+              {/* Mainnets are filtered out server-side when ENABLE_MAINNET is
+                  false. Without a word here their absence reads as a missing
+                  feature or a broken list, and someone hunts for a setting that
+                  is not there. Said once, plainly. */}
+              {mainnets.length === 0 && (
+                <p className="net-note">
+                  <strong>Test networks only.</strong> Real-money networks are disabled in this
+                  build. Live trading still signs genuine transactions here — the funds simply have
+                  no monetary value.
+                </p>
+              )}
               <p className="net-note">
                 One address, every network. Your wallet address is the same on all of these — you do
                 not need a separate wallet per chain.

@@ -22,6 +22,10 @@ module.exports = [
     },
     rules: {
       "no-undef": "error",
+      // Catches the temporal dead zone, which `no-undef` cannot — the variable
+      // is in scope, just declared later. `functions: false` because hoisted
+      // function declarations are idiomatic here.
+      "no-use-before-define": ["error", { functions: false, variables: true, classes: true }],
       "no-unused-vars": ["warn", { args: "none", varsIgnorePattern: "^_" }],
       "no-empty": ["warn", { allowEmptyCatch: true }],
     },

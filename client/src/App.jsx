@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { ChainProvider } from "./context/ChainContext";
 import { lazy } from "react";
 import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
@@ -45,6 +46,10 @@ function RequireAuth({ children }) {
 export default function App() {
   return (
     <AuthProvider>
+      {/* Inside AuthProvider: the chain list is an authenticated call, and the
+          keystore is scoped per account, so chains must not be fetched before we
+          know who is signed in. */}
+      <ChainProvider>
       <Routes>
         <Route
           path="/"
@@ -82,6 +87,7 @@ export default function App() {
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </ChainProvider>
     </AuthProvider>
   );
 }

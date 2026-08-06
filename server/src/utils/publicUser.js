@@ -18,6 +18,26 @@ function publicUser(user) {
     notifyPrefs: u.notifyPrefs || { marketAlerts: true, remindersDue: true, txUpdates: true },
     crypto: cryptoSettings(u.crypto),
     tradingMode: u.tradingMode || "paper",
+    /**
+     * Whether this account may switch to live trading. Decided HERE, on the
+     * server, because the server is what enforces it — the client used to
+     * compare against a hardcoded demo email, which would silently disagree the
+     * moment the policy changed.
+     *
+     * Required lazily to avoid a require cycle: the trading controller already
+     * imports this module.
+     */
+    canTradeLive: require("../controllers/trading.controller").canTradeLive(u),
+    // Defaults to "prompt" here as well as in the schema, so an account created
+    // before this field existed behaves the same as a new one.
+    chainSwitchMode: u.chainSwitchMode || "prompt",
+    /**
+     * Whether the extra reveal verification is on — the PROMPTS and HASHES are
+     * deliberately NOT included. The UI only needs to know it is enabled; the
+     * questions are fetched from the wallet-security endpoint when they are
+     * actually needed, and the hashes never leave the server at all.
+     */
+    walletSecurityEnabled: Boolean(u.walletSecurity && u.walletSecurity.enabled),
     customTokens: u.customTokens || [],
     createdAt: u.createdAt,
   };

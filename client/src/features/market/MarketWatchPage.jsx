@@ -36,9 +36,9 @@ import TradingModeToggle from "./TradingModeToggle";
 import LiveSwapModal from "./LiveSwapModal";
 import LivePortfolioPanel from "./LivePortfolioPanel";
 import { tradeability } from "./tradeability";
-import { fetchChains } from "../wallet/walletApi";
 import { getStoredAddress } from "../wallet/keystore";
-import { recallChain } from "../wallet/NetworkSwitcher";
+import NetworkSwitcher from "../wallet/NetworkSwitcher";
+import { useChain } from "../../context/ChainContext";
 
 const STARTING_CASH = 1000000;
 
@@ -51,12 +51,67 @@ function MarketWatch() {
   // this mirrors it so the UI does not have to round-trip on every render.
   const [mode, setMode] = useState(user?.tradingMode === "live" ? "live" : "paper");
   // Live trading needs a chain and the wallet address; both are inert in paper mode.
-  const [liveChains, setLiveChains] = useState([]);
-  const [liveChainId, setLiveChainId] = useState(null);
+  /**
+   * ONE chain selection, shared with the wallet. This page used to keep its own
+   * `liveChainId`, read the session store only on mount, and only in live mode —
+   * so it could show a different network from the wallet while both looked
+   * authoritative. Aliased to the old names so the rest of this large component
+   * reads unchanged.
+   */
+  const {
+    chains: liveChains,
+    chainId: liveChainId,
+    chain: liveChain,
+    setChainId: setLiveChainId,
+    error: chainError,
+  } = useChain();
+
   const [liveSwap, setLiveSwap] = useState(null);
-  const liveChain = liveChains.find((c) => c.chainId === liveChainId) || null;
   const walletAddress = getStoredAddress();
   const toast = useToast();
+
+  /**
+   * The first enabled chain that actually has a verified DEX. Comes from the
+   * registry, so "supports live trading" means contracts we checked on chain —
+   * never a hardcoded chain id.
+   */
+  const dexChain = useMemo(() => liveChains.find((c) => c.dex) || null, [liveChains]);
+
+  /**
+   * Move to a chain that can trade, and SAY SO. Called either by the user
+   * pressing the button or automatically when they have chosen `auto`; the toast
+   * names the chain in both cases, because a network changing underneath you
+   * without a word is exactly the surprise this feature exists to avoid.
+   */
+  const switchToDexChain = useCallback(
+    (reason) => {
+      if (!dexChain) return;
+      setLiveChainId(dexChain.chainId);
+      toast(
+        reason === "auto"
+          ? `Switched to ${dexChain.name} — the network that supports live trading.`
+          : `Now on ${dexChain.name}.`,
+        { type: "info" }
+      );
+    },
+    [dexChain, setLiveChainId, toast]
+  );
+
+  /**
+   * Entering live mode on a chain with no DEX. `auto` moves immediately; the
+   * default `prompt` leaves the explanatory banner below to offer the switch.
+   */
+  const onModeChange = useCallback(
+    (next) => {
+      setMode(next);
+      if (next !== "live") return;
+      const current = liveChains.find((c) => c.chainId === liveChainId) || null;
+      if (current && !current.dex && dexChain && user?.chainSwitchMode === "auto") {
+        switchToDexChain("auto");
+      }
+    },
+    [liveChains, liveChainId, dexChain, user?.chainSwitchMode, switchToDexChain]
+  );
   const [watches, setWatches] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [alertHistory, setAlertHistory] = useState([]);
@@ -152,17 +207,9 @@ function MarketWatch() {
     loadData();
   }, [loadData]);
 
-  // Chain list only matters in live mode; the same registry the wallet uses.
-  useEffect(() => {
-    if (mode !== "live" || liveChains.length) return;
-    fetchChains()
-      .then((d) => {
-        const usable = (d.chains || []).filter((c) => c.testnet || d.enableMainnet);
-        setLiveChains(usable);
-        if (usable.length) setLiveChainId((p) => p || recallChain(usable));
-      })
-      .catch(() => setLiveChains([]));
-  }, [mode, liveChains.length]);
+  // The chain list is loaded once by ChainProvider for the whole app, in BOTH
+  // modes. It used to load only in live mode, which is part of why this page and
+  // the wallet could disagree about the current network.
 
   /**
    * A foreground push has already been toasted by the shell-level bridge, so this
@@ -438,9 +485,56 @@ function MarketWatch() {
         }
       />
 
-      <TradingModeToggle mode={mode} onChange={setMode} />
+      <TradingModeToggle mode={mode} onChange={onModeChange} />
 
+      {/* The SAME switcher component the wallet uses — same typed-MAINNET
+          confirmation, same badge rules. Switching here switches there, because
+          both read one shared selection. Shown in live mode, where the chain
+          actually determines what can be traded and with what. */}
+      {mode === "live" && liveChains.length > 0 && (
+        <div className="row space-between wrap market-chain-bar">
+          <span className="muted small">
+            Trading on <strong>{liveChain ? liveChain.name : "no network selected"}</strong> — the
+            same network your wallet is on.
+          </span>
+          <NetworkSwitcher
+            chains={liveChains}
+            chainId={liveChainId}
+            address={walletAddress}
+            onChange={setLiveChainId}
+          />
+        </div>
+      )}
+
+      {chainError && <p className="error-text">{chainError}</p>}
       {error && <p className="error-text">{error}</p>}
+
+      {/* No verified DEX on this chain. Named plainly with a way out, rather
+          than letting the user discover it when a trade silently cannot be
+          quoted. */}
+      {mode === "live" && liveChain && !liveChain.dex && (
+        <div className="reveal-warning warn">
+          <TriangleAlert size={18} />
+          <div className="grow">
+            <p className="reveal-warn-lead">
+              No verified exchange on {liveChain.name}
+            </p>
+            <p className="muted small" style={{ margin: 0 }}>
+              Live trading needs a decentralised exchange whose contracts we have verified on
+              chain, and {liveChain.name} has none — so quotes and swaps are unavailable here.
+              Your balances and payments on this network are unaffected.
+              {dexChain
+                ? ` ${dexChain.name} does support live trading.`
+                : " No enabled network currently supports live trading."}
+            </p>
+          </div>
+          {dexChain && (
+            <Button variant="primary" onClick={() => switchToDexChain("manual")}>
+              Switch to {dexChain.name}
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* A notification pointed at an alert that has since been resolved. This is
           an ordinary outcome, not an error, so it reads as information and can be

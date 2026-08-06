@@ -17,9 +17,34 @@ function isDemo(user) {
   return String(user.email || "").toLowerCase() === PROTECTED_EMAIL;
 }
 
+/**
+ * Temporary unlock for a SUPERVISED demonstration.
+ *
+ * Off unless explicitly set. The credentials for this account are printed in the
+ * README, so with the flag on, anyone who signs in can put the shared account
+ * into live mode. That is acceptable while someone is presenting and watching;
+ * it is not acceptable as a standing configuration, which is why it defaults to
+ * false rather than being removed.
+ *
+ * Note the blast radius is bounded by design: the keystore lives in the
+ * presenter's own browser, so another visitor switching the shared account to
+ * live mode still has no key to sign with and cannot move anyone's funds.
+ */
+function demoLiveAllowed() {
+  return process.env.DEMO_ALLOW_LIVE === "true";
+}
+
+/**
+ * May this user trade live? The ONE place that answers it, so the API and the
+ * UI can never disagree about the policy.
+ */
+function canTradeLive(user) {
+  return !isDemo(user) || demoLiveAllowed();
+}
+
 /** Reused by the execution paths, so the lock cannot be bypassed by route. */
 function assertCanTradeLive(user) {
-  if (isDemo(user)) {
+  if (!canTradeLive(user)) {
     const err = new Error(
       "The shared demo account is limited to paper trading. Create your own account to trade live."
     );
@@ -121,4 +146,4 @@ async function removeToken(req, res) {
   }
 }
 
-module.exports = { setMode, listTokens, addToken, removeToken, assertCanTradeLive, isDemo };
+module.exports = { setMode, listTokens, addToken, removeToken, assertCanTradeLive, isDemo, canTradeLive };

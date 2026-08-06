@@ -41,6 +41,20 @@ export default [
       "no-undef": "error",
 
       /**
+       * Use before declaration — the temporal dead zone.
+       *
+       * `no-undef` cannot catch this: the variable IS defined in scope, just
+       * later. That is precisely how a `useCallback` dependency array reading
+       * `toast` before `const toast = useToast()` crashed Market Watch into the
+       * error boundary — React evaluates a dep array eagerly on every render, so
+       * the array alone throws without the callback body ever running.
+       *
+       * `functions: false` on purpose: hoisted function declarations used above
+       * their definition are idiomatic and safe. `const`/`let` are the hazard.
+       */
+      "no-use-before-define": ["error", { functions: false, variables: true, classes: true }],
+
+      /**
        * Without this, plain `no-unused-vars` cannot see that a component is used
        * inside JSX, and reports every imported component as dead — 575 false
        * findings on this codebase. Warnings nobody can trust are worse than no

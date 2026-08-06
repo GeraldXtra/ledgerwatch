@@ -35,14 +35,14 @@ import {
   isBackedUp,
 } from "./keystore";
 import {
-  fetchChains,
   fetchTxs,
   clearAddress,
   updateTxStatus,
   saveAddress,
   saveCustomToken,
 } from "./walletApi";
-import NetworkSwitcher, { rememberChain, recallChain } from "./NetworkSwitcher";
+import NetworkSwitcher from "./NetworkSwitcher";
+import { useChain } from "../../context/ChainContext";
 import MainnetBanner from "./MainnetBanner";
 import CreateWalletModal from "./CreateWalletModal";
 import ImportWalletModal from "./ImportWalletModal";
@@ -58,8 +58,13 @@ function shorten(a) {
 
 function WalletInner() {
   const { user, applyUser } = useAuth();
-  const [chains, setChains] = useState([]);
-  const [chainId, setChainId] = useState(null);
+  /**
+   * Chain state comes from the shared context, NOT from local state. This page
+   * and Market Watch previously each held their own and could sit on different
+   * networks while both looked authoritative — on a screen where the chain
+   * decides which balance you see, that is the worst kind of quiet wrong.
+   */
+  const { chains, chainId, chain, setChainId, error: chainError } = useChain();
   const [address, setAddress] = useState(getStoredAddress());
   const [legacy, setLegacy] = useState(() => getLegacyWallet());
   const [claiming, setClaiming] = useState(false);
@@ -80,7 +85,6 @@ function WalletInner() {
   const [importOpen, setImportOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const chain = chains.find((c) => c.chainId === chainId) || null;
 
   // A zero native balance means nothing can be sent from this chain at all.
   // Surfaced persistently rather than at the moment of signing. An UNKNOWN
@@ -108,20 +112,8 @@ function WalletInner() {
     setTxs([]);
   }, [user?._id]);
 
-  // Load the config-driven chain list once. The server already filters disabled
-  // chains; we filter again here so a mainnet entry can never surface client-side
-  // unless ENABLE_MAINNET is explicitly on (defence in depth).
-  useEffect(() => {
-    fetchChains()
-      .then((d) => {
-        const usable = (d.chains || []).filter((c) => c.testnet || d.enableMainnet);
-        setChains(usable);
-        // Restore the chain chosen earlier this session rather than snapping back
-        // to the first in the list on every reload.
-        if (usable.length) setChainId((prev) => prev || recallChain(usable));
-      })
-      .catch(() => setChains([]));
-  }, []);
+  // The chain list, its mainnet filtering and the session restore all live in
+  // ChainContext now — fetched once for the app instead of once per page.
 
   // Curated (verified on-chain) tokens for this chain, plus anything the user
   // added themselves. Custom entries carry the decimals read from their contract.
@@ -414,6 +406,10 @@ function WalletInner() {
         title={chain && !chain.testnet ? "Wallet" : "Testnet wallet"}
         support="Non-custodial · keys encrypted on this device · you approve every transaction."
       />
+
+      {/* A failed chain fetch leaves the switcher empty. Saying why beats an
+          empty dropdown that reads as "this app has no networks". */}
+      {chainError && <p className="error-text">{chainError}</p>}
 
       <MainnetBanner chain={chain} />
 

@@ -78,6 +78,16 @@ const userSchema = new mongoose.Schema({
   tradingMode: { type: String, enum: ["paper", "live"], default: "paper" },
 
   /**
+   * What happens when live trading is switched on while the current network has
+   * no verified exchange.
+   *
+   * PROMPT BY DEFAULT. `auto` moves the user to a tradeable chain for them,
+   * which is convenient but changes which network their next transaction lands
+   * on — so it is opted into, never assumed.
+   */
+  chainSwitchMode: { type: String, enum: ["prompt", "auto"], default: "prompt" },
+
+  /**
    * Spending caps for LIVE trading. Absent means the built-in defaults apply
    * (permissive on testnet, materially stricter on mainnet) — there is no
    * "unlimited" state, because a live trading path with no ceiling is one

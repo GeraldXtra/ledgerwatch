@@ -35,6 +35,9 @@ export default function CryptoSection() {
     notifyOnDetected: c.notifyOnDetected !== false,
   });
   const [overrides, setOverrides] = useState(() => ({ ...(c.confirmationOverrides || {}) }));
+  // Lives beside the chain settings because it decides what happens to the
+  // chain selection, not to anything crypto-payment specific.
+  const [chainSwitchMode, setChainSwitchMode] = useState(user.chainSwitchMode || "prompt");
   const [chains, setChains] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -64,7 +67,7 @@ export default function CryptoSection() {
       for (const [chainId, value] of Object.entries(overrides)) {
         if (value !== "" && value != null) confirmationOverrides[chainId] = Number(value);
       }
-      await updateProfile({ crypto: { ...clean, confirmationOverrides } });
+      await updateProfile({ crypto: { ...clean, confirmationOverrides }, chainSwitchMode });
       toast("Crypto payment settings saved.", { type: "success" });
     } catch (err) {
       setError(err?.response?.data?.error || "Could not save these settings");
@@ -226,6 +229,45 @@ export default function CryptoSection() {
       {error && <p className="error-text">{error}</p>}
 
       <div className="row" style={{ justifyContent: "flex-end" }}>
+        <div className="stack-sm chain-switch-setting">
+          <div className="overline">Live trading on a network without an exchange</div>
+          <p className="muted small" style={{ margin: 0 }}>
+            Only some networks have a decentralised exchange whose contracts we have verified on
+            chain. This decides what happens when you turn on live trading while you are on one
+            that does not.
+          </p>
+          <label className="toggle-row">
+            <input
+              type="radio"
+              name="chainSwitchMode"
+              checked={chainSwitchMode === "prompt"}
+              onChange={() => setChainSwitchMode("prompt")}
+            />
+            <span>
+              <span className="toggle-title">Ask me first</span>
+              <span className="muted small">
+                Explains which network supports trading and offers to switch. Nothing moves
+                without you agreeing.
+              </span>
+            </span>
+          </label>
+          <label className="toggle-row">
+            <input
+              type="radio"
+              name="chainSwitchMode"
+              checked={chainSwitchMode === "auto"}
+              onChange={() => setChainSwitchMode("auto")}
+            />
+            <span>
+              <span className="toggle-title">Switch automatically</span>
+              <span className="muted small">
+                Moves you to a tradeable network and tells you which one. Quicker, but it changes
+                which network your next transaction lands on.
+              </span>
+            </span>
+          </label>
+        </div>
+
         <Button variant="primary" type="submit" disabled={busy}>
           {busy ? "Saving…" : "Save crypto settings"}
         </Button>

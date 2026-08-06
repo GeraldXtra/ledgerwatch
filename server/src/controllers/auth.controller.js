@@ -109,7 +109,8 @@ async function me(req, res) {
  */
 async function updateMe(req, res) {
   try {
-    const { name, companyName, bankDetails, autoSend, notifyPrefs, crypto } = req.body || {};
+    const { name, companyName, bankDetails, autoSend, notifyPrefs, crypto, chainSwitchMode } =
+      req.body || {};
     const updates = {};
 
     if (typeof name === "string" && name.trim()) {
@@ -126,6 +127,12 @@ async function updateMe(req, res) {
         bankName: bankDetails.bankName,
       };
     }
+    // Whitelisted explicitly rather than passed through: an unknown value would
+    // fail schema validation and reject the whole profile save.
+    if (chainSwitchMode === "prompt" || chainSwitchMode === "auto") {
+      updates.chainSwitchMode = chainSwitchMode;
+    }
+
     if (notifyPrefs && typeof notifyPrefs === "object") {
       updates.notifyPrefs = {
         marketAlerts: notifyPrefs.marketAlerts !== false,
@@ -154,7 +161,7 @@ async function updateMe(req, res) {
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({
         error:
-          "Nothing to update (provide name, companyName, bankDetails, autoSend, notifyPrefs and/or crypto)",
+          "Nothing to update (provide name, companyName, bankDetails, autoSend, notifyPrefs, crypto and/or chainSwitchMode)",
       });
     }
 
