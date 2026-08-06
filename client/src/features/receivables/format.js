@@ -100,9 +100,17 @@ export function countdown(value) {
   return `${pad(hours)}:${pad(mins)}:${pad(secs)}`;
 }
 
-/** USDC is a 2 dp figure in the UI, always shown with both places. */
-export function usdc(amount) {
-  return `${usdcAmount(amount)} USDC`;
+/**
+ * A stablecoin figure: 2 dp, always both places, labelled with the token that
+ * was actually requested.
+ *
+ * The symbol used to be the literal string "USDC". Now that an invoice can be
+ * issued in USDT (wherever a verified contract exists), a hardcoded label would
+ * confidently mislabel the amount — and a payer reading "send 44.09 USDC" when
+ * the address only accepts USDT would send the wrong token to a real address.
+ */
+export function usdc(amount, symbol = "USDC") {
+  return `${usdcAmount(amount)} ${symbol || "USDC"}`;
 }
 
 /**

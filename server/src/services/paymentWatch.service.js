@@ -2,13 +2,14 @@ const PaymentAddress = require("../models/PaymentAddress");
 const Payment = require("../models/Payment");
 const Debt = require("../models/Debt");
 const User = require("../models/User");
-const Reminder = require("../models/Reminder");
 const { getChain } = require("../config/chains");
 const { GRACE_DAYS, GRACE_SCAN_MINUTES } = require("../config/derivation");
 const { confirmationsFor } = require("./cryptoSettings.service");
 const { recomputeDebtStatus } = require("./receivables.service");
 const { notifyUser } = require("./push.service");
 const { rpcCall } = require("./rpc.service");
+const { onInvoiceSettled } = require("./settlement.service");
+const { resyncActivePaymentAddress } = require("./paymentAddress.service");
 
 /**
  * PAYMENT WATCH — detects inbound stablecoin transfers to invoice addresses and
@@ -303,12 +304,16 @@ async function settleIfDue(pa, chain) {
 
   if (fullyPaid) {
     pa.status = "paid";
-  } else {
-    // Keep accepting top ups, and restate what is still needed AT THE SAME RATE
-    // so the payer is never quoted a moving target.
-    pa.expectedUsdc = Math.ceil(((remainingNgn - creditNgn) / pa.ngnPerUsd) * 100) / 100;
   }
   await pa.save();
+
+  /**
+   * Restate what is still needed, at the SAME snapshot rate, through the shared
+   * helper. The formula used to be inlined here and existed nowhere else, which
+   * is precisely why a bank payment never updated the quote. One implementation,
+   * called from every path that changes the balance.
+   */
+  if (!fullyPaid) await resyncActivePaymentAddress(debt._id);
 
   // Reuse the shared recompute so a crypto settlement behaves exactly like a
   // manual payment: status, history and reminder cancellation all identical.
@@ -322,81 +327,26 @@ async function settleIfDue(pa, chain) {
    * was told about, or an email claiming a payment that was never recorded —
    * the three can now only ever agree.
    */
-  await onInvoiceSettled({ pa, chain, debt, payment, totalUsdc, creditNgn, fullyPaid, isLate });
+  /**
+   * The SAME event the bank route fires. This used to be a local function here,
+   * so a bank payment settled silently while a crypto payment emailed and
+   * notified. One implementation, so the two can never disagree.
+   */
+  await onInvoiceSettled({
+    debt,
+    payment,
+    method: "crypto",
+    creditNgn,
+    fullyPaid,
+    pa,
+    chain,
+    totalUsdc,
+    isLate,
+  }).catch((err) => console.error("[paymentWatch] settlement event failed:", err.message));
 
   return { payment, fullyPaid, totalUsdc, creditNgn };
 }
 
-/**
- * Everything that must happen when an invoice settles in crypto. Never throws:
- * the money has already arrived and the ledger is already correct, so a failed
- * notification must not undo a successful settlement.
- */
-async function onInvoiceSettled({ pa, chain, debt, payment, totalUsdc, creditNgn, fullyPaid, isLate }) {
-  // 1. Tell the owner.
-  await notifyUser(
-    pa.userId,
-    {
-      title: fullyPaid
-        ? `Invoice settled — ${debt.debtorName}`
-        : `Part payment received — ${debt.debtorName}`,
-      body:
-        `${totalUsdc.toFixed(2)} ${pa.tokenSymbol} confirmed on ${chain.name}.` +
-        (isLate ? " This arrived after the payment address had expired." : ""),
-      tag: `pay-${pa._id}`,
-      type: "payment",
-      url: "/app/receivables",
-    },
-    "txUpdates"
-  ).catch(() => {});
-
-  // 2. Send the payer a receipt, if we have somewhere to send it.
-  try {
-    if (debt.debtorEmail) {
-      // eslint-disable-next-line global-require
-      const { sendEmail, getLogoAttachment, isNonRoutableEmail } = require("./notify.service");
-      // eslint-disable-next-line global-require
-      const { buildPaymentReceiptEmail } = require("../utils/paymentReceipt");
-      // eslint-disable-next-line global-require
-      const User = require("../models/User");
-
-      if (isNonRoutableEmail(debt.debtorEmail)) {
-        console.warn(
-          `[paymentWatch] receipt not sent: ${debt.debtorEmail} is a reserved domain and would bounce.`
-        );
-      } else {
-        const owner = await User.findById(pa.userId).select("name bankDetails");
-        const logo = getLogoAttachment();
-        const { html, text } = buildPaymentReceiptEmail({
-          businessName: owner && owner.name,
-          debtorName: debt.debtorName,
-          amountUsdc: totalUsdc,
-          tokenSymbol: pa.tokenSymbol,
-          creditNgn,
-          chain,
-          txHash: (pa.observed.find((o) => o.settledPaymentId) || {}).txHash,
-          fullyPaid,
-          isLate,
-          remainingNgn: Math.max(0, (debt.amount || 0) - (creditNgn + ((debt.amountPaid || 0)))),
-          hasLogo: Boolean(logo),
-        });
-        const res = await sendEmail(
-          debt.debtorEmail,
-          fullyPaid
-            ? `Payment received in full — thank you`
-            : `Payment received — thank you`,
-          html,
-          { text, attachments: logo ? [logo] : [] }
-        );
-        if (!res.ok) {
-          console.error(`[paymentWatch] receipt email failed: ${res.error}`);
-        }
-      }
-    }
-  } catch (err) {
-    console.error("[paymentWatch] receipt email error:", err.message);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // WATCH

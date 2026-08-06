@@ -282,7 +282,7 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
               </div>
               <div>
                 <dt>Amount to request</dt>
-                <dd className="num">{usdc(quote.expectedUsdc)}</dd>
+                <dd className="num">{usdc(quote.expectedUsdc, quote.token && quote.token.symbol)}</dd>
               </div>
               <div>
                 <dt>Rate used</dt>

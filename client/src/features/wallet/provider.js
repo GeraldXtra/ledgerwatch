@@ -4,7 +4,10 @@ import { getToken } from "../../api/http";
 // All RPC goes through the authenticated backend proxy, so the Alchemy key is never
 // exposed to the browser. ethers.JsonRpcProvider speaks standard JSON-RPC to the
 // proxy URL; the proxy enforces a method allowlist and forwards upstream.
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+// 8000 matches the server's PORT, api/http.js and api/push.js. All three must
+// agree: a split fallback silently sends wallet RPC to a different port than the
+// rest of the app.
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export function getProvider(chainId) {
   const req = new ethers.FetchRequest(`${API_BASE}/api/wallet/rpc/${chainId}`);

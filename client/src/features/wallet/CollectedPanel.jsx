@@ -8,7 +8,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { Button, SkeletonLines } from "../../components/ui";
-import { getProvider, ERC20_ABI } from "./provider";
+import { getProvider, ERC20_ABI, rpcErrorReason } from "./provider";
 import { fetchPaymentAddresses } from "../receivables/cryptoApi";
 import SweepModal from "../receivables/SweepModal";
 import { ngn, shortHash, usdcAmount } from "../receivables/format";
@@ -58,9 +58,15 @@ export default function CollectedPanel({ chain, mainAddress, sweepDestination, o
       // is visible rather than silently dropped).
       setRows(withBalances.filter((r) => r.failed || (r.live && r.live > 0)));
       setError("");
-    } catch {
+    } catch (err) {
       setRows([]);
-      setError("Could not load collected balances.");
+      // Names the cause. "Could not load" on its own gives the user nothing to
+      // act on and reads the same whether the network is down or the account is
+      // empty — the two things they most need to tell apart.
+      const reason = rpcErrorReason(err);
+      setError(
+        reason ? `Could not load collected balances: ${reason}` : "Could not load collected balances."
+      );
     } finally {
       setRefreshing(false);
     }

@@ -59,6 +59,9 @@ export default function CryptoPaymentPanel({ debt, refreshKey = 0 }) {
   const { user } = useAuth();
   const [addresses, setAddresses] = useState(null);
   const [chains, setChains] = useState([]);
+  // Today's rate, for comparison against each address's snapshot. The snapshot
+  // still settles the invoice; this only makes the drift visible.
+  const [currentRate, setCurrentRate] = useState(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -66,10 +69,16 @@ export default function CryptoPaymentPanel({ debt, refreshKey = 0 }) {
       const data = await fetchPaymentAddresses(debt._id);
       setAddresses(data.addresses || []);
       setChains(data.chains || []);
+      setCurrentRate(data.currentRate || null);
       setError("");
-    } catch {
+    } catch (err) {
       setAddresses([]);
-      setError("Could not load the crypto payment details.");
+      const reason = err?.response?.data?.error || err?.message;
+      setError(
+        reason
+          ? `Could not load the crypto payment details: ${reason}`
+          : "Could not load the crypto payment details."
+      );
     }
   }, [debt._id]);
 
@@ -97,13 +106,16 @@ export default function CryptoPaymentPanel({ debt, refreshKey = 0 }) {
           chain={chains.find((c) => c.chainId === pa.chainId) || null}
           onChanged={load}
           sweepDestination={user?.crypto?.sweepDestination || null}
+          // Loaded once for the whole panel and shared by every card, rather
+          // than each card fetching today's rate for itself.
+          currentRate={currentRate}
         />
       ))}
     </div>
   );
 }
 
-function AddressCard({ pa, chain, onChanged, sweepDestination }) {
+function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = null }) {
   const [qr, setQr] = useState("");
   const [copied, setCopied] = useState(false);
   const [left, setLeft] = useState(() => countdown(pa.expiresAt));
@@ -245,15 +257,44 @@ function AddressCard({ pa, chain, onChanged, sweepDestination }) {
           <dl className="trade-quote">
             <div>
               <dt>Amount requested</dt>
-              <dd className="num">{usdc(expected)}</dd>
+              <dd className="num">
+                {usdc(expected, pa.tokenSymbol)}
+                <span className="quote-sub">in {pa.tokenSymbol || "USDC"}</span>
+              </dd>
             </div>
             <div>
               <dt>Naira equivalent</dt>
               <dd className="num">
                 {ngn(pa.invoiceBalanceNgn)}
                 <span className="quote-sub">
-                  at {ngn(pa.ngnPerUsd)} per USDC, {agoLabel(pa.rateTimestamp)}
+                  at {ngn(pa.ngnPerUsd)} per {pa.tokenSymbol || "USDC"}, {agoLabel(pa.rateTimestamp)}
                 </span>
+                {/* SNAPSHOT vs CURRENT. The snapshot is what settles this invoice
+                    — a payer who sends what they were quoted clears it whatever
+                    the naira does. The owner still needs to see how far the rate
+                    has moved, so both are shown and the drift is named. Withheld
+                    below 0.5% because a rate always wobbles slightly and flagging
+                    noise would train people to ignore it. */}
+                {!currentRate || !(currentRate.ngnPerUsd > 0) ? (
+                  /* Today's rate could not be read. Said out loud rather than
+                     omitted: an absent comparison looks identical to "the rate
+                     has not moved", which is a claim we cannot make. The
+                     snapshot above is unaffected and still settles the invoice. */
+                  <span className="quote-sub">
+                    Today&rsquo;s rate is unavailable, so no comparison is shown. This invoice is
+                    unaffected — it settles at the rate above.
+                  </span>
+                ) : (
+                  pa.ngnPerUsd > 0 &&
+                  Math.abs(currentRate.ngnPerUsd - pa.ngnPerUsd) / pa.ngnPerUsd > 0.005 && (
+                    <span className="quote-sub rate-drift">
+                      now {ngn(currentRate.ngnPerUsd)} (
+                      {currentRate.ngnPerUsd > pa.ngnPerUsd ? "+" : ""}
+                      {(((currentRate.ngnPerUsd - pa.ngnPerUsd) / pa.ngnPerUsd) * 100).toFixed(1)}%)
+                      {" — this invoice still settles at the rate above"}
+                    </span>
+                  )
+                )}
               </dd>
             </div>
             <div>
@@ -338,7 +379,7 @@ function AddressCard({ pa, chain, onChanged, sweepDestination }) {
           {pa.overpaidUsdc > 0 && (
             <p className="settings-note">
               <TriangleAlert size={15} />
-              {usdc(pa.overpaidUsdc)} more than the invoice asked for arrived. The invoice is
+              {usdc(pa.overpaidUsdc, pa.tokenSymbol)} more than the invoice asked for arrived. The invoice is
               settled in full and the excess is recorded here.
             </p>
           )}
@@ -366,7 +407,7 @@ function AddressCard({ pa, chain, onChanged, sweepDestination }) {
                 </span>
                 <div>
                   <div className="num mono-strong">
-                    {usdc(unitsToNumber(t.value, pa.tokenDecimals))}
+                    {usdc(unitsToNumber(t.value, pa.tokenDecimals), pa.tokenSymbol)}
                   </div>
                   <div className="muted caption">
                     {t.status === "confirmed" && (

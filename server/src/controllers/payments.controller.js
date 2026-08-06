@@ -1,6 +1,8 @@
 const Debt = require("../models/Debt");
 const Payment = require("../models/Payment");
 const { recomputeDebtStatus, withDerived } = require("../services/receivables.service");
+const { resyncActivePaymentAddress } = require("../services/paymentAddress.service");
+const { onInvoiceSettled } = require("../services/settlement.service");
 
 async function findMyDebt(req) {
   return Debt.findOne({ _id: req.params.id, userId: req.user._id });
@@ -41,7 +43,39 @@ async function record(req, res) {
     debt.history.push({ event: "payment_received" });
     const totalPaid = await recomputeDebtStatus(debt); // saves debt + cancels reminders at zero
 
-    return res.status(201).json({ payment, debt: withDerived(debt, totalPaid) });
+    /**
+     * A bank payment changes what the CRYPTO address must still ask for.
+     *
+     * Without this the address kept quoting the amount it was issued with, so a
+     * debtor who paid half by transfer was still told to send the full token
+     * amount — and the reminder, which reads this field, showed the stale figure.
+     * Recomputed at the address's own snapshot rate, so the quote never moves
+     * with the market.
+     */
+    const resync = await resyncActivePaymentAddress(debt._id);
+
+    /**
+     * ONE settlement event, both routes. Bank payments previously recorded
+     * silently: no receipt to the payer, no push to the owner, while the crypto
+     * route sent both. Same event, same three consequences, so they can never
+     * disagree about what happened.
+     */
+    await onInvoiceSettled({
+      debt,
+      payment,
+      method: "bank",
+      creditNgn: amt,
+      totalPaid,
+      fullyPaid: debt.status === "paid",
+    }).catch(() => {});
+
+    return res.status(201).json({
+      payment,
+      debt: withDerived(debt, totalPaid),
+      // Returned so the UI can restate the crypto amount immediately rather than
+      // waiting for a refetch that might show the old figure.
+      cryptoQuote: resync.updated ? resync : undefined,
+    });
   } catch (err) {
     console.error("record payment error:", err.message);
     return res.status(500).json({ error: "Failed to record payment" });
@@ -64,6 +98,9 @@ async function list(req, res) {
 }
 
 // DELETE /api/debts/:id/payments/:paymentId
+// Deleting a payment RAISES the balance again, so the crypto address must ask
+// for more. Without the resync below it would keep quoting the lower figure and
+// the invoice could never be settled in full.
 async function remove(req, res) {
   try {
     const debt = await findMyDebt(req);
@@ -78,7 +115,14 @@ async function remove(req, res) {
 
     await payment.deleteOne();
     const totalPaid = await recomputeDebtStatus(debt); // may revert status
-    return res.json({ ok: true, debt: withDerived(debt, totalPaid) });
+    // Re-quote upward at the same snapshot rate. No notification here: nothing
+    // was paid, so telling the debtor a payment "arrived" would be false.
+    const resync = await resyncActivePaymentAddress(debt._id);
+    return res.json({
+      ok: true,
+      debt: withDerived(debt, totalPaid),
+      cryptoQuote: resync.updated ? resync : undefined,
+    });
   } catch (err) {
     console.error("delete payment error:", err.message);
     return res.status(500).json({ error: "Failed to delete payment" });

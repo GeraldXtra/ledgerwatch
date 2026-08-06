@@ -10,6 +10,7 @@ const {
   issueAddress,
   getNgnRate,
   quoteForInvoice,
+  stablecoinsFor,
 } = require("../services/paymentAddress.service");
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -26,12 +27,19 @@ const HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 async function quote(req, res) {
   try {
     requireCryptoEnabled(req.user);
+    const chainId = Number(req.query.chainId);
     const result = await quoteForInvoice({
       userId: req.user._id,
       debtId: req.query.debtId,
-      chainId: Number(req.query.chainId),
+      chainId,
+      // Optional. Absent means the chain's first stablecoin, so the existing
+      // client keeps working without change.
+      tokenSymbol: req.query.tokenSymbol,
     });
-    return res.json(result);
+    // Every stablecoin this chain can actually accept, so the UI can offer the
+    // real choice rather than a hardcoded one. Testnets list USDC alone because
+    // no verified USDT exists there — that is honest, not a gap.
+    return res.json({ ...result, availableTokens: stablecoinsFor(chainId) });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error("payment address quote error:", err.message);
@@ -92,7 +100,7 @@ async function allocate(req, res) {
 async function create(req, res) {
   try {
     requireCryptoEnabled(req.user);
-    const { debtId, chainId, address, derivationIndex } = req.body || {};
+    const { debtId, chainId, address, derivationIndex, tokenSymbol } = req.body || {};
     if (!ADDRESS_RE.test(address || "")) {
       return res.status(400).json({ error: "Invalid address" });
     }
@@ -106,6 +114,9 @@ async function create(req, res) {
       chainId: Number(chainId),
       address,
       derivationIndex,
+      // Which stablecoin the payer will send. Validated against the chain's
+      // verified list in the service, which rejects anything else by name.
+      tokenSymbol,
     });
 
     return res.status(201).json({
@@ -153,7 +164,26 @@ async function list(req, res) {
       debtorName: nameById.get(String(a.debtId)) || null,
     }));
 
-    return res.json({ addresses: rows, chains: listChains() });
+    /**
+     * The CURRENT rate alongside each address's SNAPSHOT rate.
+     *
+     * The snapshot is what settles the invoice — a payer who sends exactly what
+     * they were quoted clears it however the naira has moved since. But the owner
+     * needs to see the divergence, because a snapshot taken days ago may now be
+     * worth materially more or less in naira than the invoice says. Showing only
+     * one number hides that; showing both makes it a decision rather than a
+     * surprise.
+     */
+    const live = await getNgnRate();
+    return res.json({
+      addresses: rows,
+      chains: listChains(),
+      currentRate: {
+        ngnPerUsd: live.rate,
+        fetchedAt: live.fetchedAt,
+        stale: live.stale,
+      },
+    });
   } catch (err) {
     console.error("list payment addresses error:", err.message);
     return res.status(500).json({ error: "Failed to load payment addresses" });

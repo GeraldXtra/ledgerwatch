@@ -68,8 +68,18 @@ async function recomputeDebtStatus(debt) {
   const amountPaid = rows.length ? rows[0].paid : 0;
   const balance = (debt.amount || 0) - amountPaid;
 
+  /**
+   * The same 0.5% tolerance the crypto watcher uses, applied to the COMBINED
+   * total. An exact `balance <= 0` left invoices open over a few kobo of
+   * rounding dust — the money had effectively arrived, the payer had done
+   * nothing wrong, and the invoice sat there looking unpaid. Chasing somebody
+   * for two kobo is worse than absorbing it.
+   */
+  const TOLERANCE = Number(process.env.USDC_SETTLEMENT_TOLERANCE || 0.005);
+  const settled = balance <= (debt.amount || 0) * TOLERANCE;
+
   const wasPaid = debt.status === "paid";
-  if (balance <= 0) {
+  if (settled) {
     debt.status = "paid";
     if (!wasPaid) debt.history.push({ event: "marked_paid" });
   } else if (amountPaid > 0) {
@@ -79,8 +89,10 @@ async function recomputeDebtStatus(debt) {
   }
   await debt.save();
 
-  // Reaching zero cancels any scheduled reminders (same as manual mark-paid).
-  if (balance <= 0 && !wasPaid) {
+  // Settling cancels any scheduled reminders (same as manual mark-paid). Uses
+  // `settled`, NOT `balance <= 0`: an invoice cleared within tolerance would
+  // otherwise be marked paid and still chase the debtor for the dust.
+  if (settled && !wasPaid) {
     await Reminder.updateMany(
       { debtId: debt._id, userId: debt.userId, status: "scheduled" },
       { $set: { status: "cancelled" } }
