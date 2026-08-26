@@ -9,3 +9,16 @@ dist/
 .DS_Store
 .env.local
 build/
+resume-session.txt
+*resume-session.txt
+
+# Wallet seed phrases / private keys - NEVER commit.
+# These were tracked and pushed to origin (commits 1820f35, d68cfd5) before this
+# rule existed. Untracking does NOT remove them from history: treat any phrase in
+# here as compromised and rotate it. See docs/SECURITY.md section 6 for the purge.
+acccountSecretPhrase/
+accountSecretPhrase/
+*.seed
+*.mnemonic
+*secret*phrase*
+keystore*.json
