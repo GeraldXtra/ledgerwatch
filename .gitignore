@@ -22,3 +22,13 @@ accountSecretPhrase/
 *.mnemonic
 *secret*phrase*
 keystore*.json
+
+# Internal engineering docs - local only, never published.
+# The repo is public; the defect register, architecture and build plan are not
+# for a public audience. Purged from history 2026-08-28. README.md is the only
+# markdown this project publishes.
+*.md
+!README.md
+.claude/
+docs/
+claude-project/
