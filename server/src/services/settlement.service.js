@@ -79,6 +79,25 @@ async function onInvoiceSettled({
   // closed by the resync helper instead.
   const activeAddress = fullyPaid ? null : pa || (await PaymentAddress.findOne({ debtId: debt._id, status: "active" }));
 
+  /**
+   * RESOLVE THE CHAIN FROM THE ADDRESS, not only from the argument (LW-007).
+   *
+   * The bank route calls this with no `chain`, but `activeAddress` is still
+   * found in the database above. So `payToAddress` and `stillOwedToken`
+   * populated while `payToChainName` stayed null, and the receipt template
+   * silently dropped the "on Base, this network only" line.
+   *
+   * The payer then received an address, an exact amount, and NO NETWORK. Every
+   * other surface in this codebase carries an explicit wrong network warning;
+   * this one path dropped it. With mainnet enabled that is the difference
+   * between a payment arriving and a payment being destroyed: the same address
+   * exists on every EVM chain, and funds sent on the wrong one are not
+   * recoverable by anybody.
+   */
+  const { getChain } = require("../config/chains");
+  const receiptChain =
+    chain || (activeAddress && activeAddress.chainId ? getChain(activeAddress.chainId) : null);
+
   // ---- 1. Tell the owner --------------------------------------------------
   const received =
     method === "crypto" && totalUsdc != null && pa
@@ -143,13 +162,13 @@ async function onInvoiceSettled({
       stillOwedToken: activeAddress ? activeAddress.expectedUsdc : null,
       stillOwedSymbol: activeAddress ? activeAddress.tokenSymbol : null,
       payToAddress: activeAddress ? activeAddress.address : null,
-      payToChainName: activeAddress && chain ? chain.name : null,
+      payToChainName: activeAddress && receiptChain ? receiptChain.name : null,
       hasLogo: Boolean(logo),
     });
 
     const res = await sendEmail(
       debt.debtorEmail,
-      fullyPaid ? "Payment received in full — thank you" : "Payment received — thank you",
+      fullyPaid ? "Payment received in full. Thank you" : "Payment received. Thank you",
       html,
       { text, attachments: logo ? [logo] : [] }
     );

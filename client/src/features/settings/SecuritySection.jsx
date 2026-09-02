@@ -86,7 +86,7 @@ export default function SecuritySection() {
 
       <p className="settings-note">
         <ShieldCheck size={15} />
-        Your wallet key is encrypted in your browser and never leaves this device — changing
+        Your wallet key is encrypted in your browser and never leaves this device. Changing
         this password does not affect it.
       </p>
     </div>

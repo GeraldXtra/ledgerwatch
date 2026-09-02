@@ -35,7 +35,7 @@ const VALID_TYPES = ["drop_pct", "rise_pct", "price_below", "price_above"];
  * OR an explicit { coinId, symbol } pair from the coin search — so ANY coin can be
  * watched. Captures the current price as baseline. Throws 400 on invalid input.
  */
-async function createWatch(userId, { symbol, type, value, coinId }) {
+async function createWatch(userId, { symbol, type, value, coinId }, mode = "paper") {
   let resolvedCoinId;
   let resolvedSymbol;
 
@@ -69,6 +69,9 @@ async function createWatch(userId, { symbol, type, value, coinId }) {
 
   const watch = await Watch.create({
     userId,
+    // Watches belong to one book. A watch made while in paper mode must not
+    // start firing real money alerts the moment somebody switches to live.
+    mode: mode === "live" ? "live" : "paper",
     coinId: resolvedCoinId,
     symbol: resolvedSymbol,
     condition: { type, value: numValue },
@@ -223,6 +226,7 @@ async function runPricePass({ userId } = {}) {
       // cooldown above only spaces them out; this stops them entirely until the
       // human approves or dismisses the one already waiting.
       const alreadyWaiting = await Alert.exists({
+        mode: watch.mode || "paper",
         watchId: watch._id,
         status: "pending",
       });
@@ -242,6 +246,7 @@ async function runPricePass({ userId } = {}) {
       const message = aiMessage || template;
 
       const alert = await Alert.create({
+        mode: watch.mode || "paper",
         userId: watch.userId,
         watchId: watch._id,
         coinId: watch.coinId,
@@ -301,10 +306,17 @@ async function runPricePass({ userId } = {}) {
 
 // ---- portfolio -------------------------------------------------------------
 
-async function loadOrCreatePortfolio(userId) {
-  let portfolio = await Portfolio.findOne({ userId });
+async function loadOrCreatePortfolio(userId, mode = "paper") {
+  const book = mode === "live" ? "live" : "paper";
+  let portfolio = await Portfolio.findOne({ userId, mode: book });
   if (!portfolio) {
-    portfolio = await Portfolio.create({ userId });
+    // A live book starts empty. Seeding it with the paper starting cash would
+    // put a million naira of imaginary money next to real holdings.
+    portfolio = await Portfolio.create({
+      userId,
+      mode: book,
+      ...(book === "live" ? { cashBalance: 0 } : {}),
+    });
   }
   return portfolio;
 }
@@ -312,8 +324,8 @@ async function loadOrCreatePortfolio(userId) {
 /**
  * Compute the user's sim portfolio with live (cached) values and total P/L.
  */
-async function getPortfolio(userId) {
-  const portfolio = await loadOrCreatePortfolio(userId);
+async function getPortfolio(userId, mode = "paper") {
+  const portfolio = await loadOrCreatePortfolio(userId, mode);
   const holdings = portfolio.holdings || [];
 
   const coinIds = [...new Set(holdings.map((h) => h.coinId))];
@@ -383,7 +395,7 @@ async function actOnAlert(userId, alert, intent) {
     throw httpError(400, "Enter an amount greater than zero");
   }
 
-  const portfolio = await loadOrCreatePortfolio(userId);
+  const portfolio = await loadOrCreatePortfolio(userId, alert.mode || "paper");
 
   // Current price: live if available, else the price captured on the alert.
   const row = await getPrice(alert.coinId);
@@ -442,6 +454,7 @@ async function actOnAlert(userId, alert, intent) {
   }
 
   trade = await SimTrade.create({
+      mode: alert.mode || "paper",
     userId,
     coinId: alert.coinId,
     symbol: alert.symbol,
@@ -471,7 +484,7 @@ async function approveAlert(userId, alert) {
   }
 
   const side = alert.suggestion; // "buy" | "sell" | "hold"
-  const portfolio = await loadOrCreatePortfolio(userId);
+  const portfolio = await loadOrCreatePortfolio(userId, alert.mode || "paper");
   let trade = null;
 
   if (side === "buy") {
@@ -506,6 +519,7 @@ async function approveAlert(userId, alert) {
     }
 
     trade = await SimTrade.create({
+      mode: alert.mode || "paper",
       userId,
       coinId: alert.coinId,
       symbol: alert.symbol,
@@ -531,6 +545,7 @@ async function approveAlert(userId, alert) {
     portfolio.holdings.splice(idx, 1);
 
     trade = await SimTrade.create({
+      mode: alert.mode || "paper",
       userId,
       coinId: alert.coinId,
       symbol: alert.symbol,

@@ -43,18 +43,35 @@ export function AuthProvider({ children }) {
       window.removeEventListener("ledgerwatch:unauthorized", onUnauthorized);
   }, []);
 
-  const login = useCallback(async (email, password) => {
-    const { data } = await http.post("/api/auth/login", { email, password });
+  const login = useCallback(async (email, password, turnstileToken) => {
+    const { data } = await http.post("/api/auth/login", { email, password, turnstileToken });
     setToken(data.token);
     setUser(data.user);
     return data.user;
   }, []);
 
+  /**
+   * Registering no longer starts a session. The server creates the account
+   * unverified and emails a code, so this returns the "confirm your email" state
+   * for the form to act on. Signing somebody in here would make the verification
+   * step decorative.
+   */
   const register = useCallback(async (payload) => {
     const { data } = await http.post("/api/auth/register", payload);
+    return data;
+  }, []);
+
+  /** Confirming the code IS the moment the session begins. */
+  const verifyEmail = useCallback(async (email, code) => {
+    const { data } = await http.post("/api/auth/verify-email", { email, code });
     setToken(data.token);
     setUser(data.user);
     return data.user;
+  }, []);
+
+  const resendCode = useCallback(async (email) => {
+    const { data } = await http.post("/api/auth/resend-code", { email });
+    return data;
   }, []);
 
   const updateProfile = useCallback(async (updates) => {
@@ -67,7 +84,17 @@ export function AuthProvider({ children }) {
   // context, so the sidebar and topbar update without a refetch.
   const applyUser = useCallback((next) => setUser(next), []);
 
-  const value = { user, loading, login, register, logout, updateProfile, applyUser };
+  const value = {
+    user,
+    loading,
+    login,
+    register,
+    verifyEmail,
+    resendCode,
+    logout,
+    updateProfile,
+    applyUser,
+  };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

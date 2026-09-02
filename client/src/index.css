@@ -1,68 +1,81 @@
 :root {
   color-scheme: light;
 
-  /* ---- NAVY: ink + primary action (white on navy-700 ≈ 13:1) ---- */
-  --navy-950: #060d1a;
-  --navy-900: #0a1428;
-  --navy-800: #0f1d36;
-  --navy-700: #16294a;
-  --navy-600: #22406f;
-  --navy-100: #dce4f0;
-  --navy-50: #eef2f8;
+  /* =========================================================================
+     LEDGER  ink and brass on warm paper
 
-  /* ---- GOLD: the ONE accent, spent sparingly (charts, indicators, logo) ---- */
-  --gold-700: #7a5e1b; /* text-bearing gold on white ≈ 5.6:1 */
-  --gold-600: #9a7726;
-  --gold-500: #c0a053; /* brand tone: chart series, indicator bars */
-  --gold-400: #d4bc80;
-  --gold-200: #eadfc0;
-  --gold-100: #f4eddc;
-  --gold-50: #fbf7ee;
+     The neutrals here are WARM on purpose. The previous set was cold blue grey
+     (#f2f5f9, #e1e7f0, #64748b), which is a stock utility palette, and against
+     navy it read as a default rather than a decision. Warm paper under navy ink
+     with a brass accent is the register a ledger has always been kept in, and
+     it is the difference between the product looking generated and looking made.
 
-  /* Primary-action family. Components read --accent-*; map them to NAVY so every
-     button, link and active nav row recolors at once. Gold stays the accent. */
+     One accent only. Brass marks value; it is never decoration.
+     ========================================================================= */
+
+  /* ---- INK  the brand and every primary action ---- */
+  --navy-950: #06101b;
+  --navy-900: #0a1420;
+  --navy-800: #101c2c;
+  --navy-700: #16283f; /* PRIMARY. White on this is about 13:1 */
+  --navy-600: #23405f;
+  --navy-100: #dde3ec;
+  --navy-50:  #eff2f6;
+
+  /* ---- BRASS  the one accent, spent sparingly ---- */
+  --gold-700: #74581a; /* carries text on paper, about 6:1 */
+  --gold-600: #96742b;
+  --gold-500: #b08d3f; /* brand tone. Antique rather than yellow */
+  --gold-400: #cdae6c;
+  --gold-200: #e8dbbc;
+  --gold-100: #f3ead4;
+  --gold-50:  #faf6ec;
+
+  /* Components read --accent-*; these map onto ink so one edit recolours every
+     button, link and active row. Brass stays separate and stays rare. */
   --accent-800: var(--navy-950);
   --accent-700: var(--navy-800);
   --accent-600: var(--navy-700); /* PRIMARY */
   --accent-500: var(--navy-600);
-  --accent-400: var(--navy-600);
+  --accent-400: #35577c;
   --accent-100: var(--navy-100);
-  --accent-50: var(--navy-50);
-  --ring: rgba(22, 41, 74, 0.28);
+  --accent-50:  var(--navy-50);
+  --ring: rgba(22, 40, 63, 0.26);
 
-  /* ---- COOL neutrals (replaces the beige monotone) ---- */
-  --canvas: #f2f5f9;
-  --canvas-2: #e9eef5; /* alternating landing band */
-  --card: #ffffff;
-  --well: #f4f7fa; /* Tier 0: inset well inside cards */
-  --canvas-deep: #e4eaf2;
-  --hero-tint: #f7f9fc;
-  --border: #e1e7f0;
-  --border-hi: #c8d2e0;
-  --ink: #0a1428;
-  --body: #3a4658;
-  --muted: #64748b;
-  --faint: #94a3b8;
+  /* ---- WARM neutrals. The change that carries the whole redesign ---- */
+  --canvas:      #f7f5f1;
+  --canvas-2:    #f1ede6;
+  --card:        #ffffff;
+  --well:        #f4f1ea;
+  --canvas-deep: #e9e4da;
+  --hero-tint:   #fbfaf7;
+  --border:      #e6e1d8;
+  --border-hi:   #d2cabb;
+  --ink:   #15181d;
+  --body:  #3f454e;
+  --muted: #6d6962;
+  --faint: #9b958b;
 
-  /* semantic: tint bg + same-hue dark text (data only, never a UI accent) */
-  --pos-text: #0a6e4c;
-  --pos-bg: #daf0e5;
-  --neg-text: #b3362b;
-  --neg-bg: #fbe4e1;
-  --warn-text: #8a6a1f; /* gold-family, no mustard clash */
-  --warn-bg: #f4eddc;
-  --neutral-text: #5a6472;
-  --neutral-bg: #edf1f6;
+  /* semantic: tinted ground with same hue text. Data only, never a UI accent */
+  --pos-text: #0b6247;
+  --pos-bg:   #dcece4;
+  --neg-text: #a2362a;
+  --neg-bg:   #f8e4df;
+  --warn-text: #7f6220;
+  --warn-bg:   #f4ecd9;
+  --neutral-text: #5d5952;
+  --neutral-bg:   #efece5;
 
-  /* shadows — layered, cool navy-tinted (elevation changes alpha, not geometry) */
-  --sh-sm: 0 1px 2px rgba(10, 20, 40, 0.05), 0 1px 3px rgba(10, 20, 40, 0.04);
-  --sh-md: 0 2px 4px rgba(10, 20, 40, 0.05), 0 8px 20px rgba(10, 20, 40, 0.07);
-  --sh-lg: 0 4px 8px rgba(10, 20, 40, 0.06), 0 20px 40px rgba(10, 20, 40, 0.1);
-  --sh-hero: 0 24px 60px rgba(10, 20, 40, 0.16), 0 8px 20px rgba(10, 20, 40, 0.08);
-  --sh-pop: 0 0 0 1px var(--border), 0 12px 32px rgba(10, 20, 40, 0.12),
-    0 4px 12px rgba(10, 20, 40, 0.06);
-  --sh-modal: 0 16px 40px rgba(10, 20, 40, 0.16), 0 6px 16px rgba(10, 20, 40, 0.08);
-  /* legacy aliases (kept so existing class refs still resolve) */
+  /* Shadows are WARM tinted, not black. Black shadows on warm paper turn it
+     grey and are the fastest way to make a warm palette look dirty. Elevation
+     changes alpha and spread, never colour. */
+  --sh-sm: 0 1px 2px rgba(38, 30, 18, 0.05), 0 1px 3px rgba(38, 30, 18, 0.04);
+  --sh-md: 0 2px 4px rgba(38, 30, 18, 0.05), 0 10px 24px rgba(38, 30, 18, 0.07);
+  --sh-lg: 0 4px 10px rgba(38, 30, 18, 0.06), 0 24px 48px rgba(38, 30, 18, 0.1);
+  --sh-hero: 0 28px 68px rgba(38, 30, 18, 0.15), 0 10px 24px rgba(38, 30, 18, 0.08);
+  --sh-pop: 0 0 0 1px var(--border), 0 14px 36px rgba(38, 30, 18, 0.13),
+    0 4px 12px rgba(38, 30, 18, 0.06);
+  --sh-modal: 0 20px 48px rgba(38, 30, 18, 0.17), 0 8px 18px rgba(38, 30, 18, 0.08);
   --sh-card: var(--sh-sm);
   --sh-hover: var(--sh-md);
 
@@ -71,13 +84,25 @@
   --gap: 24px;
   --gap-loose: 32px;
 
-  /* motion */
+  /* ---- MOTION  one curve, four speeds ----
+     A single easing curve across the whole app is what makes movement feel like
+     one hand rather than several. This one decelerates hard, so things arrive
+     rather than drift. */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --t-fast: 150ms;
-  --t-pop: 200ms;
-  --t-modal: 250ms;
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --t-fast: 160ms;
+  --t-pop: 220ms;
+  --t-modal: 280ms;
+  --t-enter: 420ms;
 
-  font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* ---- TYPE ----
+     Newsreader carries the figures and the titles. It is a serif drawn for
+     screens, and on a page about money it reads as a record rather than an app.
+     Inter does the interface work it is good at. */
+  --font-display: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  font-family: var(--font-ui);
   font-feature-settings: "cv01", "ss03", "cv10";
 }
 
@@ -2062,7 +2087,14 @@ legend {
 
 @media (max-width: 820px) {
   .app-shell {
-    grid-template-columns: 1fr;
+    /* minmax(0, 1fr), NOT a bare 1fr. A bare `1fr` is minmax(AUTO, 1fr), and
+       an auto minimum refuses to shrink below the content's min-content
+       width. One wide child then forces the whole shell past the viewport
+       and the entire page scrolls sideways. It showed up worst on Market
+       Watch simply because the market table is the widest thing in the app,
+       but every page was affected. The desktop rule above already had the
+       zero minimum; the mobile override dropped it. */
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .sidebar {
@@ -4949,3 +4981,71 @@ input[type="checkbox"] {
 
 /* Live positions total — same figure treatment as the other oversized numbers. */
 .live-total { display: flex; flex-direction: column; gap: 2px; margin: 14px 0 6px; }
+
+/* ===========================================================================
+   TURNSTILE  Cloudflare human check, sits under the last field in the auth
+   forms. The widget renders in its own iframe at a fixed 300x65, so it is
+   centred rather than stretched: forcing width on it just leaves whitespace
+   inside the frame.
+   =========================================================================== */
+.turnstile-field { display: flex; justify-content: center; margin: 4px 0 2px; min-height: 65px; }
+.turnstile-field .field-error { margin-top: 6px; text-align: center; }
+
+.turnstile-missing { justify-content: flex-start; gap: 10px; padding: 12px 14px;
+  background: var(--warn-bg); border: 1px solid var(--gold-200); border-radius: 8px;
+  color: var(--warn-text); font-size: 13px; line-height: 1.5; text-align: left; }
+.turnstile-missing .caption { color: var(--warn-text); opacity: .85; margin-top: 2px; }
+
+/* ===========================================================================
+   MARKET WATCH  mobile
+
+   The shell fix above stops the page scrolling sideways. These stop the wide
+   content from being unreadable once it is forced to fit.
+   =========================================================================== */
+@media (max-width: 820px) {
+  /* Belt and braces: any layout child that meets long unbreakable content, a
+     42 character address or a nine figure amount, can now shrink instead of
+     pushing its parent wide. */
+  .page, .main-col > *, .split-7-5 > *, .card, .stat-card { min-width: 0; }
+
+  /* Long tokens must break rather than widen a row. */
+  .list-row, .alert-card, .chat-msg, .hero-figure { overflow-wrap: anywhere; }
+
+  /* The market table keeps its own horizontal scroll rather than the page
+     taking it. Between 640 and 820 it is still a real table. */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* The allocation bar is decorative and reads badly at phone widths. */
+  .alloc-bar { min-width: 0; }
+}
+
+@media (max-width: 560px) {
+  /* The mobile top nav wraps instead of running off the edge. */
+  .mobile-topbar { flex-wrap: wrap; row-gap: 8px; }
+  /* Two KPI tiles per row reads better than one very wide one. */
+  .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .stat-value { font-size: clamp(20px, 6vw, 28px); }
+}
+
+/* ===========================================================================
+   WALLET NET WORTH  the figure first, then what makes it up
+   =========================================================================== */
+.wallet-networth {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 18px 20px; margin-bottom: 14px;
+  background: var(--well); border: 1px solid var(--border); border-radius: 12px;
+}
+.networth-figure {
+  font-size: clamp(30px, 5vw, 42px); font-weight: 700; color: var(--ink);
+  line-height: 1.1; letter-spacing: -0.02em;
+}
+/* A caveat on an incomplete total is not decoration. It carries the warn tone
+   so it cannot be mistaken for a caption. */
+.networth-caveat {
+  font-size: 12.5px; line-height: 1.5; color: var(--warn-text); margin-top: 6px;
+}
+/* The USD value of one holding, under its symbol. */
+.balance-usd {
+  display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px;
+}
+

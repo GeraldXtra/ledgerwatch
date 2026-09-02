@@ -207,7 +207,7 @@ export default function CoinPicker({ value, onChange }) {
                   thumb: meta && meta.image,
                 })
               }
-              title={meta ? `${meta.name} — $${meta.current_price}` : sym}
+              title={meta ? `${meta.name} at $${meta.current_price}` : sym}
             >
               {sym}
             </button>

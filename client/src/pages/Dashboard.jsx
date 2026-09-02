@@ -1,4 +1,4 @@
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useMemo, useRef } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Receipt,
@@ -8,34 +8,40 @@ import {
   LogOut,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { Avatar, Button, Sidebar, Footer, ToastProvider, useToast } from "../components/ui";
+import { Avatar, Footer, ToastProvider, useToast } from "../components/ui";
+import LogoMark from "../components/LogoMark";
+import useSlidingIndicator from "../hooks/useSlidingIndicator";
 import { ensureServiceWorker, onForegroundPush } from "../api/push";
 
+/**
+ * THE SHELL
+ *
+ * A masthead over a double rule, then a rail of small capitals with one brass
+ * underscore that slides. There is no sidebar.
+ *
+ * That is a deliberate structural change rather than a restyle. A fixed 240px
+ * sidebar spends a fifth of the screen restating four words the user already
+ * knows, on an application whose whole job is showing rows of figures. Moving
+ * navigation into the chrome gives every one of those rows the width back, and
+ * the masthead over a ruled page is how a book of account has always been laid
+ * out, which is what this product is.
+ */
+
 const NAV_ITEMS = [
-  { id: "receivables", label: "Receivables", icon: <Receipt size={16} />, to: "/app/receivables" },
-  { id: "market", label: "Market Watch", icon: <CandlestickChart size={16} />, to: "/app/market" },
-  { id: "wallet", label: "Wallet", icon: <Wallet size={16} />, to: "/app/wallet" },
+  { id: "receivables", label: "Receivables", icon: <Receipt size={14} />, to: "/app/receivables" },
+  { id: "market", label: "Market Watch", icon: <CandlestickChart size={14} />, to: "/app/market" },
+  { id: "wallet", label: "Wallet", icon: <Wallet size={14} />, to: "/app/wallet" },
+  { id: "settings", label: "Settings", icon: <SettingsIcon size={14} />, to: "/app/settings" },
 ];
 
-const TAB_LABEL = {
-  receivables: "Receivables",
-  market: "Market Watch",
-  wallet: "Wallet",
-  settings: "Settings",
-};
-
 /**
- * The single foreground-push bridge for the whole app.
+ * The single foreground push bridge for the whole app.
  *
  * It lives in the shell rather than on one page because the service worker
- * suppresses the OS notification whenever a window is focused, and it has no idea
- * which route the user happens to be on. When the only listener sat inside
+ * suppresses the OS notification whenever a window is focused, and it has no
+ * idea which route the user happens to be on. When the only listener sat inside
  * MarketWatchPage, a push that arrived while the user was on Settings or Wallet
- * produced neither an OS notification nor a toast — it vanished.
- *
- * Rendered inside a ToastProvider so it can toast on any route. Pages that mount
- * their own provider still resolve `useToast` to their nearest one, so nothing
- * about their existing toasts changes.
+ * produced neither an OS notification nor a toast. It vanished.
  */
 function PushBridge() {
   const toast = useToast();
@@ -46,11 +52,12 @@ function PushBridge() {
     return onForegroundPush((message) => {
       if (message.kind === "push") {
         const payload = message.payload || {};
-        toast(payload.title ? `${payload.title} — ${payload.body || ""}` : payload.body || "", {
-          type: payload.type === "alert" ? "info" : "success",
-        });
-        // Pages that want to react (refetch, open a panel) still listen for this.
-        // It carries a `handled` marker so the alert poll does not toast the same
+        toast(
+          payload.title ? `${payload.title}. ${payload.body || ""}`.trim() : payload.body || "",
+          { type: payload.type === "alert" ? "info" : "success" }
+        );
+        // Pages that want to react (refetch, open a panel) listen for this. It
+        // carries a `handled` marker so the alert poll does not toast the same
         // alert a second time.
         window.dispatchEvent(new CustomEvent("ledgerwatch:push", { detail: payload }));
         return;
@@ -71,91 +78,117 @@ function PushBridge() {
   return null;
 }
 
+/** A ledger page carries its date. One line, and it says this is a record. */
+function today() {
+  try {
+    return new Date().toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return "";
+  }
+}
+
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const location = useLocation();
+  const railRef = useRef(null);
 
-  // Active section comes from the URL rather than local state.
+  // Active section comes from the URL rather than local state, so every tab has
+  // a real shareable address.
   const tab = location.pathname.split("/")[2] || "receivables";
+  const bar = useSlidingIndicator(railRef, tab);
+  const date = useMemo(today, []);
 
   return (
-    // Shell-level provider so a foreground push can toast on ANY route. Pages
-    // that mount their own provider are unaffected — useToast resolves to the
-    // nearest one, which is still theirs.
+    // Shell level provider so a foreground push can toast on ANY route. Pages
+    // that mount their own provider are unaffected, because useToast resolves to
+    // the nearest one, which is still theirs.
     <ToastProvider>
       <PushBridge />
-      <div className="app-shell">
-        <Sidebar items={NAV_ITEMS} activeId={tab} user={user} onLogout={logout} />
+      <div className="lw-shell">
+        <header className="lw-mast">
+          <div className="lw-mast-inner">
+            <NavLink to="/app/receivables" className="lw-brand">
+              <LogoMark size={30} />
+              <span className="lw-brand-name">
+                Ledger<em>Watch</em>
+              </span>
+            </NavLink>
 
-        <div className="main-col">
-          {/* mobile-only top nav (sidebar collapses) */}
-          <div className="mobile-topbar">
-            <span className="wordmark">
-              Ledger<span className="tick">Watch</span>
-            </span>
-            <div className="row wrap">
-              {NAV_ITEMS.map((item) => (
-                <NavLink
-                  key={item.id}
-                  to={item.to}
-                  className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}
-                >
-                  {item.icon}
-                  {item.label}
-                </NavLink>
-              ))}
+            <span className="lw-mast-spacer" />
+
+            <span className="lw-mast-date">{date}</span>
+
+            <NavLink to="/app/settings" className="lw-mast-user" title="Your account">
+              <Avatar name={user.name} src={user.avatarUrl} />
+              <span className="hide-sm">{user.name}</span>
+            </NavLink>
+
+            <button
+              type="button"
+              className="lw-mast-icon"
+              onClick={logout}
+              title="Sign out"
+              aria-label="Sign out"
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
+          <hr className="lw-rule" />
+        </header>
+
+        <nav className="lw-rail" aria-label="Sections">
+          <div className="lw-rail-inner" ref={railRef}>
+            {NAV_ITEMS.map((item) => (
               <NavLink
-                to="/app/settings"
-                className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}
-                title="Settings"
+                key={item.id}
+                to={item.to}
+                data-navitem={item.id}
+                className={({ isActive }) => (isActive ? "lw-rail-link active" : "lw-rail-link")}
               >
-                <SettingsIcon size={15} />
+                {item.icon}
+                {item.label}
               </NavLink>
-              <Button variant="ghost" icon title="Sign out" onClick={logout}>
-                <LogOut size={15} />
-              </Button>
-            </div>
+            ))}
+
+            {bar && (
+              <span
+                className="lw-rail-ink"
+                aria-hidden="true"
+                style={{ transform: `translateX(${bar.left}px)`, width: bar.width }}
+              />
+            )}
+
+            {/* NOTHING IS ASSERTED HERE ANY MORE, AND THAT IS THE POINT.
+                This rail used to read "Testnet" on the wallet tab and "Simulated
+                portfolio" on the market tab. Both were true when mainnet was
+                disabled and paper was the only trading mode. Both became FALSE
+                the day mainnet was switched on: the rail would have said
+                "Testnet" in small capitals directly above a real balance on
+                Ethereum, and "Simulated portfolio" above a live wallet.
+
+                The shell cannot know either fact. The selected chain lives in
+                WalletPage and the trading mode lives in MarketWatchPage, so
+                anything stated here is a guess dressed as chrome, and a label
+                that cannot know the truth must not assert it. Both screens say
+                it themselves where they actually know: the wallet through its
+                network pill and its mainnet banner, the market through its mode
+                toggle. */}
           </div>
+        </nav>
 
-          {/* desktop content topbar */}
-          <div className="content-topbar">
-            <div className="breadcrumb">
-              <span>LedgerWatch</span>
-              <span className="sep">/</span>
-              <span className="current">{TAB_LABEL[tab] || "Receivables"}</span>
-            </div>
-            <div className="topbar-right">
-              {/* Only labels that are actually true: the paper portfolio really is
-                  simulated and the wallet really is testnet. Receivables is the
-                  user's own ledger, so it carries no badge. */}
-              {tab === "market" && (
-                <span className="sim-pill">
-                  <span className="dot" />
-                  Simulated portfolio
-                </span>
-              )}
-              {tab === "wallet" && (
-                <span className="sim-pill testnet">
-                  <span className="dot" />
-                  Testnet
-                </span>
-              )}
-              <NavLink to="/app/settings" className="user-chip" title="Settings">
-                <Avatar name={user.name} src={user.avatarUrl} />
-                {user.name}
-              </NavLink>
-            </div>
-          </div>
+        {/* Keyed on the route so the entrance replays on navigation. */}
+        <main key={tab} className="lw-body lw-stack">
+          <Suspense fallback={<p className="muted">Loading this section...</p>}>
+            <Outlet />
+          </Suspense>
+        </main>
 
-          {/* keyed on the route so the entrance transition replays on navigation */}
-          <main key={tab} className="page stack">
-            <Suspense fallback={<p className="muted">Loading…</p>}>
-              <Outlet />
-            </Suspense>
-          </main>
-
-          <Footer />
-        </div>
+        <Footer />
       </div>
     </ToastProvider>
   );

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BarChart3, Receipt, Sparkles, Users } from "lucide-react";
 import http from "../../api/http";
 import {
@@ -12,6 +12,7 @@ import {
 import ReceivablesOverview from "./ReceivablesOverview";
 import DebtsPanel from "./DebtsPanel";
 import DebtorsView from "./DebtorsView";
+import { kpiNgn } from "./format";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: <BarChart3 size={15} /> },
@@ -41,21 +42,19 @@ function AssistantCard() {
 
   return (
     <Card
-      eyebrow="Assistant"
-      title="Ask about your receivables"
-      subtitle="Plain-language answers over your ledger — who owes most, who never pays on time."
-      icon={<Sparkles size={17} />}
+      title="Ask about your ledger"
+      subtitle="Ordinary questions, answered over your own figures. Who owes most, who never pays on time."
     >
       <div className="stack">
         <form onSubmit={ask} className="row wrap">
           <Input
             className="grow"
-            placeholder="e.g. who owes me the most?"
+            placeholder="Try: who owes me the most?"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             aria-label="Ask about your receivables"
           />
-          <Button type="submit" disabled={asking}>
+          <Button type="submit" variant="secondary" disabled={asking}>
             <Sparkles size={14} /> {asking ? "Thinking..." : "Ask"}
           </Button>
         </form>
@@ -69,11 +68,73 @@ function AssistantCard() {
 function Receivables() {
   const [tab, setTab] = useState("overview");
 
+  /**
+   * The analytics live here rather than inside the overview panel, because the
+   * folio at the top of the page states them and the folio belongs to the page.
+   *
+   * This is the change that retired the row of four boxed KPI cards. The same
+   * request, the same numbers, stated once at the top in the figures rail
+   * instead of twice: once in a box and once in a chart caption.
+   */
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsError, setAnalyticsError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    http
+      .get("/api/receivables/analytics")
+      .then(({ data }) => active && setAnalytics(data))
+      .catch(
+        (err) =>
+          active &&
+          setAnalyticsError(err?.response?.data?.error || "Could not load your figures")
+      );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const overdue = analytics?.countByStatus?.overdue || 0;
+
+  // Nothing is stated until it is known. An empty figures rail is honest; a rail
+  // of zeroes while the request is still in flight is a wrong number.
+  const figures = analytics
+    ? [
+        {
+          label: "Outstanding",
+          countTo: analytics.totalOutstanding,
+          format: kpiNgn,
+          mark: true,
+          note: "across every open balance",
+        },
+        {
+          label: "Overdue",
+          value: String(overdue),
+          tone: overdue > 0 ? "neg" : undefined,
+          note: overdue === 1 ? "one account past due" : "accounts past due",
+        },
+        {
+          label: "Collected",
+          countTo: analytics.collectedThisMonth,
+          format: kpiNgn,
+          tone: analytics.collectedThisMonth > 0 ? "pos" : undefined,
+          note: "so far this month",
+        },
+        {
+          label: "Rate",
+          countTo: analytics.collectionRate,
+          format: (n) => `${Math.round(n)}%`,
+          note: "of everything invoiced",
+        },
+      ]
+    : undefined;
+
   return (
     <>
       <PageHeader
         title="Receivables"
-        support="Track invoices, record part-payments, and see which clients actually pay on terms."
+        support="What you are owed, who owes it, and how long it has been waiting."
+        figures={figures}
       />
 
       <div className="subtabs" role="tablist">
@@ -95,7 +156,7 @@ function Receivables() {
       <div key={tab} className="stack subtab-panel">
         {tab === "overview" && (
           <>
-            <ReceivablesOverview />
+            <ReceivablesOverview data={analytics} error={analyticsError} />
             <AssistantCard />
           </>
         )}
@@ -106,7 +167,7 @@ function Receivables() {
   );
 }
 
-// ToastProvider wraps the tab so Receivables (and its children) can raise toasts.
+// ToastProvider wraps the tab so Receivables and its children can raise toasts.
 export default function ReceivablesPage() {
   return (
     <ToastProvider>

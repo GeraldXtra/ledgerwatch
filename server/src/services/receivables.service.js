@@ -60,6 +60,34 @@ async function attachTotals(userId, debts) {
  * Recompute a debt's stored status after a payment change, and cancel scheduled
  * reminders when it reaches zero. Mutates + saves the debt. Returns amountPaid.
  */
+/**
+ * THE LARGEST NAIRA SHORTFALL THAT STILL COUNTS AS PAID IN FULL.
+ *
+ * ONE definition, because there were three and they were all the same mistake.
+ * `recomputeDebtStatus` here, `resyncActivePaymentAddress` in
+ * paymentAddress.service and `settleIfDue` in paymentWatch.service each wrote
+ * their own `amount * 0.005`, and capping one of them changed nothing because
+ * the next one closed the invoice anyway. A regression test caught exactly that
+ * sequence, twice.
+ *
+ * The intent was always to absorb rounding dust. A PERCENTAGE is not dust: it
+ * scales with the invoice, and these are naira invoices that run to nine
+ * figures.
+ *
+ *     invoice NGN      10,000  ->  forgives NGN 50      (unchanged, under the cap)
+ *     invoice NGN     100,000  ->  forgives NGN 100     (was NGN 500)
+ *     invoice NGN 326,480,000  ->  forgives NGN 100     (was NGN 1,632,400)
+ *
+ * That last line is the one that mattered. It marked the invoice paid, stopped
+ * the reminders, and added over a million naira nobody had sent to the owner's
+ * collected figure. Harmless while every chain was a testnet; not harmless now.
+ */
+function toleratedShortfallNgn(invoiceAmountNgn) {
+  const TOLERANCE = Number(process.env.USDC_SETTLEMENT_TOLERANCE || 0.005);
+  const MAX_DUST_NGN = Number(process.env.SETTLEMENT_MAX_DUST_NGN || 100);
+  return Math.min(Number(invoiceAmountNgn || 0) * TOLERANCE, MAX_DUST_NGN);
+}
+
 async function recomputeDebtStatus(debt) {
   const rows = await Payment.aggregate([
     { $match: { debtId: debt._id } },
@@ -69,14 +97,31 @@ async function recomputeDebtStatus(debt) {
   const balance = (debt.amount || 0) - amountPaid;
 
   /**
-   * The same 0.5% tolerance the crypto watcher uses, applied to the COMBINED
-   * total. An exact `balance <= 0` left invoices open over a few kobo of
-   * rounding dust — the money had effectively arrived, the payer had done
-   * nothing wrong, and the invoice sat there looking unpaid. Chasing somebody
+   * SETTLED WHEN THE SHORTFALL IS DUST, AND DUST IS AN ABSOLUTE AMOUNT.
+   *
+   * The intent has always been the one in the sentence below: an exact
+   * `balance <= 0` left invoices open over a few kobo of rounding, the money had
+   * effectively arrived, the payer had done nothing wrong, and chasing somebody
    * for two kobo is worse than absorbing it.
+   *
+   * But it was written as a bare 0.5 percent of the invoice, and a percentage is
+   * not dust. It scales:
+   *
+   *     invoice NGN      10,000  ->  closes while short NGN 50
+   *     invoice NGN     100,000  ->  closes while short NGN 500
+   *     invoice NGN 326,480,000  ->  closes while short NGN 1,632,400
+   *
+   * THIS is the tolerance that actually decides the invoice is paid, stops the
+   * reminders and feeds the collected figure, so on a large mainnet invoice it
+   * would have recorded over a million naira as received that nobody sent. The
+   * crypto watcher had the same flaw and capping only that one did not help,
+   * because this line closed the debt anyway. A regression test caught exactly
+   * that.
+   *
+   * So the tolerated shortfall is the SMALLER of the percentage and a genuinely
+   * dust sized absolute amount. Small invoices are unaffected.
    */
-  const TOLERANCE = Number(process.env.USDC_SETTLEMENT_TOLERANCE || 0.005);
-  const settled = balance <= (debt.amount || 0) * TOLERANCE;
+  const settled = balance <= toleratedShortfallNgn(debt.amount);
 
   const wasPaid = debt.status === "paid";
   if (settled) {
@@ -383,6 +428,7 @@ module.exports = {
   attachTotals,
   withDerived,
   recomputeDebtStatus,
+  toleratedShortfallNgn,
   debtorKey,
   debtorGroups,
   debtorProfile,

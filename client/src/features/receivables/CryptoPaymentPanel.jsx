@@ -270,7 +270,7 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
                   at {ngn(pa.ngnPerUsd)} per {pa.tokenSymbol || "USDC"}, {agoLabel(pa.rateTimestamp)}
                 </span>
                 {/* SNAPSHOT vs CURRENT. The snapshot is what settles this invoice
-                    — a payer who sends what they were quoted clears it whatever
+                    settles this invoice. A payer who sends what they were quoted clears it whatever
                     the naira does. The owner still needs to see how far the rate
                     has moved, so both are shown and the drift is named. Withheld
                     below 0.5% because a rate always wobbles slightly and flagging
@@ -282,7 +282,7 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
                      snapshot above is unaffected and still settles the invoice. */
                   <span className="quote-sub">
                     Today&rsquo;s rate is unavailable, so no comparison is shown. This invoice is
-                    unaffected — it settles at the rate above.
+                    unaffected. It settles at the rate above.
                   </span>
                 ) : (
                   pa.ngnPerUsd > 0 &&
@@ -291,7 +291,7 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
                       now {ngn(currentRate.ngnPerUsd)} (
                       {currentRate.ngnPerUsd > pa.ngnPerUsd ? "+" : ""}
                       {(((currentRate.ngnPerUsd - pa.ngnPerUsd) / pa.ngnPerUsd) * 100).toFixed(1)}%)
-                      {" — this invoice still settles at the rate above"}
+                      {". This invoice still settles at the rate above"}
                     </span>
                   )
                 )}

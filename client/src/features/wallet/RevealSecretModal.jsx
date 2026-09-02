@@ -184,7 +184,7 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
               <ul className="reveal-warn-list">
                 <li>
                   <strong>LedgerWatch will never ask you for it.</strong> Nobody legitimate ever
-                  will — not support, not a developer, not an airdrop.
+                  will. Not support, not a developer, not an airdrop.
                 </li>
                 <li>Never type it into another website, form or chat.</li>
                 <li>Write it on paper. A photo or a note app is readable by other software.</li>
@@ -195,13 +195,13 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
 
           {isPhrase ? (
             <p className="muted small">
-              Your recovery phrase restores the <strong>entire wallet</strong> — this address and
+              Your recovery phrase restores the <strong>entire wallet</strong>, meaning this address and
               every invoice payment address derived from it.
             </p>
           ) : (
             <p className="muted small">
               A private key exposes <strong>one account only</strong>. It does not restore the rest
-              of the wallet or its derived invoice addresses — the recovery phrase does that.
+              of the wallet or its derived invoice addresses. Only the recovery phrase does that.
             </p>
           )}
 
@@ -261,7 +261,7 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
           </div>
           {busy && (
             <p className="muted caption" style={{ margin: 0 }}>
-              This takes a few seconds — the encryption is deliberately slow to resist guessing.
+              This takes a few seconds, because the encryption is deliberately slow to resist guessing.
             </p>
           )}
         </form>
@@ -276,7 +276,7 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
                 <p className="reveal-warn-lead">This wallet has no recovery phrase</p>
                 <p className="muted small" style={{ margin: 0 }}>
                   It was imported from a private key, and a private key contains no seed to
-                  rebuild a phrase from — so there is nothing to show. Your private key is below;
+                  rebuild a phrase from, so there is nothing to show. Your private key is below,
                   it is the only backup this wallet can have.
                 </p>
               </div>
@@ -285,7 +285,7 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
 
           {!visible ? (
             /* Concealed. The secret is NOT in the DOM at this point — only in a
-               ref — so a screen share, an extension or a screenshot catches
+               ref, so a screen share, an extension or a screenshot catches
                nothing. Revealing is a deliberate act. */
             <button type="button" className="reveal-cover" onClick={() => setVisible(secretRef.current)}>
               <Eye size={22} />
@@ -305,7 +305,7 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
                 ))}
               </ol>
               <p className="muted caption" style={{ margin: 0 }}>
-                Numbered because the order matters — the same words in a different order restore a
+                Numbered because the order matters. The same words in a different order restore a
                 different wallet.
               </p>
             </>

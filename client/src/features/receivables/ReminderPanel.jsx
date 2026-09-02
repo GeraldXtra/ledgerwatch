@@ -110,7 +110,7 @@ export default function ReminderPanel({ debt, result, onClose }) {
       }
       if (!sent.length && !failed.length && skipped.length) {
         toast(
-          `Not configured on the server — ${skipped
+          `Not configured on the server. ${skipped
             .map((d) => d.channel)
             .join(" & ")} skipped. Use "Open in WhatsApp" to send by hand.`,
           { type: "info" }
@@ -125,7 +125,7 @@ export default function ReminderPanel({ debt, result, onClose }) {
       toast(
         served ||
           (err?.code === "ECONNABORTED"
-            ? "The request timed out before the server answered. The reminder may still have gone out — check the history below before resending."
+            ? "The request timed out before the server answered. The reminder may still have gone out. Check the history below before resending."
             : "Could not reach the server. Check that it is running, then try again."),
         { type: "error", duration: 9000 }
       );
@@ -137,7 +137,7 @@ export default function ReminderPanel({ debt, result, onClose }) {
   return (
     <Modal label={`Reminder for ${debt.debtorName}`} onClose={onClose}>
       <div className="row space-between">
-        <h3 className="section-title">Reminder — {debt.debtorName}</h3>
+        <h3 className="section-title">Reminder for {debt.debtorName}</h3>
         <Button variant="ghost" icon title="Close" onClick={onClose}>
           <X size={15} />
         </Button>

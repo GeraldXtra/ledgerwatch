@@ -32,6 +32,38 @@ const TRANSFER_TOPIC =
 // amount has paid in full. Absorbs rounding and any fee dust taken in transit.
 const TOLERANCE = Number(process.env.USDC_SETTLEMENT_TOLERANCE || 0.005);
 
+/**
+ * THE TOLERANCE MUST BE CAPPED IN ABSOLUTE TERMS, NOT LEFT PROPORTIONAL.
+ *
+ * `TOLERANCE` exists to absorb ROUNDING. The quote is rounded up to two decimal
+ * places, so the largest honest shortfall is a fraction of a cent. As a bare
+ * percentage that was fine on a testnet and quietly catastrophic on mainnet,
+ * because 0.5 percent scales with the invoice:
+ *
+ *     invoice NGN      10,000  ->  forgives NGN 50
+ *     invoice NGN     100,000  ->  forgives NGN 500
+ *     invoice NGN 100,000,000  ->  forgives NGN 500,000
+ *     invoice NGN 326,480,000  ->  forgives NGN 1,632,400
+ *
+ * And it does not merely forgive it. `creditNgn` on a full payment credits the
+ * ENTIRE remaining balance, so the ledger records the whole invoice as received,
+ * the reminders stop, and the owner's collected figure includes 1.6 million
+ * naira that nobody ever sent. That is money invented in the book of account,
+ * which is the one thing this system exists not to do.
+ *
+ * So the shortfall actually tolerated is the SMALLER of the percentage and a
+ * few cents. Small invoices behave exactly as before; large ones stop forgiving
+ * real money. Override with USDC_MAX_SHORTFALL if a payment rail genuinely
+ * deducts more than this, and write down why.
+ */
+const MAX_SHORTFALL = Number(process.env.USDC_MAX_SHORTFALL || 0.05);
+
+/** The largest shortfall that still counts as paid in full, in token units. */
+function toleratedShortfall(expected) {
+  const proportional = Number(expected || 0) * TOLERANCE;
+  return Math.min(proportional, MAX_SHORTFALL);
+}
+
 // Never ask an RPC for an unbounded range; testnet nodes reject huge spans.
 /**
  * Blocks per eth_getLogs query.
@@ -47,6 +79,31 @@ const TOLERANCE = Number(process.env.USDC_SETTLEMENT_TOLERANCE || 0.005);
  * limit on every enabled chain, not just the one being tested.
  */
 const MAX_BLOCK_SPAN = Number(process.env.PAYMENT_WATCH_BLOCK_SPAN || 1500);
+
+/**
+ * The span for ONE chain.
+ *
+ * A single global number was wrong the moment mainnet was enabled. Log ranges are
+ * capped PER ENDPOINT, independently of how many results come back, and the caps
+ * differ by an order of magnitude between chains and between providers on the
+ * same chain. Measured 2026-08-29 with `npm run verify:chains`: publicnode serves
+ * 50 blocks on Base, Arbitrum and Optimism while the official endpoints serve
+ * 10,000; Alchemy's FREE TIER caps eth_getLogs at a 10 block range on every
+ * network, which is why it is never the endpoint that ends up serving one.
+ *
+ * So the registry carries a measured `logSpan` per chain and this reads it. The
+ * env var remains an override and the old 1500 remains the floor for any chain
+ * that has not been measured, because a too-small span is slow while a too-large
+ * one is the silent-failure mode described above: every query rejected, the
+ * cursor never advancing, and a watcher that looks healthy while detecting
+ * nothing.
+ */
+function spanFor(chain) {
+  const override = Number(process.env.PAYMENT_WATCH_BLOCK_SPAN);
+  if (Number.isFinite(override) && override > 0) return override;
+  const measured = Number(chain && chain.logSpan);
+  return Number.isFinite(measured) && measured > 0 ? measured : MAX_BLOCK_SPAN;
+}
 
 // ---- shared caches / single-flight -----------------------------------------
 const blockCache = new Map(); // chainId -> { block, ts }
@@ -222,13 +279,39 @@ async function settleIfDue(pa, chain) {
   if (totalUsdc <= 0) return null;
 
   /**
+   * THE BASIS. Read this before changing anything below it.
+   *
+   * `totalUsdc` is CUMULATIVE across the whole life of this address.
+   * `pa.expectedUsdc` is REMAINING: resyncActivePaymentAddress rewrites it after
+   * every partial settlement to what is still owed.
+   *
+   * Comparing those two was LW-004, and it was not theoretical. After any
+   * partial settlement the comparison is permanently biased toward true, so the
+   * NEXT transfer of any size at all settles the entire remaining balance. Two
+   * addresses in this database were primed for it: derivationIndex 19 held
+   * receivedUsdc 20 against expectedUsdc 16.72 on a balance of 22,759.60 naira,
+   * which means one cent would have closed it.
+   *
+   * So the comparison is made on ONE basis: what has arrived and NOT yet been
+   * turned into a Payment, against what is still expected. `settledUsdc` is
+   * derived from the settledPaymentId already stamped on each observed transfer,
+   * so this is correct for rows written before this fix as well as after it, and
+   * needs no migration.
+   */
+  const settledUsdc = confirmed
+    .filter((o) => o.settledPaymentId)
+    .reduce((s, o) => s + unitsToAmount(o.value, pa.tokenDecimals), 0);
+  const unsettledUsdc = Math.max(0, totalUsdc - settledUsdc);
+  if (unsettledUsdc <= 0) return { outcome: "NOTHING_NEW" };
+
+  /**
    * Convert with the SNAPSHOT rate stored when the address was issued, never the
    * live rate. The payer was told "send exactly this many USDC" — so sending that
    * amount must clear the invoice, however the naira has moved since. Using a
    * live rate would mean someone who paid precisely what was asked could still be
    * shown as owing money, which would be indefensible.
    */
-  const settledNgn = totalUsdc * pa.ngnPerUsd;
+  const settledNgn = unsettledUsdc * pa.ngnPerUsd;
 
   const debt = await Debt.findById(pa.debtId);
   if (!debt) return null;
@@ -240,9 +323,69 @@ async function settleIfDue(pa, chain) {
   ]);
   const alreadyPaid = rows.length ? rows[0].paid : 0;
   const remainingNgn = Math.max(0, (debt.amount || 0) - alreadyPaid);
-  if (remainingNgn <= 0) return null; // nothing left to settle
 
-  const fullyPaid = totalUsdc >= pa.expectedUsdc * (1 - TOLERANCE);
+  /**
+   * MONEY THAT ARRIVES WITH NOTHING OWED IS STILL MONEY.
+   *
+   * This was `if (remainingNgn <= 0) return null;` — a bare early return in the
+   * one path where silence costs the owner real funds (LW-002). It fired before
+   * Payment.create, before receivedUsdc was updated, before status was set and
+   * before save, so a confirmed transfer left no trace of any kind.
+   *
+   * There is no fourth outcome available here: value that has arrived is
+   * credited, recorded as overpayment, or recorded as unattributed. It is never
+   * discarded. See ARCHITECTURE.md section 4.4.
+   */
+  if (remainingNgn <= 0) {
+    /**
+     * ASSIGNED, not accumulated, and the difference matters.
+     *
+     * `unsettledUsdc` is already the running total of every confirmed transfer
+     * that has never become a Payment, so it IS the unattributed figure. Adding
+     * to it counted the same transfer again on every pass: a regression test
+     * caught this reading 17.20 where the address had received 9.85.
+     *
+     * Assigning is also idempotent, which matters here more than anywhere else
+     * in the file, because this branch runs on every grace scan for the life of
+     * the address and must converge rather than drift.
+     */
+    pa.unattributedUsdc = unsettledUsdc;
+    pa.unattributedAt = new Date();
+    pa.receivedUsdc = totalUsdc;
+    // Surfaced through the field the panel already renders, so the owner sees it
+    // on the invoice rather than only in a log nobody reads.
+    pa.unidentifiedBalanceAt = pa.unidentifiedBalanceAt || new Date();
+    await pa.save();
+
+    console.warn(
+      `[paymentWatch] UNATTRIBUTED ${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} at ` +
+        `${pa.address} on ${chain.name}: invoice ${debt._id} already owes nothing. ` +
+        `Recorded against the address and the owner notified; the funds are ` +
+        `swept from this address like any other balance.`
+    );
+
+    await notifyUser(
+      pa.userId,
+      {
+        title: "Money arrived on a settled invoice",
+        body:
+          `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} reached the address for ` +
+          `${debt.debtorName}, which is already paid in full. It is safe in your ` +
+          `derived address and can be swept.`,
+        type: "tx",
+      },
+      "txUpdates"
+    ).catch(() => {
+      /* the record above is durable whether or not the push lands */
+    });
+
+    return { outcome: "UNATTRIBUTED", unattributedUsdc: unsettledUsdc };
+  }
+
+  // Both operands are now REMAINING. See the basis note above. The tolerance is
+  // capped in absolute terms, so a large invoice cannot be closed while short by
+  // a percentage that runs into millions of naira.
+  const fullyPaid = unsettledUsdc >= pa.expectedUsdc - toleratedShortfall(pa.expectedUsdc);
 
   // On full payment credit the ENTIRE remaining balance so it lands on exactly
   // zero, rather than a few kobo short from rounding. Under-payment credits only
@@ -256,10 +399,13 @@ async function settleIfDue(pa, chain) {
   if (unsettled.length === 0) return null;
   const keyTx = unsettled[unsettled.length - 1];
 
-  const overpaidUsdc = fullyPaid ? Math.max(0, totalUsdc - pa.expectedUsdc) : 0;
+  // Measured against the SAME remaining basis as fullyPaid. Using the cumulative
+  // total here reported an overpayment that had not happened, with a warning
+  // triangle, on any address that had ever taken a part payment.
+  const overpaidUsdc = fullyPaid ? Math.max(0, unsettledUsdc - pa.expectedUsdc) : 0;
   const isLate = unsettled.some((o) => o.late);
   const noteParts = [
-    `${totalUsdc.toFixed(2)} ${pa.tokenSymbol} received on ${chain.name}`,
+    `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} received on ${chain.name}`,
     `rate ${pa.ngnPerUsd.toLocaleString("en-NG")} naira per ${pa.tokenSymbol}`,
   ];
   if (isLate) {
@@ -300,7 +446,9 @@ async function settleIfDue(pa, chain) {
 
   pa.receivedUsdc = totalUsdc;
   pa.settledNgn = (pa.settledNgn || 0) + creditNgn;
-  pa.overpaidUsdc = overpaidUsdc;
+  // ACCUMULATES. Assigning here meant a later partial settlement silently reset
+  // an overpayment the owner had already been shown to zero.
+  pa.overpaidUsdc = (pa.overpaidUsdc || 0) + overpaidUsdc;
 
   if (fullyPaid) {
     pa.status = "paid";
@@ -385,14 +533,15 @@ async function scanAddress(pa, chain, head, mode = "active") {
     if (!hasNewMoney && !awaitingConfirmation) return { found: 0, newlyConfirmed: 0, late: 0 };
 
     if (hasNewMoney) {
-      from = Math.max(0, head - MAX_BLOCK_SPAN);
+      from = Math.max(0, head - spanFor(chain));
       to = head;
     } else {
       scanning = false; // only advancing confirmations
     }
   } else {
-    from = pa.lastScannedBlock > 0 ? pa.lastScannedBlock + 1 : Math.max(0, head - MAX_BLOCK_SPAN);
-    to = Math.min(head, from + MAX_BLOCK_SPAN);
+    const span = spanFor(chain);
+    from = pa.lastScannedBlock > 0 ? pa.lastScannedBlock + 1 : Math.max(0, head - span);
+    to = Math.min(head, from + span);
   }
 
   let found = 0;
@@ -443,7 +592,7 @@ async function scanAddress(pa, chain, head, mode = "active") {
         console.error(
           `[paymentWatch] ${chain.name}: log query FAILED for ${pa.address} over ` +
             `${to - from + 1} blocks and has never succeeded. Payments to this address ` +
-            `cannot be detected. If this repeats, PAYMENT_WATCH_BLOCK_SPAN (${MAX_BLOCK_SPAN}) ` +
+            `cannot be detected. If this repeats, the log span for this chain (${spanFor(chain)}) ` +
             `is likely above this RPC's range limit.`
         );
       }
@@ -603,6 +752,8 @@ module.exports = {
   settleIfDue,
   scanAddress,
   unitsToAmount,
+  toleratedShortfall,
+  MAX_SHORTFALL,
   accountedOnChain,
   tokenBalance,
   addressTopic,

@@ -35,7 +35,9 @@ import PortfolioPanel from "./PortfolioPanel";
 import TradingModeToggle from "./TradingModeToggle";
 import LiveSwapModal from "./LiveSwapModal";
 import LivePortfolioPanel from "./LivePortfolioPanel";
+import MainnetBanner from "../wallet/MainnetBanner";
 import { tradeability } from "./tradeability";
+import { toSpendAmount } from "./amount";
 import { fetchChains } from "../wallet/walletApi";
 import { getStoredAddress } from "../wallet/keystore";
 import { recallChain } from "../wallet/NetworkSwitcher";
@@ -138,7 +140,7 @@ function MarketWatch() {
           .filter((al) => !knownAlertIds.current.has(al._id))
           .filter((al) => !pushedAlertIds.current.has(String(al._id)))
           .forEach((al) =>
-            toast(`New alert: ${al.symbol} — ${al.suggestion}`, { type: "info" })
+            toast(`New alert on ${al.symbol}. The agent suggests ${al.suggestion}.`, { type: "info" })
           );
       }
       knownAlertIds.current = new Set(nextAlerts.map((al) => al._id));
@@ -146,9 +148,23 @@ function MarketWatch() {
     } catch (err) {
       setError(err?.response?.data?.error || "Failed to load market data");
     }
-  }, [toast]);
+    // `mode` is a dependency because the server now scopes watches, alerts and
+    // the portfolio to the book you are in. Without it the paper rows stayed on
+    // screen after switching to live, so the live wallet showed watches nobody
+    // had added to it.
+  }, [toast, mode]);
 
   useEffect(() => {
+    /**
+     * Clear the previous book BEFORE fetching the next one. Leaving the old rows
+     * up during the round trip shows paper positions under a live heading, which
+     * is the one thing this separation exists to prevent.
+     */
+    setWatches([]);
+    setAlerts([]);
+    setAlertHistory([]);
+    setPortfolio(null);
+    knownAlertIds.current = null;
     loadData();
   }, [loadData]);
 
@@ -224,7 +240,7 @@ function MarketWatch() {
                 // that arrived as a notification is not toasted a second time.
                 .filter((al) => !pushedAlertIds.current.has(String(al._id)))
                 .forEach((al) =>
-                  toast(`New alert: ${al.symbol} — ${al.suggestion}`, { type: "info" })
+                  toast(`New alert on ${al.symbol}. The agent suggests ${al.suggestion}.`, { type: "info" })
                 );
               // a new alert means history/portfolio may change too
               http.get("/api/alerts/history").then((h) => setAlertHistory(h.data.alerts)).catch(() => {});
@@ -300,13 +316,35 @@ function MarketWatch() {
         toast(t.reason, { type: "info", duration: 9000 });
         return;
       }
-      // Amount is denominated in the stablecoin for a buy, in the asset for a sell.
+      // LW-008. The conversion lives in ./amount so it can be tested; it was
+      // inline here as a ternary with two identical branches, which is exactly
+      // why nobody spotted it. See __tests__/LW-008.test.js.
+      const conv = toSpendAmount({
+        action,
+        denom,
+        amount,
+        price: Number(alert.priceAtAlert) || 0,
+      });
+      if (!conv.ok) {
+        toast(
+          conv.reason === "no-price"
+            ? "No live price for that coin right now, so the amount cannot be converted safely."
+            : "That amount could not be worked out. Please enter it again.",
+          { type: "error", duration: 9000 }
+        );
+        return;
+      }
+
       setLiveSwap({
         side: action,
         coin: { coinId: alert.coinId, symbol: alert.symbol },
         token: t.token,
         cash: t.cash,
-        amountDisplay: denom === "quote" ? amount : amount,
+        amountDisplay: conv.amount,
+        // Carried so the confirm screen can restate what the user actually typed
+        // alongside what will be spent, rather than silently showing a different
+        // number from the one they entered.
+        typed: { amount: Number(amount), denom, price: Number(alert.priceAtAlert) || 0 },
         alertId: alert._id,
       });
       setTrade(null);
@@ -346,8 +384,8 @@ function MarketWatch() {
       const created = data.alertsCreated ?? 0;
       toast(
         created > 0
-          ? `Check complete — ${created} new alert${created === 1 ? "" : "s"}.`
-          : "Check complete — no new alerts.",
+          ? `Check complete. ${created} new alert${created === 1 ? "" : "s"}.`
+          : "Check complete. Nothing new.",
         { type: created > 0 ? "info" : "success" }
       );
       await loadData();
@@ -423,12 +461,12 @@ function MarketWatch() {
         title="Market Watch"
         support={
           mode === "live"
-            ? "A human-in-the-loop crypto agent: live prices, alerts you approve, and real swaps you sign yourself."
-            : "A human-in-the-loop crypto agent: live prices, alerts you approve, and a fully simulated portfolio."
+            ? "Live prices, alerts that wait for your answer, and swaps you sign yourself."
+            : "Live prices, alerts that wait for your answer, and a portfolio that is entirely simulated."
         }
         action={
           <>
-            <Button onClick={runPass} loading={running}>
+            <Button variant="primary" onClick={runPass} loading={running}>
               <Zap size={14} /> {running ? "Checking" : "Check now"}
             </Button>
             <Button variant="ghost" icon title="Refresh" onClick={loadData}>
@@ -439,6 +477,12 @@ function MarketWatch() {
       />
 
       <TradingModeToggle mode={mode} onChange={setMode} />
+
+      {/* The banner renders nothing on a testnet, so it is dropped in
+          unconditionally. It belongs here as much as on the wallet: live mode
+          signs real swaps, and the only thing distinguishing practice from
+          irreversible would otherwise be a chain name in a dropdown. */}
+      {mode === "live" && <MainnetBanner chain={liveChain} />}
 
       {error && <p className="error-text">{error}</p>}
 
@@ -459,7 +503,7 @@ function MarketWatch() {
 
       {/* Only PAPER mode waits on the paper portfolio. It used to gate the entire
           page, so a slow or failed /api/portfolio call left live mode showing
-          skeletons forever — live holdings come from the chain and have nothing
+          skeletons forever, because live holdings come from the chain and have nothing
           to do with the simulated portfolio loading. */}
       {mode === "paper" && pf === null ? (
         <>
@@ -479,7 +523,7 @@ function MarketWatch() {
             mode too, so switching to Live wallet still showed "Simulated
             portfolio" and the $1,000,000 paper start sitting above real funds.
             A simulated figure presented while the user believes they are looking
-            at real holdings is the most dangerous thing this screen can do —
+            at real holdings is the most dangerous thing this screen can do,
             every decision made from it would be based on money that does not
             exist. In live mode the live panel below is the ONLY portfolio shown,
             and it states its own failures rather than falling back to anything.
@@ -549,7 +593,7 @@ function MarketWatch() {
 
           {/* LIVE ONLY, and rendered UNCONDITIONALLY in live mode. It previously
               required `liveChain && walletAddress`, so a user with neither saw
-              nothing live and only the paper hero above — which is exactly how a
+              nothing live and only the paper hero above, which is exactly how a
               paper figure ended up representing a live wallet. The panel now owns
               its own "no wallet" / "no chain" / "unreadable" states. */}
           {mode === "live" && (
@@ -565,7 +609,7 @@ function MarketWatch() {
 
           <div className="kpi-row">
             {/* Cash / watches / alerts only change on a trade or a fired alert, so they
-                count up. Total P/L is recomputed on every 10s price poll — animating it
+                count up. Total P/L is recomputed on every 10s price poll, so animating it
                 would restart the count from zero each tick, so it stays a plain value. */}
             {/* The two money tiles are PAPER figures — simulated cash and P/L
                 against the 1,000,000 start. They are meaningless in live mode and
@@ -630,7 +674,7 @@ function MarketWatch() {
       )}
 
       {/* The live panel now renders once, near the top, where the paper hero sits
-          in paper mode — so the two can never appear together and live mode can
+          in paper mode, so the two can never appear together and live mode can
           never fall through to a simulated figure. */}
 
       {trade && (

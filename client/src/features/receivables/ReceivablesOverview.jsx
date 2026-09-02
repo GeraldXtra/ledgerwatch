@@ -1,77 +1,65 @@
-import { useEffect, useState } from "react";
-import { AlertCircle, CalendarClock, HandCoins, Percent, TrendingUp } from "lucide-react";
-import http from "../../api/http";
-import { Card, SkeletonBlock, StatCard } from "../../components/ui";
-import { kpiNgn } from "./format";
+import { AlertCircle } from "lucide-react";
+import { Card, SkeletonBlock } from "../../components/ui";
 import OwedCollectedChart from "./OwedCollectedChart";
 import AgingChart from "./AgingChart";
 
 /**
- * Analytics overview: KPI cards + two real charts (6-month owed vs collected, and
- * an aging breakdown). Driven by GET /api/receivables/analytics.
+ * The two charts: six months of invoiced against collected, and how overdue the
+ * unpaid money is.
+ *
+ * The KPI row that used to sit above these moved into the page folio, so the
+ * four headline figures are stated once at the top of the page rather than in a
+ * row of boxes here. `data` now arrives as a prop from ReceivablesPage, which
+ * owns the request, so the same numbers can never disagree between the two
+ * places they appear.
+ *
+ * An error is rendered as an error. It is never allowed to look like an empty
+ * ledger, because "you are owed nothing" and "we could not ask" are different
+ * claims about the world and only one of them is good news.
  */
-export default function ReceivablesOverview() {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let active = true;
-    http
-      .get("/api/receivables/analytics")
-      .then(({ data }) => active && setData(data))
-      .catch((err) => active && setError(err?.response?.data?.error || "Failed to load analytics"));
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  if (error) return <p className="error-text">{error}</p>;
-
-  if (!data) {
+export default function ReceivablesOverview({ data, error }) {
+  if (error) {
     return (
-      <>
-        <div className="kpi-row">
-          <SkeletonBlock height={110} />
-          <SkeletonBlock height={110} />
-          <SkeletonBlock height={110} />
-          <SkeletonBlock height={110} />
-        </div>
-        <div className="grid2">
-          <SkeletonBlock height={300} />
-          <SkeletonBlock height={300} />
-        </div>
-      </>
+      <Card title="Your figures">
+        <p className="error-text" style={{ margin: 0 }}>
+          {error}. This is a connection problem rather than an empty ledger, so nothing has been
+          lost. Reload the page to try again.
+        </p>
+      </Card>
     );
   }
 
-  const overdue = data.countByStatus.overdue || 0;
+  if (!data) {
+    return (
+      <div className="grid2">
+        <SkeletonBlock height={300} />
+        <SkeletonBlock height={300} />
+      </div>
+    );
+  }
+
+  const overdue = data.countByStatus?.overdue || 0;
 
   return (
-    <>
-      <div className="kpi-row">
-        <StatCard label="Total outstanding" countTo={data.totalOutstanding} format={kpiNgn} icon={<AlertCircle size={17} />} iconTone={data.totalOutstanding > 0 ? "neg" : "neutral"} hint="Across all open balances" />
-        <StatCard label="Collected this month" countTo={data.collectedThisMonth} format={kpiNgn} tone={data.collectedThisMonth > 0 ? "pos" : undefined} iconTone="pos" icon={<HandCoins size={17} />} hint="Payments received this month" />
-        <StatCard label="Collection rate" countTo={data.collectionRate} format={(n) => `${Math.round(n)}%`} icon={<Percent size={17} />} iconTone="accent" hint="Of all money invoiced" />
-        {data.avgDaysToPayment != null ? (
-          <StatCard label="Avg days to pay" countTo={data.avgDaysToPayment} format={(n) => String(Math.round(n))} icon={<CalendarClock size={17} />} iconTone="neutral" hint="From invoice to full settlement" />
-        ) : (
-          <StatCard label="Avg days to pay" value="—" icon={<CalendarClock size={17} />} iconTone="neutral" hint="From invoice to full settlement" />
+    <div className="grid2 overview-charts">
+      <Card
+        title="Invoiced against collected"
+        subtitle="The last six months of money owed set against money that actually arrived."
+      >
+        <OwedCollectedChart data={data.monthly} />
+      </Card>
+      <Card
+        title="How old the money is"
+        subtitle="The longer a balance sits in a later bucket, the less likely it is to arrive."
+      >
+        <AgingChart aging={data.aging} />
+        {overdue > 0 && (
+          <p className="muted small" style={{ marginTop: 10 }}>
+            <AlertCircle size={13} style={{ verticalAlign: "-2px" }} /> {overdue} account
+            {overdue === 1 ? " is" : "s are"} past due. Start with the oldest bucket.
+          </p>
         )}
-      </div>
-
-      <div className="grid2 overview-charts">
-        <Card eyebrow="Cash flow" title="Invoiced vs collected" subtitle="The last six months of money owed against money received." icon={<TrendingUp size={17} />}>
-          <OwedCollectedChart data={data.monthly} />
-        </Card>
-        <Card eyebrow="Risk" title="Aging of outstanding money" subtitle="How overdue your unpaid balances are." icon={<AlertCircle size={17} />}>
-          <AgingChart aging={data.aging} />
-          {overdue > 0 && (
-            <p className="muted small" style={{ marginTop: 10 }}>
-              {overdue} debt{overdue === 1 ? "" : "s"} past due. Chase the oldest buckets first.
-            </p>
-          )}
-        </Card>
-      </div>
-    </>
+      </Card>
+    </div>
   );
 }

@@ -26,4 +26,16 @@ module.exports = [
       "no-empty": ["warn", { allowEmptyCatch: true }],
     },
   },
+  /**
+   * Test files run under vitest with `globals: true`, so describe/it/expect and
+   * the lifecycle hooks are injected rather than imported. Without this block
+   * `no-undef` flags every one of them, which it did: 24 errors that nobody saw
+   * because the harness landed in one session and only the client was linted
+   * afterwards. A lint gate that is failing for a reason everybody has agreed to
+   * ignore is not a gate.
+   */
+  {
+    files: ["src/__tests__/**/*.js", "**/*.test.js"],
+    languageOptions: { globals: { ...globals.node, ...globals.vitest } },
+  },
 ];

@@ -14,7 +14,7 @@ export default function MainnetBanner({ chain }) {
     <div className="mainnet-banner">
       <TriangleAlert size={16} />
       <span>
-        <strong>MAINNET — REAL FUNDS.</strong> You are on {chain.name}. Transactions here move real
+        <strong>MAINNET. REAL FUNDS.</strong> You are on {chain.name}. Transactions here move real
         money, confirm in seconds and cannot be reversed by us or by anyone else.
       </span>
     </div>

@@ -31,7 +31,7 @@ export default class ErrorBoundary extends Component {
           </div>
           <h2 className="section-title">Something went wrong</h2>
           <p className="muted small">
-            The page hit an unexpected error. Reloading usually fixes it — your data is safe.
+            The page hit an unexpected error. Reloading usually fixes it, and your data is safe.
           </p>
           <div className="row" style={{ justifyContent: "center" }}>
             <button

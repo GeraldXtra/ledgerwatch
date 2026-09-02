@@ -30,7 +30,12 @@ function getMailer() {
   if (mailerLoaded) return mailer;
   mailerLoaded = true;
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
-  if (SMTP_HOST && SMTP_PORT && SMTP_USER && SMTP_PASS) {
+  // Treat a leftover example value as unconfigured. Building a transport around
+  // `you@gmail.com` produces an auth rejection that looks like a bug in this app
+  // rather than a blank field in .env.
+  const usable =
+    SMTP_HOST && SMTP_PORT && SMTP_USER && SMTP_PASS && emailConfigStatus().configured;
+  if (usable) {
     try {
       mailer = require("nodemailer").createTransport({
         host: SMTP_HOST,
@@ -66,8 +71,22 @@ function getMailer() {
 async function verifyEmail() {
   const transport = getMailer();
   if (!transport) {
-    console.log("[email] SMTP not configured — email sends will be skipped.");
-    return { ok: false, configured: false };
+    const status = emailConfigStatus();
+    console.warn("[email] ================================================================");
+    console.warn(`[email] EMAIL IS OFF. ${status.reason}`);
+    if (status.missing.length) console.warn(`[email]   missing:      ${status.missing.join(", ")}`);
+    if (status.placeholders.length) console.warn(`[email]   placeholder:  ${status.placeholders.join(", ")}`);
+    console.warn("[email]");
+    console.warn("[email]   Gmail needs an APP PASSWORD, not your account password:");
+    console.warn("[email]   turn on 2 step verification, then create one at");
+    console.warn("[email]   https://myaccount.google.com/apppasswords and put the 16 characters");
+    console.warn("[email]   in SMTP_PASS with no spaces. SMTP_USER and MAIL_FROM must be your");
+    console.warn("[email]   real address, not the example one.");
+    console.warn("[email]");
+    console.warn("[email]   Until this is set, every reminder email is SKIPPED. The reminder");
+    console.warn("[email]   itself is still created and the WhatsApp link still works.");
+    console.warn("[email] ================================================================");
+    return { ok: false, configured: false, reason: status.reason };
   }
   try {
     await transport.verify();
@@ -135,10 +154,70 @@ function isNonRoutableEmail(address) {
   return NON_ROUTABLE_DOMAIN.test(String(address || "").trim());
 }
 
+/**
+ * Values shipped in .env.example. A placeholder is WORSE than an empty value:
+ * empty makes `getMailer()` return null and every send reports "not-configured",
+ * which is at least honest. A placeholder passes the truthiness check, so the
+ * transport is built, Gmail rejects the credentials, and the failure arrives as
+ * an authentication error that reads like a code fault. This app has already been
+ * bitten by exactly that shape with ANTHROPIC_API_KEY.
+ */
+const PLACEHOLDER_TOKENS = [
+  "you@gmail.com",
+  "your-app-password",
+  "your-16-char-app-password",
+  "your-anthropic-api-key",
+  "change-me",
+];
+
+/**
+ * Substring rather than exact match. MAIL_FROM is a display name wrapped around
+ * an address (`LedgerWatch <you@gmail.com>`), so an exact comparison misses the
+ * example value that is actually sitting there. Matching the token catches every
+ * form the same placeholder takes.
+ */
+const isPlaceholder = (v) => {
+  const s = String(v || "").trim().toLowerCase();
+  return s !== "" && PLACEHOLDER_TOKENS.some((t) => s.includes(t));
+};
+
+/**
+ * Why email is or is not usable, in enough detail to act on.
+ *
+ * `emailConfigured()` used to answer this as a bare boolean AND omitted
+ * SMTP_PORT, which `getMailer()` requires — so it could report "configured"
+ * while every send was skipped. Naming the missing variable is the difference
+ * between a user fixing it in a minute and assuming the feature is broken.
+ */
+function emailConfigStatus() {
+  const required = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_FROM"];
+  const missing = required.filter((k) => !process.env[k]);
+  const placeholders = required.filter((k) => isPlaceholder(process.env[k]));
+
+  if (missing.length) {
+    return {
+      configured: false,
+      missing,
+      placeholders,
+      reason: `Email is not set up. Missing in server/.env: ${missing.join(", ")}.`,
+    };
+  }
+  if (placeholders.length) {
+    return {
+      configured: false,
+      missing,
+      placeholders,
+      reason:
+        `Email is not set up. These still hold the example values from .env.example: ` +
+        `${placeholders.join(", ")}. Replace them with real credentials.`,
+    };
+  }
+  return { configured: true, missing: [], placeholders: [], reason: null };
+}
+
 const whatsappConfigured = () =>
   Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM);
-const emailConfigured = () =>
-  Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS && process.env.MAIL_FROM);
+const emailConfigured = () => emailConfigStatus().configured;
 
 // Normalise a phone to the E.164 form Twilio's WhatsApp channel expects.
 function toWhatsAppAddress(phone) {
@@ -151,21 +230,158 @@ function toWhatsAppAddress(phone) {
 /**
  * @returns {Promise<{ok:boolean, skipped?:boolean, providerId?:string, error?:string}>}
  */
-async function sendWhatsApp(toPhone, body) {
-  const client = getTwilio();
-  const from = process.env.TWILIO_WHATSAPP_FROM;
-  if (!client || !from) return { ok: false, skipped: true, error: "WhatsApp not configured" };
+/**
+ * WHATSAPP DELIVERY — three providers behind one call.
+ *
+ * Twilio was the original and it is the wrong default for this product. It bills
+ * per message on top of Meta's own fee, it needs a paid account before a single
+ * real message leaves the sandbox, and the sandbox requires every recipient to
+ * text a join code first, which no debtor will ever do. For a small business
+ * chasing its own invoices that is a cost and a friction it does not need.
+ *
+ *   link   (default) Free, works today, no account anywhere. The message is
+ *          prepared and handed back as a wa.me link for the owner to send from
+ *          their own WhatsApp. One tap per debtor. It keeps the human in the
+ *          loop, which is this product's stated design rule anyway, and it costs
+ *          nothing. Its honest limit: it cannot fire unattended at 2am.
+ *
+ *   cloud  WhatsApp Cloud API, direct from Meta, no reseller in between. Meta's
+ *          free tier covers a small business comfortably and there is no
+ *          per-message platform fee on top. This is the option to grow into and
+ *          the only one that can send while nobody is watching.
+ *
+ *   twilio Kept so an existing configuration keeps working. Not recommended.
+ *
+ * Every provider returns the same shape, so callers never branch on which one is
+ * active. `queued: true` means "prepared for a human to send", which is a real
+ * outcome and NOT a failure: recording it as one would put a red error in front
+ * of the user for the path that is working exactly as designed.
+ */
+function whatsappProvider() {
+  const explicit = String(process.env.WHATSAPP_PROVIDER || "").trim().toLowerCase();
+  if (explicit) return explicit;
+  // Infer, so an existing Twilio setup keeps working with no new variable.
+  if (process.env.WHATSAPP_CLOUD_TOKEN && process.env.WHATSAPP_CLOUD_PHONE_ID) return "cloud";
+  if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) return "twilio";
+  return "link";
+}
 
-  const to = toWhatsAppAddress(toPhone);
-  if (!to) return { ok: false, error: "Invalid phone number" };
+/** wa.me deep link with the message pre-filled. Free, and always available. */
+function buildWaLink(toPhone, body) {
+  const { normalizePhone } = require("../utils/phone");
+  const { valid, intl } = normalizePhone(toPhone);
+  if (!valid) return null;
+  return `https://wa.me/${intl}?text=${encodeURIComponent(body)}`;
+}
+
+async function sendViaCloud(toPhone, body) {
+  const token = process.env.WHATSAPP_CLOUD_TOKEN;
+  const phoneId = process.env.WHATSAPP_CLOUD_PHONE_ID;
+  if (!token || !phoneId) {
+    return { ok: false, skipped: true, reason: "not-configured", error: "WhatsApp Cloud API is not configured." };
+  }
+  const { normalizePhone } = require("../utils/phone");
+  const { valid, intl } = normalizePhone(toPhone);
+  if (!valid) return { ok: false, reason: "invalid-number", error: "That phone number is not valid for WhatsApp." };
 
   try {
-    const msg = await client.messages.create({ from, to, body });
-    return { ok: true, providerId: msg.sid };
+    const axios = require("axios");
+    const version = process.env.WHATSAPP_CLOUD_VERSION || "v21.0";
+    const { data } = await axios.post(
+      `https://graph.facebook.com/${version}/${phoneId}/messages`,
+      { messaging_product: "whatsapp", to: intl, type: "text", text: { preview_url: false, body } },
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 }
+    );
+    return { ok: true, providerId: data?.messages?.[0]?.id || null, provider: "cloud" };
   } catch (err) {
-    console.error("WhatsApp send failed:", err.message);
-    return { ok: false, error: err.message };
+    /**
+     * Meta's own error text is far more useful than the axios wrapper's, and the
+     * commonest failure by a mile is code 131047: outside the 24 hour window a
+     * business may only open a conversation with an approved template, never
+     * free text. Saying that plainly is the difference between a fixable problem
+     * and an unexplained failure.
+     */
+    const meta = err?.response?.data?.error;
+    const code = meta?.code;
+    let message = meta?.message || err.message;
+    if (code === 131047 || code === 131026) {
+      message =
+        "WhatsApp will not deliver free text to this number because they have not messaged you in the last 24 hours. " +
+        "Business initiated reminders need an approved message template.";
+    } else if (code === 190) {
+      message = "The WhatsApp Cloud token has expired or been revoked. Generate a new one in Meta Business settings.";
+    }
+    console.error(`[whatsapp] cloud send failed (code=${code || "?"}): ${message}`);
+    return { ok: false, reason: "send-failed", error: message, provider: "cloud" };
   }
+}
+
+async function sendViaTwilio(toPhone, body) {
+  const client = getTwilio();
+  const from = process.env.TWILIO_WHATSAPP_FROM;
+  if (!client || !from) {
+    return { ok: false, skipped: true, reason: "not-configured", error: "Twilio WhatsApp is not configured." };
+  }
+  const to = toWhatsAppAddress(toPhone);
+  if (!to) return { ok: false, reason: "invalid-number", error: "That phone number is not valid for WhatsApp." };
+  try {
+    const msg = await client.messages.create({ from, to, body });
+    return { ok: true, providerId: msg.sid, provider: "twilio" };
+  } catch (err) {
+    console.error("[whatsapp] twilio send failed:", err.message);
+    return { ok: false, reason: "send-failed", error: err.message, provider: "twilio" };
+  }
+}
+
+async function sendWhatsApp(toPhone, body) {
+  const provider = whatsappProvider();
+  if (provider === "cloud") return sendViaCloud(toPhone, body);
+  if (provider === "twilio") return sendViaTwilio(toPhone, body);
+
+  // link — the free default.
+  const link = buildWaLink(toPhone, body);
+  if (!link) return { ok: false, reason: "invalid-number", error: "That phone number is not valid for WhatsApp." };
+  return {
+    ok: false,
+    queued: true,
+    skipped: true,
+    reason: "awaiting-send",
+    provider: "link",
+    waLink: link,
+    error: "Ready to send. Open WhatsApp to deliver it.",
+  };
+}
+
+function whatsappConfigStatus() {
+  const provider = whatsappProvider();
+  if (provider === "cloud") {
+    const missing = ["WHATSAPP_CLOUD_TOKEN", "WHATSAPP_CLOUD_PHONE_ID"].filter((k) => !process.env[k]);
+    return {
+      provider,
+      automatic: missing.length === 0,
+      missing,
+      reason: missing.length ? `WhatsApp Cloud API is missing: ${missing.join(", ")}.` : null,
+    };
+  }
+  if (provider === "twilio") {
+    const missing = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"].filter(
+      (k) => !process.env[k]
+    );
+    return {
+      provider,
+      automatic: missing.length === 0,
+      missing,
+      reason: missing.length ? `Twilio WhatsApp is missing: ${missing.join(", ")}.` : null,
+    };
+  }
+  return {
+    provider: "link",
+    automatic: false,
+    missing: [],
+    reason:
+      "WhatsApp reminders are prepared for you to send with one tap. This is free and needs no account. " +
+      "For unattended sending, set up the WhatsApp Cloud API and set WHATSAPP_PROVIDER=cloud.",
+  };
 }
 
 /**
@@ -216,11 +432,15 @@ async function sendEmail(to, subject, html, opts = {}) {
   const transport = getMailer();
   const from = normalizeFrom(process.env.MAIL_FROM);
   if (!transport || !from) {
+    // Name the missing or placeholder variable rather than saying "no SMTP
+    // settings". The generic wording sent people looking for a bug in the app;
+    // "Missing in server/.env: SMTP_PASS" is something a user can act on without
+    // reading any code.
     return {
       ok: false,
       skipped: true,
       reason: "not-configured",
-      error: "Email is not configured on the server (no SMTP settings).",
+      error: emailConfigStatus().reason || "Email is not configured on the server.",
     };
   }
   if (!to) {
@@ -553,4 +773,7 @@ module.exports = {
   isNonRoutableEmail,
   whatsappConfigured,
   emailConfigured,
+  emailConfigStatus,
+  whatsappConfigStatus,
+  buildWaLink,
 };

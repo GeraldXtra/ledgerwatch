@@ -22,10 +22,38 @@ const autoSendSchema = new mongoose.Schema(
   { _id: false }
 );
 
+/**
+ * Email verification state.
+ *
+ * The code is stored HASHED, never in plain text. It is a short lived credential
+ * that grants account access, so a leaked database dump must not hand out live
+ * codes — the same reasoning that applies to `passwordHash` a line below.
+ *
+ * `attempts` exists because a six digit code is only a million guesses, which is
+ * nothing to a script. Without a cap, an attacker who knows an email address can
+ * brute force the code inside its own thirty minute window.
+ *
+ * `lastSentAt` throttles resends. Without it the resend endpoint is an open relay
+ * for mailing anyone repeatedly, at the sender reputation of our own domain.
+ */
+const emailVerificationSchema = new mongoose.Schema(
+  {
+    codeHash: { type: String, default: null },
+    expiresAt: { type: Date, default: null },
+    attempts: { type: Number, default: 0 },
+    lastSentAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
+  // Accounts created before verification existed are grandfathered as verified,
+  // handled at read time in the login path rather than by a migration.
+  emailVerified: { type: Boolean, default: false },
+  emailVerification: { type: emailVerificationSchema, default: () => ({}) },
   bankDetails: { type: bankDetailsSchema, default: {} },
   autoSend: { type: autoSendSchema, default: () => ({}) },
   // Public wallet address only — private keys never touch the server (Phase 4).

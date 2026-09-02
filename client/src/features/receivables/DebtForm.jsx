@@ -121,7 +121,7 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
         <p className="muted small" style={{ margin: "4px 0 0" }}>
           {editing
             ? "Update the details of this receivable."
-            : "Track a credit sale — LedgerWatch drafts the reminders."}
+            : "Track a credit sale. LedgerWatch drafts the reminders for you."}
         </p>
       </div>
 
@@ -130,10 +130,10 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
           <Field label="Debtor name">
             <Input value={form.debtorName} onChange={update("debtorName")} required autoFocus />
           </Field>
-          <Field label="Phone — e.g. 08031234567">
+          <Field label="Phone (for example 08031234567)">
             <Input value={form.debtorPhone} onChange={update("debtorPhone")} />
           </Field>
-          <Field label="Email — optional, enables email reminders">
+          <Field label="Email (optional, turns on email reminders)">
             <Input
               type="email"
               value={form.debtorEmail}
@@ -143,7 +143,7 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
           </Field>
           <Field label="Amount (₦)">
             {/* Text rather than number so thousand separators can be shown while
-                typing — enterprise invoices run to nine figures and an unbroken
+                typing, because enterprise invoices run to nine figures and an unbroken
                 run of digits is unreadable. The raw numeric string is kept in
                 state; only the display is grouped. */}
             <Input
@@ -173,7 +173,7 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
               placeholder="3"
             />
           </Field>
-          <Field label="Note — optional">
+          <Field label="Note (optional)">
             <Input value={form.note} onChange={update("note")} />
           </Field>
         </div>
@@ -197,7 +197,7 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
         )}
         {known && known.reliabilityScore != null && (known.band === "Excellent" || known.band === "Good") && (
           <div className="rel-note">
-            Returning customer — {known.debtorName} usually pays reliably.
+            Returning customer. {known.debtorName} usually pays reliably.
             <ReliabilityBadge score={known.reliabilityScore} band={known.band} size="sm" />
           </div>
         )}

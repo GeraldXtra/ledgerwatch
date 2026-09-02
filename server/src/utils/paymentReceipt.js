@@ -177,7 +177,16 @@ function buildPaymentReceiptEmail({
                   RECALCULATED from the new balance at the rate originally
                   quoted, so it already accounts for what was just paid — the
                   payer never has to work it out or find the first email. */
-               stillOwedToken > 0 && payToAddress
+               /* A CRYPTO BLOCK WITHOUT A NETWORK IS NOT RENDERED AT ALL.
+                  Requiring payToChainName here is the structural half of LW-007:
+                  the tactical fix was to resolve the chain in the caller, and
+                  this is what makes forgetting it impossible to ship. An address
+                  with an amount and no network is worse than no block, because
+                  the same address exists on every EVM chain and the payer has
+                  been given everything they need to destroy the funds. If the
+                  chain cannot be resolved the payer is told to reply for
+                  details instead. */
+               stillOwedToken > 0 && payToAddress && payToChainName
                  ? `<tr><td style="padding:12px 28px 4px">
                <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
                       style="background:${WELL};border:1px solid ${LINE};border-radius:12px">
@@ -188,13 +197,9 @@ function buildPaymentReceiptEmail({
                    <div style="font:700 20px ${FONT};color:${INK};padding-top:5px">${Number(
                      stillOwedToken
                    ).toFixed(2)} ${esc(stillOwedSymbol || "")}</div>
-                   ${
+                   <div style="font:400 13px ${FONT};color:${MUTED};padding-top:4px">on ${esc(
                      payToChainName
-                       ? `<div style="font:400 13px ${FONT};color:${MUTED};padding-top:4px">on ${esc(
-                           payToChainName
-                         )} &mdash; this network only</div>`
-                       : ""
-                   }
+                   )}. This network only</div>
                    <div style="font:600 11px ${FONT};letter-spacing:.08em;text-transform:uppercase;color:${MUTED};padding-top:12px">Send to</div>
                    <div style="font:400 13px/1.5 ${FONT};color:${INK};word-break:break-all;padding-top:4px">${esc(
                      payToAddress

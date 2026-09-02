@@ -61,7 +61,7 @@ export default function WalletBackupSection() {
         </h3>
         <p className="muted small" style={{ margin: "4px 0 0" }}>
           Your wallet is encrypted and stored in this browser only. If you clear site data or
-          change device without a backup, the funds cannot be recovered — by you or by us.
+          change device without a backup, the funds cannot be recovered, by you or by us.
         </p>
       </div>
 
@@ -95,8 +95,8 @@ export default function WalletBackupSection() {
           <span className="grow">
             <span className="backup-option-title">Export private key</span>
             <span className="muted small">
-              This one account only. It does not restore the rest of the wallet — the recovery
-              phrase does that.
+              This one account only. It does not restore the rest of the wallet. Only the
+              recovery phrase does that.
             </span>
           </span>
         </button>
@@ -207,8 +207,8 @@ function SecurityQuestions() {
             <div className="backup-option-title">Extra verification before revealing</div>
             <div className="muted small">
               {state.enabled
-                ? `On — ${(state.questions || []).length} questions are asked alongside your password.`
-                : "Off — your wallet password alone unlocks a reveal."}
+                ? `On. ${(state.questions || []).length} questions are asked alongside your password.`
+                : "Off. Your wallet password alone unlocks a reveal."}
             </div>
           </div>
         </div>
@@ -219,7 +219,7 @@ function SecurityQuestions() {
 
       <p className="muted caption" style={{ margin: 0 }}>
         This is an <strong>extra lock, not a spare key</strong>. It never replaces your wallet
-        password and it cannot recover one you have forgotten — nobody can, because the password
+        password and it cannot recover one you have forgotten. Nobody can, because the password
         never reaches our servers. Security questions are also a weak factor on their own, since
         answers are often discoverable, which is exactly why they sit alongside the password
         rather than instead of it.
@@ -274,7 +274,7 @@ function SecurityQuestions() {
           </div>
 
           <p className="muted caption" style={{ margin: 0 }}>
-            Answers are hashed before they are stored, so nobody — including us — can read them
+            Answers are hashed before they are stored, so nobody, including us, can read them
             back. Capitalisation and extra spaces are ignored when you answer.
           </p>
 

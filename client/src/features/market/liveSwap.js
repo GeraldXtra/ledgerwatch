@@ -11,6 +11,7 @@ import {
   minOut,
   simulateSwap,
 } from "./dex";
+import { isCashToken } from "./tradeability";
 
 /**
  * Live swap execution.
@@ -102,10 +103,29 @@ export async function planSwap({
     }
   }
 
-  // 6. Spending caps and the gas floor.
+  /**
+   * 6. Spending caps and the gas floor.
+   *
+   * THE CAP IS MEASURED IN DOLLARS, SO IT MUST BE GIVEN DOLLARS.
+   *
+   * This passed `amountInDisplay`, which is the quantity of tokenIn. On a BUY
+   * that is the cash token and the cap worked. On a SELL tokenIn is the asset,
+   * so a cap of 100 was being compared against a count of Bitcoin: selling 12.8
+   * WBTC read as "12.8", passed every limit, and moved roughly 995,000 dollars
+   * through a control whose message says 100.
+   *
+   * The dollar leg is whichever side is the cash token, so that is what is
+   * measured. This is the same class of error as LW-008, surviving inside the
+   * control built to catch it.
+   */
+  const sellingForCash = isCashToken(tokenOut);
+  const cashValueDisplay = sellingForCash
+    ? Number(ethers.formatUnits(quote.amountOut, tokenOut.decimals))
+    : Number(amountInDisplay);
+
   const nativeAfterWei = gas ? gas.balanceWei - gas.feeWei : null;
   const caps = checkTrade({
-    amount: amountInDisplay,
+    amount: cashValueDisplay,
     limits,
     spentToday,
     impactPct: quote.impactPct,
@@ -119,6 +139,9 @@ export async function planSwap({
     tokenOut,
     amountIn,
     amountInDisplay,
+    // What this trade is worth in dollars, whichever side the cash is on. The
+    // caps and the session spend are both denominated in this.
+    cashValueDisplay,
     quote,
     amountOutMinimum,
     slippagePct,
@@ -208,7 +231,9 @@ export async function executeSwap({ plan, password, side, alertId, onStep = () =
     alertId: alertId || null,
   }).catch(() => null);
 
-  recordSessionSpend(plan.amountInDisplay);
+  // In dollars, for the same reason the cap is. Charging a session budget of 150
+  // with "12.8" for a 995,000 dollar sale made the session cap meaningless too.
+  recordSessionSpend(plan.cashValueDisplay ?? plan.amountInDisplay);
 
   // Settle in the background exactly as SendForm and sweep do — a testnet
   // confirmation takes 10-30s and must not hold the UI.

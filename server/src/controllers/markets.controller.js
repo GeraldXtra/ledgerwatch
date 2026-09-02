@@ -11,7 +11,7 @@ async function get(req, res) {
       .filter(Boolean);
 
     if (ids.length === 0) {
-      const watches = await Watch.find({ userId: req.user._id, active: true });
+      const watches = await Watch.find({ userId: req.user._id, active: true, mode: req.user.tradingMode === "live" ? "live" : "paper" });
       ids = [...new Set(watches.map((w) => w.coinId))];
     }
 

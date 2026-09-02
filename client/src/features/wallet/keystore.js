@@ -229,7 +229,7 @@ export async function importFromKeystore(json, password, onProgress) {
     throw new Error("That is not valid JSON. Upload the keystore file you downloaded.");
   }
   if (!parsed || !parsed.Crypto && !parsed.crypto) {
-    throw new Error("That JSON is not an encrypted keystore — it has no Crypto section.");
+    throw new Error("That JSON is not an encrypted keystore. It has no Crypto section.");
   }
   const wallet = await ethers.Wallet.fromEncryptedJson(text, password, onProgress);
   return { wallet, address: wallet.address };
@@ -249,7 +249,7 @@ export function isBackedUp() {
   try {
     return localStorage.getItem(`${BACKUP_KEY}.${address.toLowerCase()}`) === "1";
   } catch {
-    return true; // storage unavailable — do not nag about something unreadable
+    return true; // storage unavailable, so do not nag about something unreadable
   }
 }
 

@@ -98,7 +98,7 @@ async function receivablesQuery(req, res) {
 }
 
 // Execute a list of watch intents; returns { created, notes }.
-async function executeWatchIntents(userId, intents) {
+async function executeWatchIntents(userId, intents, mode = "paper") {
   const created = [];
   const notes = [];
   for (const intent of intents || []) {
@@ -107,7 +107,7 @@ async function executeWatchIntents(userId, intents) {
         symbol: intent.symbol,
         type: intent.type,
         value: intent.value,
-      });
+      }, mode);
       created.push(watch);
     } catch (err) {
       notes.push(err.message || `Could not watch ${intent.symbol}`);
@@ -129,8 +129,8 @@ async function chat(req, res) {
 
     // Build context from the user's real data.
     const [watches, portfolio] = await Promise.all([
-      Watch.find({ userId: req.user._id, active: true }),
-      getPortfolio(req.user._id),
+      Watch.find({ userId: req.user._id, active: true, mode: req.user.tradingMode === "live" ? "live" : "paper" }),
+      getPortfolio(req.user._id, req.user.tradingMode === "live" ? "live" : "paper"),
     ]);
     const coinIds = [...new Set(watches.map((w) => w.coinId))];
     const prices = coinIds.length ? await getPrices(coinIds) : {};
@@ -152,7 +152,8 @@ async function chat(req, res) {
     if (aiResult && typeof aiResult === "object") {
       const { created, notes } = await executeWatchIntents(
         req.user._id,
-        aiResult.watches
+        aiResult.watches,
+        req.user.tradingMode === "live" ? "live" : "paper"
       );
       let reply = aiResult.reply || "";
       if (created.length) {
@@ -167,7 +168,7 @@ async function chat(req, res) {
     // No-AI fallback.
     const intents = parseWatchCommand(message);
     if (intents.length) {
-      const { created, notes } = await executeWatchIntents(req.user._id, intents);
+      const { created, notes } = await executeWatchIntents(req.user._id, intents, req.user.tradingMode === "live" ? "live" : "paper");
       let reply = created.length
         ? `Now watching: ${created.map((w) => w.symbol).join(", ")}.`
         : "";

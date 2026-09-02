@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
 import {
-  Copy,
+  ArrowDownToLine,
+  ArrowUpRight,
   Check,
+  Copy,
   Droplets,
   History,
+  Info,
+  Inbox,
   PlusCircle,
   DownloadCloud,
-  Info,
   RefreshCw,
   Trash2,
   TriangleAlert,
@@ -15,16 +18,10 @@ import {
   X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import {
-  Button,
-  Card,
-  PageHeader,
-  Segmented,
-  SkeletonLines,
-  ToastProvider,
-} from "../../components/ui";
+import { Button, Card, SkeletonLines, ToastProvider } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { getProvider, ERC20_ABI, rpcErrorReason } from "./provider";
+import { fetchUsdPrices, totalUsd } from "./usdValue";
 import {
   hasWallet,
   getStoredAddress,
@@ -42,8 +39,11 @@ import {
   saveAddress,
   saveCustomToken,
 } from "./walletApi";
-import NetworkSwitcher, { rememberChain, recallChain } from "./NetworkSwitcher";
-import MainnetBanner from "./MainnetBanner";
+import NetworkSwitcher, { recallChain } from "./NetworkSwitcher";
+import Identicon from "./Identicon";
+import TokenLogo from "../../components/TokenLogo";
+import { prefetchLogos } from "./tokenLogos";
+import BitcoinPanel from "./BitcoinPanel";
 import CreateWalletModal from "./CreateWalletModal";
 import ImportWalletModal from "./ImportWalletModal";
 import AddTokenModal from "./AddTokenModal";
@@ -52,9 +52,64 @@ import ReceivePanel from "./ReceivePanel";
 import CollectedPanel from "./CollectedPanel";
 import TxHistory from "./TxHistory";
 
+/**
+ * THE WALLET
+ *
+ * Modelled on the MetaMask browser view, and deliberately unlike every other
+ * screen in this application.
+ *
+ * That is the point. The rest of the product is a book of account: ruled sheets,
+ * figures in the margin, a masthead. A wallet is not a page of accounts. Somebody
+ * who is about to move real value should be looking at the arrangement every
+ * wallet they have ever used has taught them to read, because familiarity is a
+ * safety property here and novelty is not. Network on the left, account across
+ * the top, one large fiat figure, a row of round actions, then tokens and
+ * activity.
+ *
+ * Everything the previous version guaranteed is preserved and marked below. The
+ * important one: a balance that could not be READ is never rendered as a zero.
+ */
+
 function shorten(a) {
-  return a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "";
+  return a ? `${a.slice(0, 6)}...${a.slice(-4)}` : "";
 }
+
+function usd(n) {
+  return Number(n).toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  });
+}
+
+/**
+ * Bitcoin is offered in the SAME network menu as the EVM chains, because from
+ * the owner's point of view it is simply another network their one recovery
+ * phrase reaches. It is not an EVM chain and has no chainId, so it carries a
+ * string id and a `kind` the rest of the wallet branches on. Everything about
+ * Bitcoin lives in BitcoinPanel; nothing EVM specific is asked to pretend.
+ */
+const BITCOIN_CHAINS = [
+  {
+    chainId: "bitcoin",
+    kind: "bitcoin",
+    key: "bitcoin",
+    name: "Bitcoin",
+    nativeSymbol: "BTC",
+    testnet: false,
+    tokens: [],
+  },
+  {
+    chainId: "bitcoin-testnet",
+    kind: "bitcoin",
+    key: "bitcoin-testnet",
+    name: "Bitcoin Testnet",
+    nativeSymbol: "tBTC",
+    testnet: true,
+    tokens: [],
+    faucet: "https://coinfaucet.eu/en/btc-testnet/",
+  },
+];
 
 function WalletInner() {
   const { user, applyUser } = useAuth();
@@ -69,34 +124,55 @@ function WalletInner() {
   const [backedUp, setBackedUp] = useState(() => isBackedUp());
   const [backupDismissed, setBackupDismissed] = useState(false);
   const [addTokenOpen, setAddTokenOpen] = useState(false);
-  const [subtab, setSubtab] = useState("send");
+  const [tab, setTab] = useState("tokens");
+  // Which panel is open in the drawer beneath the wallet, or null for none. The
+  // frame above stays a wallet and never turns into a form.
+  const [panel, setPanel] = useState(null);
   const [balances, setBalances] = useState(null);
   const [balLoading, setBalLoading] = useState(false);
-  // Why the last balance read failed, when it did. Shown instead of a bare
-  // "try refresh", which gives the user nothing to act on.
+  // USD prices keyed by wallet SYMBOL. A symbol that never arrives stays
+  // UNPRICED rather than counting as zero: a total that quietly omits a holding
+  // is a wrong number wearing the clothes of a right one.
+  const [usdPrices, setUsdPrices] = useState({});
+  const [pricesFailed, setPricesFailed] = useState(false);
+  // Why the last balance read failed, when it did. Shown instead of a bare "try
+  // refresh", which gives the user nothing to act on.
   const [balError, setBalError] = useState(null);
   const [txs, setTxs] = useState([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const chain = chains.find((c) => c.chainId === chainId) || null;
+  // The menu shows the EVM chains the server allows plus Bitcoin. `chains` stays
+  // the EVM-only list everywhere else in this file, so no EVM code path can ever
+  // be handed a Bitcoin entry by accident.
+  const selectableChains = useMemo(() => [...chains, ...BITCOIN_CHAINS], [chains]);
+  const selected = selectableChains.find((c) => c.chainId === chainId) || null;
+  const isBitcoin = Boolean(selected && selected.kind === "bitcoin");
+  const chain = isBitcoin ? null : selected;
 
   // A zero native balance means nothing can be sent from this chain at all.
   // Surfaced persistently rather than at the moment of signing. An UNKNOWN
-  // balance is not a zero one — warning "no gas" when the figure simply could
-  // not be read would be a guess presented as a fact.
+  // balance is not a zero one: warning "no gas" when the figure simply could not
+  // be read would be a guess presented as a fact.
   const noGas = Boolean(
     balances && balances.some((b) => b.native && !b.unknown && Number(b.amount) === 0)
   );
 
-  // The native tile is never hidden — it pays for everything, so a zero there is
-  // the single most important number on this screen. Unknown balances are never
-  // hidden either: "hide zero" must not quietly swallow a figure we failed to
-  // read, since that is the one the user most needs to see.
+  /**
+   * Net worth on THIS network, plus what could not be counted. The caveat is
+   * returned alongside the number rather than folded into it.
+   */
+  const worth = useMemo(() => totalUsd(balances || [], usdPrices), [balances, usdPrices]);
+
+  // The native row is never hidden: it pays for everything, so a zero there is
+  // the single most important number on this screen. Unknown rows are never
+  // hidden either, since that is the figure the user most needs to see.
   const visibleBalances = (balances || []).filter(
     (b) => !hideZero || b.native || b.unknown || Number(b.amount) > 0
   );
+
+  const hiddenCount = (balances || []).length - visibleBalances.length;
 
   // Keystores are scoped per account, so switching account changes which wallet
   // (if any) belongs to this page. Re-read on identity change rather than
@@ -108,22 +184,22 @@ function WalletInner() {
     setTxs([]);
   }, [user?._id]);
 
-  // Load the config-driven chain list once. The server already filters disabled
-  // chains; we filter again here so a mainnet entry can never surface client-side
-  // unless ENABLE_MAINNET is explicitly on (defence in depth).
+  // Load the config driven chain list once. The server already filters disabled
+  // chains; we filter again here so a mainnet entry can never surface client
+  // side unless ENABLE_MAINNET is explicitly on. Defence in depth.
   useEffect(() => {
     fetchChains()
       .then((d) => {
         const usable = (d.chains || []).filter((c) => c.testnet || d.enableMainnet);
         setChains(usable);
-        // Restore the chain chosen earlier this session rather than snapping back
-        // to the first in the list on every reload.
+        // Restore the chain chosen earlier this session rather than snapping
+        // back to the first in the list on every reload.
         if (usable.length) setChainId((prev) => prev || recallChain(usable));
       })
       .catch(() => setChains([]));
   }, []);
 
-  // Curated (verified on-chain) tokens for this chain, plus anything the user
+  // Curated (verified on chain) tokens for this chain, plus anything the user
   // added themselves. Custom entries carry the decimals read from their contract.
   const chainTokens = useMemo(() => {
     if (!chain) return [];
@@ -139,7 +215,9 @@ function WalletInner() {
     try {
       const provider = getProvider(chain.chainId);
       const native = await provider.getBalance(address);
-      const rows = [{ symbol: chain.nativeSymbol, amount: ethers.formatEther(native), native: true }];
+      const rows = [
+        { symbol: chain.nativeSymbol, amount: ethers.formatEther(native), native: true },
+      ];
       for (const t of chainTokens) {
         try {
           const c = new ethers.Contract(t.address, ERC20_ABI, provider);
@@ -154,12 +232,12 @@ function WalletInner() {
         } catch (tokenErr) {
           /**
            * UNKNOWN, not zero. This previously pushed "0", which renders exactly
-           * like a genuine empty balance — so an RPC failure looked identical to
+           * like a genuine empty balance, so an RPC failure looked identical to
            * having spent everything. Someone could reasonably conclude their
            * funds were gone. An unread balance says so.
            *
-           * The reason is carried on the ROW: a token-only failure never reaches
-           * the outer catch, so without this the tile said "could not be read"
+           * The reason is carried on the ROW: a token only failure never reaches
+           * the outer catch, so without this the row said "could not be read"
            * and gave no clue why.
            */
           rows.push({
@@ -175,6 +253,24 @@ function WalletInner() {
       }
       setBalances(rows);
       setBalError(null);
+
+      // ONE logo request for the whole wallet. Eight rows each asking for their
+      // own would be eight round trips for something purely cosmetic, and the
+      // balances must never wait on it.
+      prefetchLogos(rows.map((r) => r.symbol));
+
+      /**
+       * Price them. Deliberately AFTER the balances are set, so the amounts
+       * appear immediately and the USD column fills in a moment later. Making
+       * the whole panel wait on CoinGecko would let a price outage hide balances
+       * that were read perfectly well.
+       */
+      fetchUsdPrices(rows.map((r) => r.symbol))
+        .then((p) => {
+          setUsdPrices(p);
+          setPricesFailed(false);
+        })
+        .catch(() => setPricesFailed(true));
     } catch (err) {
       setBalances(null);
       setBalError(rpcErrorReason(err));
@@ -194,9 +290,10 @@ function WalletInner() {
       return;
     }
 
-    // Reconcile stragglers: a send whose confirmation landed after a reload is still
-    // recorded as "pending". Ask the chain for a receipt and settle it. Uses the
-    // allowlisted eth_getTransactionReceipt via the proxy; failures are ignored.
+    // Reconcile stragglers: a send whose confirmation landed after a reload is
+    // still recorded as pending. Ask the chain for a receipt and settle it. Uses
+    // the allowlisted eth_getTransactionReceipt via the proxy; failures are
+    // ignored because the row still deep links to the explorer.
     const pending = rows.filter((t) => t.status === "pending");
     if (pending.length === 0) return;
     try {
@@ -224,16 +321,16 @@ function WalletInner() {
         );
       }
     } catch {
-      /* leave them pending — the row still deep-links to the explorer */
+      /* leave them pending; the row still deep links to the explorer */
     }
   }, [address, chain]);
 
   useEffect(() => {
     loadBalances();
     loadTxs();
-    // Backup state can change on another screen (Settings → Wallet backup), so
-    // it is re-read whenever this page becomes active rather than trusted from
-    // the first render.
+    // Backup state can change on another screen (Settings, wallet backup), so it
+    // is re-read whenever this page becomes active rather than trusted from the
+    // first render.
     setBackedUp(isBackedUp());
   }, [loadBalances, loadTxs]);
 
@@ -244,9 +341,9 @@ function WalletInner() {
     setImportOpen(false);
   }
 
-  // Take over the pre-scoping wallet for THIS account. Explicit and one time:
+  // Take over the pre scoping wallet for THIS account. Explicit and one time:
   // the legacy entry is removed on success so a second account cannot claim the
-  // same wallet, which is the cross-account leak this whole change fixes.
+  // same wallet, which is the cross account leak this whole change fixes.
   async function claimLegacy() {
     setClaiming(true);
     try {
@@ -292,7 +389,11 @@ function WalletInner() {
   }
 
   async function removeWallet() {
-    if (!window.confirm("Remove this wallet from this device? Make sure your recovery phrase is backed up — this cannot be undone here.")) {
+    if (
+      !window.confirm(
+        "Remove this wallet from this device? Make sure your recovery phrase is backed up, because this cannot be undone here."
+      )
+    ) {
       return;
     }
     clearWallet();
@@ -311,304 +412,500 @@ function WalletInner() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* visible to copy manually */
+      /* the address is on screen to copy by hand */
     }
   }
 
-  // ---- Opt-in gate: no wallet yet ----
+  function openPanel(next) {
+    setPanel((p) => (p === next ? null : next));
+  }
+
+  // ---------------------------------------------------------------- setup ----
   if (!hasWallet() || !address) {
     return (
       <>
-        <PageHeader
-          eyebrow="WALLET"
-          title="Testnet wallet"
-          support="An optional, non-custodial wallet. Your simulated portfolio stays your default — this is a separate, real testnet tool."
-        />
-        <span className="testnet-badge">TESTNET ONLY · no real funds</span>
-
-        {/* This account already registered an address, but its keystore is not in
-            this browser — a different machine, or storage was cleared. Say so,
+        {/* This account already registered an address, but its keystore is not
+            in this browser: a different machine, or storage was cleared. Say so,
             rather than implying the account has no wallet. */}
         {user?.walletAddress && (
-          <Card>
-            <div className="wallet-elsewhere">
-              <span className="icon-tile neutral">
-                <History size={16} />
+          <div className="mm-stage">
+            <Card className="mm-setup">
+              <span className="mm-setup-mark">
+                <History size={22} />
               </span>
-              <div className="grow">
-                <div className="card-title">This account has a wallet, but not on this device</div>
-                <p className="muted small" style={{ margin: "4px 0 8px" }}>
-                  It is registered as <code className="num">{shorten(user.walletAddress)}</code>.
-                  Keys only ever live in the browser they were made in, so import it here with its
-                  recovery phrase to use it again.
-                </p>
+              <h3>Your wallet is not on this device</h3>
+              <p>
+                This account is registered to{" "}
+                <code className="num">{shorten(user.walletAddress)}</code>. Keys only ever live in
+                the browser they were made in, so bring it back with its recovery phrase.
+              </p>
+              <div className="row" style={{ justifyContent: "center", marginTop: 18 }}>
                 <Button variant="primary" onClick={() => setImportOpen(true)}>
                   <DownloadCloud size={15} /> Import with recovery phrase
                 </Button>
               </div>
-            </div>
-          </Card>
+            </Card>
+          </div>
         )}
 
-        {/* A wallet left over from before keystores were scoped per account. Only
-            ever adopted on an explicit click. */}
+        {/* A wallet left over from before keystores were scoped per account.
+            Only ever adopted on an explicit click. */}
         {legacy && (
-          <Card>
-            <div className="wallet-elsewhere">
-              <span className="icon-tile neutral">
-                <WalletIcon size={16} />
+          <div className="mm-stage">
+            <Card className="mm-setup">
+              <span className="mm-setup-mark">
+                <WalletIcon size={22} />
               </span>
-              <div className="grow">
-                <div className="card-title">There is an earlier wallet in this browser</div>
-                <p className="muted small" style={{ margin: "4px 0 8px" }}>
-                  <code className="num">{shorten(legacy.address)}</code> was created before wallets
-                  were kept separate per account, so it does not belong to any account yet. Claim it
-                  for <strong>{user?.email}</strong> and it becomes this account's wallet, using the
-                  password you originally set. Otherwise create a fresh one below.
-                </p>
-                <div className="row wrap">
-                  <Button variant="primary" onClick={claimLegacy} disabled={claiming}>
-                    <Check size={15} /> {claiming ? "Claiming…" : "Claim for this account"}
-                  </Button>
-                  <Button variant="ghost" onClick={discardLegacy} disabled={claiming}>
-                    <Trash2 size={14} /> Forget it
-                  </Button>
-                </div>
+              <h3>There is an earlier wallet in this browser</h3>
+              <p>
+                <code className="num">{shorten(legacy.address)}</code> was created before wallets
+                were kept separate per account, so it belongs to nobody yet. Claim it for{" "}
+                <strong>{user?.email}</strong> and it becomes this account's wallet, using the
+                password you originally set.
+              </p>
+              <div className="row" style={{ justifyContent: "center", marginTop: 18 }}>
+                <Button variant="primary" onClick={claimLegacy} disabled={claiming}>
+                  <Check size={15} /> {claiming ? "Claiming..." : "Claim for this account"}
+                </Button>
+                <Button variant="ghost" onClick={discardLegacy} disabled={claiming}>
+                  <Trash2 size={14} /> Forget it
+                </Button>
               </div>
-            </div>
-          </Card>
+            </Card>
+          </div>
         )}
 
-        <Card>
-          <div className="wallet-intro">
-            <div className="wallet-intro-icon"><WalletIcon size={22} /></div>
-            <h3 className="section-title">Create or import a wallet</h3>
-            <p className="muted" style={{ maxWidth: "52ch", margin: "0 auto" }}>
-              Keys are generated and encrypted in your browser. Only the encrypted keystore is
-              stored on this device — the plaintext key never touches our servers. Each account
-              has its own wallet, so this one is separate from any other you have signed into.
-              Testnet chains only; mainnet is disabled behind a security audit.
+        <div className="mm-stage">
+          <Card className="mm-setup">
+            <span className="mm-setup-mark">
+              <WalletIcon size={24} />
+            </span>
+            <h3>Create or bring your wallet</h3>
+            <p>
+              Keys are generated and encrypted here in your browser. Only the encrypted keystore
+              touches this device, and the plaintext key never reaches our servers. Every account
+              gets its own wallet, so this one is separate from any other you sign into.
             </p>
-            <div className="row" style={{ justifyContent: "center", marginTop: 16 }}>
+            <div className="row" style={{ justifyContent: "center", marginTop: 20 }}>
               <Button variant="primary" onClick={() => setCreateOpen(true)}>
-                <PlusCircle size={15} /> Create wallet
+                <PlusCircle size={15} /> Create a wallet
               </Button>
               <Button variant="secondary" onClick={() => setImportOpen(true)}>
-                <DownloadCloud size={15} /> Import wallet
+                <DownloadCloud size={15} /> Import one
               </Button>
             </div>
-          </div>
-        </Card>
+            <p className="muted small" style={{ marginTop: 18 }}>
+              Real networks are available alongside the test ones, and switching to a real one asks
+              you to confirm it in writing. Nothing is signed without the password you set here.
+            </p>
+          </Card>
+        </div>
 
-        {createOpen && <CreateWalletModal onClose={() => setCreateOpen(false)} onDone={onWalletReady} />}
-        {importOpen && <ImportWalletModal onClose={() => setImportOpen(false)} onDone={onWalletReady} />}
+        {createOpen && (
+          <CreateWalletModal onClose={() => setCreateOpen(false)} onDone={onWalletReady} />
+        )}
+        {importOpen && (
+          <ImportWalletModal onClose={() => setImportOpen(false)} onDone={onWalletReady} />
+        )}
       </>
     );
   }
 
-  // ---- Active wallet ----
+  // --------------------------------------------------------------- active ----
+  const isMainnet = Boolean(chain && !chain.testnet);
+
   return (
     <>
-      <PageHeader
-        eyebrow="WALLET"
-        title={chain && !chain.testnet ? "Wallet" : "Testnet wallet"}
-        support="Non-custodial · keys encrypted on this device · you approve every transaction."
-      />
-
-      <MainnetBanner chain={chain} />
-
-      {/* A wallet whose phrase was never written down is one cleared browser
-          away from being unrecoverable — not stolen, just gone, with the owner
-          never having been given the thing that would have saved it. Dismissible
-          per session, because nagging that cannot be silenced gets ignored, but
-          it returns on the next visit until the phrase has actually been seen. */}
-      {address && !backedUp && !backupDismissed && (
-        <div className="backup-reminder">
-          <TriangleAlert size={17} />
-          <div className="grow">
-            <strong>Back up this wallet</strong>
-            <span className="muted small">
-              You have not viewed your recovery phrase yet. Without it, clearing this browser or
-              losing this device means the funds cannot be recovered — by you or by us.
-            </span>
-          </div>
-          <div className="row">
-            <Link className="btn btn-primary btn-sm" to="/app/settings?section=wallet-backup">
-              Back up now
-            </Link>
-            <Button variant="ghost" icon title="Dismiss" onClick={() => setBackupDismissed(true)}>
-              <X size={15} />
-            </Button>
-          </div>
-        </div>
-      )}
-
-      <Card>
-        <div className="wallet-head">
-          <div className="wallet-head-left">
-            {/* The badge has to follow the chain. A hardcoded "TESTNET ONLY"
-                sitting above a mainnet balance would be the most dangerous
-                label in the app. */}
-            {chain && !chain.testnet ? (
-              <span className="mainnet-badge">MAINNET · REAL FUNDS</span>
-            ) : (
-              <span className="testnet-badge">TESTNET ONLY</span>
-            )}
-            <button type="button" className="wallet-address-btn" onClick={copyAddr} title="Copy address">
-              <span className="num">{shorten(address)}</span>
-              {copied ? <Check size={13} /> : <Copy size={13} />}
-            </button>
-          </div>
-          <div className="wallet-head-right">
+      <div className="mm-stage">
+        <div className="mm">
+          {/* ---- top bar: network, account, tools ---- */}
+          <div className="mm-top">
             <NetworkSwitcher
-              chains={chains}
+              chains={selectableChains}
               chainId={chainId}
               address={address}
               onChange={setChainId}
             />
-            <Button variant="ghost" icon title="Refresh balances" onClick={loadBalances}>
-              <RefreshCw size={15} />
-            </Button>
-            <Button variant="ghost" icon title="Remove wallet" onClick={removeWallet}>
-              <Trash2 size={15} />
-            </Button>
-          </div>
-        </div>
 
-        <div className="row space-between wallet-token-bar">
-          <label className="toggle-inline">
-            <input
-              type="checkbox"
-              checked={hideZero}
-              onChange={(e) => setHideZero(e.target.checked)}
-            />
-            <span className="muted small">Hide zero balances</span>
-          </label>
-          <Button variant="ghost" onClick={() => setAddTokenOpen(true)}>
-            <PlusCircle size={14} /> Add token
-          </Button>
-        </div>
+            {/* The EVM account pill and tools belong to an EVM chain. Bitcoin
+                renders its own account row, with its own address, inside
+                BitcoinPanel. */}
+            {!isBitcoin && (
+              <>
+            <button type="button" className="mm-acct" onClick={copyAddr} title="Copy your address">
+              <Identicon address={address} size={22} />
+              <span className="addr num">{shorten(address)}</span>
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+            </button>
 
-        <div className="wallet-balances">
-          {balLoading && !balances ? (
-            <SkeletonLines count={2} />
-          ) : balances ? (
-            visibleBalances.map((b) => (
-              <div
-                key={b.symbol}
-                className={`balance-tile${b.native ? " primary" : ""}${b.unknown ? " unknown" : ""}`}
+            <div className="mm-icons">
+              <button
+                type="button"
+                className="mm-icon"
+                onClick={loadBalances}
+                title="Refresh balances"
+                aria-label="Refresh balances"
               >
-                <span className="balance-amount num">
-                  {b.unknown
-                    ? "—"
-                    : Number(b.amount).toLocaleString(undefined, { maximumFractionDigits: 6 })}
-                </span>
-                <span className="balance-symbol">
-                  {b.symbol}
-                  {/* The native token is what pays for every transaction, so it
-                      is labelled as such and its emptiness is called out here
-                      rather than discovered at signing time. */}
-                  {b.native && <span className="balance-role">pays network fees</span>}
-                  {/* Says "we could not read this", never a number. A failed read
-                      shown as 0 would look exactly like an emptied wallet. */}
-                  {b.unknown && (
-                    <span className="balance-role" title={b.reason || undefined}>
-                      {b.reason ? `unreadable: ${b.reason}` : "could not be read"}
-                    </span>
-                  )}
-                </span>
-              </div>
-            ))
-          ) : (
-            <p className="muted small">
-              Could not load balances{balError ? `: ${balError}` : ""}. Try refresh.
-            </p>
-          )}
-        </div>
-
-        {noGas && (
-          <div className="against-note" style={{ marginTop: 12 }}>
-            <TriangleAlert size={15} />
-            <span>
-              You hold no {chain?.nativeSymbol} on {chain?.name}, so no transaction can be sent
-              from this network — not a transfer, not a sweep, not a trade. Token balances are
-              unaffected.
-              {chain?.testnet && chain?.faucet && (
-                <>
-                  {" "}
-                  <a href={chain.faucet} target="_blank" rel="noopener noreferrer" className="linklike">
-                    <Droplets size={13} style={{ verticalAlign: "-2px" }} /> Get free{" "}
-                    {chain.nativeSymbol} from the {chain.name} faucet
-                  </a>
-                  .
-                </>
-              )}
-            </span>
+                <RefreshCw size={15} className={balLoading ? "spin" : undefined} />
+              </button>
+              <button
+                type="button"
+                className="mm-icon"
+                onClick={removeWallet}
+                title="Remove this wallet from this device"
+                aria-label="Remove this wallet from this device"
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+              </>
+            )}
           </div>
-        )}
 
-        {chain?.faucet && (
-          <a className="faucet-link" href={chain.faucet} target="_blank" rel="noopener noreferrer">
-            <Droplets size={14} /> Need funds? Open the {chain.name} faucet
-          </a>
-        )}
-
-        {/* Stated rather than implied. Someone holding Bitcoin or Solana will
-            otherwise reasonably assume this wallet covers them. */}
-        <p className="settings-note">
-          <Info size={15} />
-          This wallet is <strong>EVM only</strong> — Ethereum and chains compatible with it. Bitcoin,
-          Solana, Cosmos and TON use different key derivation and signing and are not supported here.
-        </p>
-      </Card>
-
-      <Card>
-        <Segmented
-          value={subtab}
-          onChange={setSubtab}
-          options={[
-            { id: "send", label: "Send" },
-            { id: "receive", label: "Receive" },
-            { id: "collected", label: "Collected" },
-            { id: "history", label: "History" },
-          ]}
-        />
-        <div className="mt">
-          {subtab === "send" && chain && (
-            <SendForm
-              address={address}
-              chain={chain}
-              onSent={() => {
-                setSubtab("history");
-                loadTxs();
-                loadBalances();
-              }}
-              onConfirmed={() => {
-                // Receipt landed — refresh so the row flips pending -> confirmed
-                // and the balance reflects the settled transfer.
-                loadTxs();
-                loadBalances();
-              }}
+          {isBitcoin && (
+            <BitcoinPanel
+              userId={user?._id}
+              network={selected.chainId === "bitcoin" ? "mainnet" : "testnet"}
             />
           )}
-          {subtab === "receive" && chain && <ReceivePanel address={address} chain={chain} />}
-          {subtab === "collected" && chain && (
-            <CollectedPanel
-              chain={chain}
-              mainAddress={address}
-              sweepDestination={user?.crypto?.sweepDestination}
-              onSwept={() => {
-                // Swept funds land in this wallet, so both views are now stale.
-                loadBalances();
-                loadTxs();
-              }}
-            />
+
+          {!isBitcoin && (
+            <>
+          {/* The badge has to follow the chain. A hardcoded testnet label sitting
+              above a mainnet balance would be the most dangerous string in the
+              application. */}
+          {isMainnet && (
+            <div className="mm-notice bad">
+              <TriangleAlert size={16} />
+              <span className="grow">
+                <strong>{chain.name} is a real network.</strong> Everything here moves real money
+                and nothing can be reversed by anyone, including us.
+              </span>
+            </div>
           )}
-          {subtab === "history" && (
-            <TxHistory txs={txs} chain={chain} chains={chains} onReceive={() => setSubtab("receive")} />
+
+          {/* A wallet whose phrase was never written down is one cleared browser
+              away from being unrecoverable. Not stolen, just gone, with the owner
+              never having been handed the thing that would have saved it.
+              Dismissible for the session, because nagging that cannot be
+              silenced gets ignored, but it returns on the next visit until the
+              phrase has actually been seen. */}
+          {!backedUp && !backupDismissed && (
+            <div className="mm-notice">
+              <TriangleAlert size={16} />
+              <span className="grow">
+                <strong>Back this wallet up.</strong> You have not seen your recovery phrase yet.
+                Without it, clearing this browser or losing this device means the funds are gone for
+                good, for you and for us.{" "}
+                <Link className="mm-linkish" to="/app/settings?section=wallet-backup">
+                  Do it now
+                </Link>
+              </span>
+              <button
+                type="button"
+                className="mm-icon"
+                onClick={() => setBackupDismissed(true)}
+                title="Dismiss"
+                aria-label="Dismiss"
+              >
+                <X size={15} />
+              </button>
+            </div>
+          )}
+
+          {/* ---- the figure ---- */}
+          <div className="mm-hero">
+            {balances ? (
+              <>
+                <span className="mm-fiat">{usd(worth.total)}</span>
+                <span className="mm-sub">
+                  {chain ? `Held on ${chain.name}` : "Select a network"}
+                </span>
+
+                {/* Never present an incomplete total as a complete one. */}
+                {!worth.complete && (
+                  <span className="mm-caveat">
+                    {worth.unread.length > 0 &&
+                      `${worth.unread.join(", ")} could not be read just now, so ${
+                        worth.unread.length === 1 ? "it is" : "they are"
+                      } missing from this total. `}
+                    {worth.unpriced.length > 0 &&
+                      `There is no dollar price for ${worth.unpriced.join(", ")}, so ${
+                        worth.unpriced.length === 1 ? "it is" : "they are"
+                      } not counted here.`}
+                  </span>
+                )}
+                {pricesFailed && (
+                  <span className="mm-caveat">
+                    Prices are unavailable right now, so this total is incomplete. The amounts below
+                    are still correct.
+                  </span>
+                )}
+              </>
+            ) : balLoading ? (
+              <span className="mm-fiat" style={{ opacity: 0.35 }}>
+                {usd(0)}
+              </span>
+            ) : (
+              <>
+                <span className="mm-fiat" style={{ fontSize: 24 }}>
+                  Balance unavailable
+                </span>
+                <span className="mm-caveat">
+                  {balError
+                    ? `The network did not answer: ${balError}. Your funds are untouched, this is a connection problem.`
+                    : "The network did not answer. Your funds are untouched, this is a connection problem."}
+                </span>
+              </>
+            )}
+          </div>
+
+          {/* ---- actions ---- */}
+          <div className="mm-actions">
+            <button type="button" className="mm-action brass" onClick={() => openPanel("receive")}>
+              <span className="ring">
+                <ArrowDownToLine size={19} />
+              </span>
+              Receive
+            </button>
+            <button
+              type="button"
+              className="mm-action"
+              onClick={() => openPanel("send")}
+              disabled={!chain}
+            >
+              <span className="ring">
+                <ArrowUpRight size={19} />
+              </span>
+              Send
+            </button>
+            <button
+              type="button"
+              className="mm-action"
+              onClick={() => openPanel("collected")}
+              disabled={!chain}
+            >
+              <span className="ring">
+                <Inbox size={19} />
+              </span>
+              Collected
+            </button>
+            {chain?.faucet && (
+              <a
+                className="mm-action"
+                href={chain.faucet}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span className="ring">
+                  <Droplets size={19} />
+                </span>
+                Faucet
+              </a>
+            )}
+          </div>
+
+          {/* ---- tokens and activity ---- */}
+          <div className="mm-tabs">
+            <button
+              type="button"
+              className={tab === "tokens" ? "mm-tab active" : "mm-tab"}
+              onClick={() => setTab("tokens")}
+            >
+              Tokens
+            </button>
+            <button
+              type="button"
+              className={tab === "activity" ? "mm-tab active" : "mm-tab"}
+              onClick={() => setTab("activity")}
+            >
+              Activity
+            </button>
+          </div>
+
+          {tab === "tokens" ? (
+            <>
+              <div className="mm-list">
+                {balLoading && !balances ? (
+                  <div style={{ padding: 16 }}>
+                    <SkeletonLines count={3} />
+                  </div>
+                ) : balances ? (
+                  visibleBalances.map((b) => {
+                    const price = usdPrices[String(b.symbol).toUpperCase()];
+                    const value =
+                      !b.unknown && Number.isFinite(price) ? Number(b.amount) * price : null;
+                    return (
+                      <div className="mm-row" key={`${b.symbol}-${b.address || "native"}`}>
+                        <TokenLogo
+                          symbol={b.symbol}
+                          native={b.native}
+                          unknown={b.unknown}
+                        />
+                        <span className="mm-row-main">
+                          <span className="mm-row-name">
+                            {b.symbol}
+                            {b.custom && (
+                              <span className="lw-label" style={{ letterSpacing: "0.12em" }}>
+                                added
+                              </span>
+                            )}
+                          </span>
+                          {/* The native token pays for every transaction, so it
+                              is labelled here rather than discovered at signing
+                              time. An unreadable row says so in words and never
+                              shows a number. */}
+                          {b.unknown ? (
+                            <span className="mm-row-note warn" title={b.reason || undefined}>
+                              {b.reason ? `Could not be read: ${b.reason}` : "Could not be read"}
+                            </span>
+                          ) : b.native ? (
+                            <span className="mm-row-note">Pays the network fees</span>
+                          ) : null}
+                        </span>
+                        <span className="mm-row-right">
+                          <span className="mm-row-fiat">
+                            {b.unknown ? "Unknown" : value != null ? usd(value) : "No price"}
+                          </span>
+                          <span className="mm-row-qty">
+                            {b.unknown
+                              ? "amount unavailable"
+                              : `${Number(b.amount).toLocaleString(undefined, {
+                                  maximumFractionDigits: 6,
+                                })} ${b.symbol}`}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="mm-row">
+                    <span className="mm-row-main">
+                      <span className="mm-row-name">Nothing could be read</span>
+                      <span className="mm-row-note warn">
+                        {balError || "The network did not answer."}
+                      </span>
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {noGas && (
+                <div className="mm-notice">
+                  <TriangleAlert size={16} />
+                  <span className="grow">
+                    You hold no {chain?.nativeSymbol} on {chain?.name}, so nothing can be sent from
+                    this network at all. Not a transfer, not a sweep, not a trade. Your token
+                    balances are untouched.
+                    {chain?.testnet && chain?.faucet && (
+                      <>
+                        {" "}
+                        <a
+                          href={chain.faucet}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mm-linkish"
+                        >
+                          Get free {chain.nativeSymbol} from the faucet
+                        </a>
+                      </>
+                    )}
+                  </span>
+                </div>
+              )}
+
+              <div className="mm-foot">
+                <label className="toggle-inline">
+                  <input
+                    type="checkbox"
+                    checked={hideZero}
+                    onChange={(e) => setHideZero(e.target.checked)}
+                  />
+                  <span className="muted small">
+                    Hide empty balances{hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
+                  </span>
+                </label>
+                <button type="button" className="mm-linkish" onClick={() => setAddTokenOpen(true)}>
+                  <PlusCircle size={14} /> Import a token
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="mm-list" style={{ padding: 16 }}>
+              <TxHistory
+                txs={txs}
+                chain={chain}
+                chains={chains}
+                onReceive={() => {
+                  setTab("tokens");
+                  setPanel("receive");
+                }}
+              />
+            </div>
+          )}
+            </>
           )}
         </div>
-      </Card>
+      </div>
+
+      {/* The drawer. Kept below the frame so the wallet stays a wallet. */}
+      {!isBitcoin && panel && (
+        <div className="mm-drawer">
+          <Card
+            title={
+              panel === "send" ? "Send" : panel === "receive" ? "Receive" : "Collected on invoices"
+            }
+            action={
+              <Button variant="ghost" icon title="Close" onClick={() => setPanel(null)}>
+                <X size={15} />
+              </Button>
+            }
+          >
+            {panel === "send" && chain && (
+              <SendForm
+                address={address}
+                chain={chain}
+                onSent={() => {
+                  setPanel(null);
+                  setTab("activity");
+                  loadTxs();
+                  loadBalances();
+                }}
+                onConfirmed={() => {
+                  // Receipt landed, so the row flips pending to confirmed and
+                  // the balance reflects the settled transfer.
+                  loadTxs();
+                  loadBalances();
+                }}
+              />
+            )}
+            {panel === "receive" && chain && <ReceivePanel address={address} chain={chain} />}
+            {panel === "collected" && chain && (
+              <CollectedPanel
+                chain={chain}
+                mainAddress={address}
+                sweepDestination={user?.crypto?.sweepDestination}
+                onSwept={() => {
+                  // Swept funds land in this wallet, so both views are stale.
+                  loadBalances();
+                  loadTxs();
+                }}
+              />
+            )}
+          </Card>
+        </div>
+      )}
+
+      {/* Stated rather than implied. Someone holding Bitcoin or Solana will
+          otherwise reasonably assume this wallet covers them. */}
+      <div className="mm-drawer">
+        <p className="settings-note" style={{ marginTop: 18 }}>
+          <Info size={15} />
+          This wallet is <strong>EVM only</strong>, meaning Ethereum and the chains compatible with
+          it. Bitcoin, Solana, Cosmos and TON use different key derivation and signing, so they are
+          not supported here.
+        </p>
+      </div>
 
       {addTokenOpen && chain && (
         <AddTokenModal

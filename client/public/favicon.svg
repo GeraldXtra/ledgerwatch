@@ -1,7 +1,15 @@
-<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="8" fill="#16294A"/>
-  <rect x="8" y="19" width="4" height="6" rx="1.4" fill="#FFFFFF" opacity="0.62"/>
-  <rect x="14" y="15" width="4" height="10" rx="1.4" fill="#FFFFFF" opacity="0.82"/>
-  <rect x="20" y="11" width="4" height="14" rx="1.4" fill="#FFFFFF"/>
-  <circle cx="22" cy="7.5" r="2.6" fill="#C0A053"/>
+<!-- LedgerWatch crest. Mirrors client/src/components/LogoMark.jsx.
+     The quiet second ledger entry is dropped and the strokes are a touch heavier:
+     at 16px in a browser tab, that detail turns to mud and costs legibility. -->
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="lwPlate" x1="32" y1="8" x2="32" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1C3358"/>
+      <stop offset="1" stop-color="#0A1529"/>
+    </linearGradient>
+  </defs>
+  <path d="M14 9H50A4 4 0 0 1 54 13V33C54 41 48 52 32 59.5C16 52 10 41 10 33V13A4 4 0 0 1 14 9Z" fill="url(#lwPlate)"/>
+  <path d="M17 12.4H47A3 3 0 0 1 50.6 15.4V33C50.6 40.5 45.4 50 32 55.6C18.6 50 13.4 40.5 13.4 33V15.4A3 3 0 0 1 17 12.4Z" stroke="#C0A053" stroke-width="1.3" stroke-opacity="0.66"/>
+  <path d="M21.6 34.4L32 23L42.4 34.4" stroke="#FFFFFF" stroke-width="5.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M22 42.5H42" stroke="#C0A053" stroke-width="3.6" stroke-linecap="round"/>
 </svg>

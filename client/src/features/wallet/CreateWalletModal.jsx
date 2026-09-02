@@ -55,12 +55,12 @@ export default function CreateWalletModal({ onClose, onDone }) {
             <ShieldCheck size={16} />
             <span>
               Your key is generated in your browser and encrypted with your password.
-              Only the encrypted keystore is stored on this device — never on our servers.
+              Only the encrypted keystore is stored on this device. It never reaches our servers.
             </span>
           </div>
           <p className="muted small">
             You are about to create a brand-new wallet. On the next screen you will see a
-            12-word recovery phrase. Write it down and keep it private — it is the only way
+            twelve word recovery phrase. Write it down and keep it private, because it is the only way
             to restore this wallet.
           </p>
           <div className="row" style={{ justifyContent: "flex-end" }}>

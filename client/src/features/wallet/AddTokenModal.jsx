@@ -40,7 +40,7 @@ export default function AddTokenModal({ chain, address, existing = [], onClose, 
       const code = await provider.getCode(addr);
       if (!code || code === "0x") {
         setError(
-          `No contract exists at that address on ${chain.name}. Check you have the right network — the same token has a different address on each chain.`
+          `No contract exists at that address on ${chain.name}. Check you have the right network, because the same token has a different address on each chain.`
         );
         return;
       }

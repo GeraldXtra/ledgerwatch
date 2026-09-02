@@ -15,7 +15,17 @@ export default defineConfig({
   plugins: [react()],
   test: {
     globals: true,
-    environment: "jsdom",
+    /**
+     * `node`, not `jsdom`, as the default.
+     *
+     * The forks pool on Windows timed out waiting for a worker to respond while
+     * jsdom loaded, so a passing test file reported as "no tests" with exit 1 —
+     * a green looking failure. Nothing here touches the DOM: the tests are on
+     * pure money arithmetic. A component test can opt back in per file with
+     * `// @vitest-environment jsdom`.
+     */
+    environment: "node",
+    pool: "threads",
     include: ["src/**/*.test.{js,jsx}"],
   },
 });

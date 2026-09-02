@@ -6,12 +6,24 @@
  * nothing in the way — so they are a prerequisite for live mode, not a polish
  * item.
  *
- * Enforced on the client before signing (so the user is stopped with a clear
- * message rather than a reverted transaction) AND on the server when the trade
- * is recorded, because a client-side-only limit is a suggestion.
+ * ENFORCED ON THE CLIENT ONLY. This said "AND on the server when the trade is
+ * recorded, because a client-side-only limit is a suggestion", which was never
+ * true: `recordTx` validates the shape of a hash and an address and nothing
+ * else, and it runs AFTER the transaction is broadcast, so it could not gate
+ * anything even if it checked. `assertCanTradeLive` is called from exactly one
+ * place and only guards setting the mode string.
+ *
+ * So by this file's own standard these limits ARE a suggestion. They stop an
+ * honest mistake, which is most mistakes, and they stop nothing else. Anyone
+ * relying on them should know which of the two they are getting. Making the
+ * claim true is a server side check on a route that does not yet exist; until
+ * then the comment says what the code does.
  *
  * Amounts are in the STABLECOIN the trade is denominated in, which is the live
- * cash balance. Native gas is handled separately by preflightGas.
+ * cash balance. That is the DOLLAR leg of the trade, whichever side it sits on:
+ * on a sell the caller must convert, because passing the asset quantity meant a
+ * cap of 100 was compared against a count of Bitcoin. Native gas is handled
+ * separately by preflightGas.
  */
 
 /**

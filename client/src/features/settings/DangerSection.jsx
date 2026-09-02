@@ -90,7 +90,7 @@ export default function DangerSection() {
 
       <p className="settings-note danger">
         <TriangleAlert size={15} />
-        Removing a wallet from this device is separate — do that from the Wallet page, and make
+        Removing a wallet from this device is separate. Do that from the Wallet page, and make
         sure your recovery phrase is backed up first.
       </p>
 

@@ -4,7 +4,9 @@ const { approveAlert, actOnAlert } = require("../services/market.service");
 // GET /api/alerts  (my pending alerts, newest first)
 async function list(req, res) {
   try {
+    const mode = req.user.tradingMode === "live" ? "live" : "paper";
     const alerts = await Alert.find({
+      mode,
       userId: req.user._id,
       status: "pending",
     }).sort({ createdAt: -1 });
@@ -18,7 +20,9 @@ async function list(req, res) {
 // GET /api/alerts/history  (approved + dismissed, newest first)
 async function history(req, res) {
   try {
+    const mode = req.user.tradingMode === "live" ? "live" : "paper";
     const alerts = await Alert.find({
+      mode,
       userId: req.user._id,
       status: { $in: ["approved", "dismissed"] },
     })

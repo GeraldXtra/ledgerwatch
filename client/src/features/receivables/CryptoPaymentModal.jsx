@@ -232,7 +232,16 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
       <Head onClose={onClose} title={`Crypto payment for ${debt.debtorName}`} />
 
       <div className="row wrap">
-        <span className="testnet-badge">Testnet only</span>
+        {/* FOLLOWS THE CHAIN. This was hardcoded "Testnet only", which was true
+            while mainnet was disabled and became a lie the moment it was not:
+            this modal issues the address a PAYER is given, so a testnet badge
+            over a real Ethereum address invites somebody to treat real money as
+            practice. The wallet already learned this lesson; this screen had not. */}
+        {chain && !chain.testnet ? (
+          <span className="mainnet-badge">MAINNET. REAL FUNDS</span>
+        ) : (
+          <span className="testnet-badge">Testnet only</span>
+        )}
         {quote && quote.rateStale && (
           <span className="pill warn">Rate is a fallback, not live</span>
         )}

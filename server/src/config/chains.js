@@ -18,6 +18,41 @@
  *
  * ADDING A CHAIN IS ONE OBJECT. No code changes anywhere else.
  *
+ * ============================================================================
+ *  MAINNET VERIFICATION PASS, 2026-08-29
+ * ============================================================================
+ *  The mainnet half of this file previously carried the note "single-entry:
+ *  they are disabled, so none of these were put through the fallback
+ *  verification the testnets got". That is no longer true. Every mainnet entry
+ *  below was measured by `npm run verify:chains -- --mainnet`, and the pass
+ *  found seven real problems that would have cost real money:
+ *
+ *   1. THE ALCHEMY KEY 403s ON FIVE OF SEVEN MAINNETS. The app behind it has
+ *      only the Ethereum networks switched on — the identical defect that once
+ *      made Base Sepolia permanently unusable. Those chains now lead with a
+ *      public endpoint that answers.
+ *   2. eth_getLogs AT 1500 BLOCKS FAILS ON MOST MAINNETS. Ranges are capped per
+ *      endpoint, independently of how many results come back. A single global
+ *      span is therefore wrong: each chain now carries its own `logSpan`,
+ *      measured, and the watcher reads it.
+ *   3. NARROW ENDPOINTS ARE WORSE THAN NO FALLBACK. publicnode serves 50 blocks
+ *      on Base, Arbitrum and Optimism. A range rejection arrives as a JSON-RPC
+ *      error inside a 200, which rpc.service correctly treats as the chain's
+ *      real answer and does NOT fall through — so listing a narrow endpoint
+ *      makes log queries fail intermittently rather than adding resilience.
+ *      They are dropped rather than demoted.
+ *   4. POLYGON'S USDT SELF-IDENTIFIES AS USDT0, like Arbitrum's. Relabelled.
+ *   5. AVALANCHE'S USDT SELF-IDENTIFIES AS USDt, lowercase t. Relabelled.
+ *   6. BNB CHAIN HAS EXACTLY ONE USABLE LOG ENDPOINT. Every Binance dataseed
+ *      answers "limit exceeded" to any range, and blockrazor caps at 25 blocks.
+ *      Recorded on the entry: payment watching there has no redundancy.
+ *   7. Confirmation depths for mainnet are NOT the testnet depths. See
+ *      config/derivation.js.
+ *
+ *  Re-run the verifier after any edit here. An address or endpoint that cannot
+ *  be verified must be ABSENT rather than guessed.
+ * ============================================================================
+ *
  * EVERY ADDRESS BELOW WAS VERIFIED AGAINST THE LIVE CHAIN, not from memory.
  * Each token had `symbol()` and `decimals()` read from its contract and matched
  * against what is written here; each router and quoter had `eth_getCode` confirm
@@ -80,6 +115,30 @@ function rpcList(...urls) {
 const token = (symbol, name, address, decimals) => ({ symbol, name, address, decimals });
 
 /**
+ * TRADEABLE ASSETS, as distinct from stablecoins.
+ *
+ * `stables` is what an INVOICE can be denominated in: a dollar, so a naira
+ * amount converts to it unambiguously. `assets` is what the market agent can BUY
+ * with those dollars. They are separate lists because putting WBTC in `stables`
+ * would let an invoice quote a price in Bitcoin, which is not a unit of account
+ * anybody wants to be owed in.
+ *
+ * Both end up in `tokensFor`, so the wallet shows a balance for either.
+ *
+ * BITCOIN, HONESTLY. WBTC, cbBTC, BTCB and BTC.b are ERC-20s backed one for one
+ * by real Bitcoin held by a custodian. Buying one gives real Bitcoin exposure
+ * and it is what every EVM DEX means by "buy Bitcoin". It is NOT native Bitcoin
+ * and it does not arrive in the Bitcoin wallet: that would need a bridge or a
+ * custodial exchange, and this project does neither. The symbols are left as the
+ * contracts report them so nobody can mistake one for the other.
+ *
+ * EVERY ADDRESS BELOW WAS READ OFF THE CHAIN, symbol and decimals both, and
+ * every pair below returned a real quote from the chain's own quoter. Note the
+ * decimals: WBTC and cbBTC are 8, matching Bitcoin, while BTCB on BNB is 18.
+ * Assuming 8 there would misread a balance by ten orders of magnitude.
+ */
+
+/**
  * How to move funds ONTO this chain from its L1.
  *
  * LedgerWatch does not and will not bridge. This is a signpost only: a plain
@@ -136,6 +195,7 @@ function rawRegistry(mainnetEnabled) {
       explorer: "https://sepolia.etherscan.io",
       nativeSymbol: "ETH",
       decimals: 18,
+      logSpan: 1500, // verified in the original testnet pass
       testnet: true,
       enabled: true,
       faucet: "https://www.alchemy.com/faucets/ethereum-sepolia",
@@ -165,6 +225,7 @@ function rawRegistry(mainnetEnabled) {
       explorer: "https://sepolia.basescan.org",
       nativeSymbol: "ETH",
       decimals: 18,
+      logSpan: 1500, // verified in the original testnet pass
       testnet: true,
       enabled: true,
       faucet: "https://www.alchemy.com/faucets/base-sepolia",
@@ -205,6 +266,7 @@ function rawRegistry(mainnetEnabled) {
       explorer: "https://sepolia.arbiscan.io",
       nativeSymbol: "ETH",
       decimals: 18,
+      logSpan: 1500, // verified in the original testnet pass
       testnet: true,
       enabled: true,
       faucet: "https://www.alchemy.com/faucets/arbitrum-sepolia",
@@ -226,6 +288,7 @@ function rawRegistry(mainnetEnabled) {
       explorer: "https://sepolia-optimism.etherscan.io",
       nativeSymbol: "ETH",
       decimals: 18,
+      logSpan: 1500, // verified in the original testnet pass
       testnet: true,
       enabled: true,
       faucet: "https://www.alchemy.com/faucets/optimism-sepolia",
@@ -249,6 +312,7 @@ function rawRegistry(mainnetEnabled) {
       explorer: "https://amoy.polygonscan.com",
       nativeSymbol: "POL",
       decimals: 18,
+      logSpan: 1500, // verified in the original testnet pass
       testnet: true,
       enabled: true,
       faucet: "https://www.alchemy.com/faucets/polygon-amoy",
@@ -263,10 +327,33 @@ function rawRegistry(mainnetEnabled) {
       key: "ethereum",
       name: "Ethereum",
       chainId: 1,
-      // Mainnet endpoints are single-entry: they are disabled, so none of these
-      // were put through the fallback verification the testnets got, and an
-      // unverified real-money endpoint is worse than no fallback at all.
-      rpcs: rpcList(alchemy("eth-mainnet"), "https://ethereum-rpc.publicnode.com"),
+      /**
+       * MEASURED 2026-08-29, and then CORRECTED after a second measurement that
+       * caught something the first missed.
+       *
+       * rpc.flashbots.net was listed here and has been REMOVED. It answers
+       * eth_chainId, eth_blockNumber and a 10,000 block eth_getLogs perfectly,
+       * so every check it was put through passed. It does NOT serve eth_call:
+       * every quote and every balanceOf comes back "missing revert data",
+       * because it is a transaction privacy relay for eth_sendRawTransaction
+       * rather than a general purpose node.
+       *
+       * An endpoint that serves most methods and silently fails one is the worst
+       * shape of all, and this is the second time this registry has been bitten
+       * by it in mirror image: the note above records an endpoint that served
+       * balances but not log queries. Listed first, this one would have broken
+       * token balances, decimals reads, DEX quotes and the watcher's grace
+       * balance check on Ethereum mainnet, while looking healthy.
+       *
+       * The verifier now probes eth_call per endpoint so this class cannot pass
+       * again. publicnode is also absent: it caps getLogs at 100, under our span.
+       */
+      rpcs: rpcList(
+        alchemy("eth-mainnet"),
+        "https://eth.drpc.org",
+        "https://rpc.mevblocker.io"
+      ),
+      logSpan: 2000,
       explorer: "https://etherscan.io",
       nativeSymbol: "ETH",
       decimals: 18,
@@ -278,13 +365,23 @@ function rawRegistry(mainnetEnabled) {
         token("USDT", "Tether USD", "0xdAC17F958D2ee523a2206206994597C13D831ec7", 6),
       ],
       wrappedNative: token("WETH", "Wrapped Ether", "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", 18),
+      assets: [
+        token("WBTC", "Wrapped BTC", "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", 8),
+        token("LINK", "ChainLink Token", "0x514910771AF9Ca656af840dff83E8264EcF986CA", 18),
+        token("UNI", "Uniswap", "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984", 18),
+        token("AAVE", "Aave Token", "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9", 18),
+      ],
       dex: UNIV3_CANONICAL,
     },
     {
       key: "base",
       name: "Base",
       chainId: 8453,
-      rpcs: rpcList(alchemy("base-mainnet"), "https://mainnet.base.org"),
+      // MEASURED: alchemy 403s here (key not enabled for Base), so it is not
+      // listed. base.org and drpc both served 10,000 blocks; publicnode capped
+      // at 50 and is dropped.
+      rpcs: rpcList("https://mainnet.base.org", "https://base.drpc.org"),
+      logSpan: 2000,
       explorer: "https://basescan.org",
       nativeSymbol: "ETH",
       decimals: 18,
@@ -296,6 +393,10 @@ function rawRegistry(mainnetEnabled) {
         token("USDT", "Tether USD", "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", 6),
       ],
       wrappedNative: token("WETH", "Wrapped Ether", "0x4200000000000000000000000000000000000006", 18),
+      assets: [
+        // Coinbase Wrapped BTC. Quoted 1000 USDC -> 0.0128049 cbBTC.
+        token("cbBTC", "Coinbase Wrapped BTC", "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", 8),
+      ],
       dex: {
         type: "uniswap-v3",
         router: "0x2626664c2603336E57B271c5C0b26F421741e481",
@@ -306,7 +407,26 @@ function rawRegistry(mainnetEnabled) {
       key: "arbitrum",
       name: "Arbitrum One",
       chainId: 42161,
-      rpcs: rpcList(alchemy("arb-mainnet"), "https://arbitrum-one-rpc.publicnode.com"),
+      // MEASURED: alchemy 403s. arb1 served 50,000 blocks and drpc 2,000;
+      // publicnode capped at 50 and is dropped. logSpan follows the NARROWER of
+      // the two listed endpoints, since either may serve any request.
+      /**
+       * arbitrum.drpc.org was here and has been REMOVED, for the same reason
+       * publicnode was: it answers, but it returns
+       * "-32001 You've reached the usage limit for your current plan" to
+       * eth_call under any load. That arrives as a JSON-RPC error INSIDE a 200,
+       * which rpc.service correctly treats as the chain's real answer and does
+       * NOT fall through, so a balance read that happened to reach it would fail
+       * rather than retry. An unreliable endpoint in this list is worse than a
+       * shorter list.
+       *
+       * Tenderly replaces it and serves both eth_call and a 10,000 block
+       * getLogs. Also rejected while looking: arbitrum.meowrpc.com, which
+       * replies "The method eth_call is not supported" — the same shape as the
+       * flashbots problem recorded on the Ethereum entry.
+       */
+      rpcs: rpcList("https://arb1.arbitrum.io/rpc", "https://arbitrum.gateway.tenderly.co"),
+      logSpan: 2000,
       explorer: "https://arbiscan.io",
       nativeSymbol: "ETH",
       decimals: 18,
@@ -322,13 +442,21 @@ function rawRegistry(mainnetEnabled) {
         token("USD₮0", "Tether USD (omnichain)", "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", 6),
       ],
       wrappedNative: token("WETH", "Wrapped Ether", "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", 18),
+      assets: [
+        token("WBTC", "Wrapped BTC", "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", 8),
+        token("ARB", "Arbitrum", "0x912CE59144191C1204E64559FE8253a0e49E6548", 18),
+        token("LINK", "ChainLink Token", "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", 18),
+      ],
       dex: UNIV3_CANONICAL,
     },
     {
       key: "optimism",
       name: "OP Mainnet",
       chainId: 10,
-      rpcs: rpcList(alchemy("opt-mainnet"), "https://optimism-rpc.publicnode.com"),
+      // MEASURED: alchemy 403s. optimism.io and drpc both served 10,000 blocks;
+      // publicnode capped at 50 and is dropped.
+      rpcs: rpcList("https://mainnet.optimism.io", "https://optimism.drpc.org"),
+      logSpan: 2000,
       explorer: "https://optimistic.etherscan.io",
       nativeSymbol: "ETH",
       decimals: 18,
@@ -340,13 +468,25 @@ function rawRegistry(mainnetEnabled) {
         token("USDT", "Tether USD", "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58", 6),
       ],
       wrappedNative: token("WETH", "Wrapped Ether", "0x4200000000000000000000000000000000000006", 18),
+      assets: [
+        token("WBTC", "Wrapped BTC", "0x68f180fcCe6836688e9084f035309E29Bf0A2095", 8),
+        token("OP", "Optimism", "0x4200000000000000000000000000000000000042", 18),
+      ],
       dex: UNIV3_CANONICAL,
     },
     {
       key: "polygon",
       name: "Polygon",
       chainId: 137,
-      rpcs: rpcList(alchemy("polygon-mainnet"), "https://polygon-bor-rpc.publicnode.com"),
+      // MEASURED: alchemy 403s. publicnode, quiknode and tenderly each served
+      // 10,000 blocks. polygon.drpc.org capped at 100 and polygon-rpc.com now
+      // returns 401 without a key; both are dropped.
+      rpcs: rpcList(
+        "https://polygon-bor-rpc.publicnode.com",
+        "https://rpc-mainnet.matic.quiknode.pro",
+        "https://polygon.gateway.tenderly.co"
+      ),
+      logSpan: 2000,
       explorer: "https://polygonscan.com",
       nativeSymbol: "POL",
       decimals: 18,
@@ -355,16 +495,32 @@ function rawRegistry(mainnetEnabled) {
       faucet: null,
       stables: [
         token("USDC", "USD Coin", "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", 6),
-        token("USDT", "Tether USD", "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", 6),
+        // Reads back as USDT0, not USDT: Tether migrated Polygon's USDT to the
+        // omnichain token, exactly as it did on Arbitrum. The address is right;
+        // the label follows the chain so nobody thinks they hold a different
+        // asset than they do.
+        token("USDT0", "Tether USD (omnichain)", "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", 6),
       ],
       wrappedNative: token("WPOL", "Wrapped POL", "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270", 18),
+      assets: [
+        token("WBTC", "(PoS) Wrapped BTC", "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6", 8),
+        token("WETH", "Wrapped Ether", "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", 18),
+        token("LINK", "ChainLink Token", "0x53E0bca35eC356BD5ddDFebbD1Fc0fD03FaBad39", 18),
+      ],
       dex: UNIV3_CANONICAL,
     },
     {
       key: "bnb",
       name: "BNB Chain",
       chainId: 56,
+      // MEASURED, AND THE WEAKEST LINK IN THE REGISTRY. This is the ONLY BNB
+      // endpoint found that will serve a filtered log query at all: every
+      // bsc-dataseed answers "limit exceeded" to any range, blockrazor caps at
+      // 25 blocks, drpc rate-limits and ankr now demands a key. Payment
+      // watching on BNB therefore has no redundancy — if this host goes down,
+      // detection on this chain stops until it returns.
       rpcs: rpcList("https://bsc-rpc.publicnode.com"),
+      logSpan: 2000,
       explorer: "https://bscscan.com",
       nativeSymbol: "BNB",
       decimals: 18,
@@ -378,13 +534,49 @@ function rawRegistry(mainnetEnabled) {
         token("USDC", "USD Coin", "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", 18),
       ],
       wrappedNative: token("WBNB", "Wrapped BNB", "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", 18),
-      dex: null, // PancakeSwap, not Uniswap V3 — a different router interface
+      assets: [
+        // Binance-Peg BTCB. EIGHTEEN decimals, not the 8 that WBTC uses
+        // everywhere else. Read off the contract, and assuming otherwise would
+        // misread a balance by ten orders of magnitude.
+        token("BTCB", "BTCB Token", "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", 18),
+        token("ETH", "Ethereum Token", "0x2170Ed0880ac9A755fd29B2688956BD959F933F8", 18),
+        // The contract reports "Cake", not "CAKE". Matched to the chain.
+        token("Cake", "PancakeSwap Token", "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82", 18),
+      ],
+      /**
+       * UNISWAP V3 IS DEPLOYED ON BNB CHAIN, so this no longer needs PancakeSwap
+       * and a second router interface. This entry read `dex: null` with the note
+       * "PancakeSwap, not Uniswap V3, a different router interface", which was an
+       * assumption rather than a measurement.
+       *
+       * Verified: SwapRouter02 and QuoterV2 both carry bytecode at the addresses
+       * below, byte-for-byte the same sizes as the canonical deployments, and
+       * the quoter returned real prices through the SAME ABI dex.js already
+       * encodes: 1000 USDT quoted 1.45527 WBNB and 0.0127999 BTCB.
+       *
+       * Note the 1% tier on USDT to BTCB quoted 0.0000014, roughly nine thousand
+       * times worse than the 0.05% tier. That is why every tier is quoted and the
+       * best chosen, and why quoting one hardcoded tier would be ruinous here.
+       */
+      dex: {
+        type: "uniswap-v3",
+        router: "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2",
+        quoter: "0x78D78E420Da98ad378D7799bE8f4AF69033EB077",
+        feeTiers: [500, 3000, 10000],
+      },
     },
     {
       key: "avalanche",
       name: "Avalanche C-Chain",
       chainId: 43114,
-      rpcs: rpcList("https://avalanche-c-chain-rpc.publicnode.com"),
+      // MEASURED: publicnode served 50,000 blocks, drpc 10,000 and the official
+      // api.avax.network 2,000. logSpan follows the narrowest listed.
+      rpcs: rpcList(
+        "https://avalanche-c-chain-rpc.publicnode.com",
+        "https://avalanche.drpc.org",
+        "https://api.avax.network/ext/bc/C/rpc"
+      ),
+      logSpan: 2000,
       explorer: "https://snowtrace.io",
       nativeSymbol: "AVAX",
       decimals: 18,
@@ -393,10 +585,29 @@ function rawRegistry(mainnetEnabled) {
       faucet: null,
       stables: [
         token("USDC", "USD Coin", "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", 6),
-        token("USDT", "Tether USD", "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7", 6),
+        // Avalanche's TetherToken reads back as "USDt", lowercase t. Matched to
+        // the contract rather than to the convention.
+        token("USDt", "Tether USD", "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7", 6),
       ],
       wrappedNative: token("WAVAX", "Wrapped AVAX", "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7", 18),
-      dex: null, // Trader Joe, not Uniswap V3
+      assets: [
+        // Avalanche's bridged Bitcoin. Reports its symbol as "BTC.b" and its
+        // name simply as "Bitcoin"; 8 decimals, unlike BNB's BTCB.
+        token("BTC.b", "Bitcoin", "0x152b9d0FdC40C096757F570A51E494bd4b943E50", 8),
+        token("WETH.e", "Wrapped Ether", "0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB", 18),
+      ],
+      /**
+       * UNISWAP V3 IS ALSO DEPLOYED ON AVALANCHE. Same story as BNB: this said
+       * "Trader Joe, not Uniswap V3", which was an assumption. Router and quoter
+       * bytecode verified, and the quoter answered through the existing ABI:
+       * 1000 USDC quoted 137.127 WAVAX and 0.0128000 BTC.b.
+       */
+      dex: {
+        type: "uniswap-v3",
+        router: "0xbb00FF08d01D300023C629E8fFfFcb65A5a578cE",
+        quoter: "0xbe0F5544EC67e9B3b2D979aaA43f18Fd87E6257F",
+        feeTiers: [500, 3000, 10000],
+      },
     },
   ];
 }
@@ -407,7 +618,14 @@ function rawRegistry(mainnetEnabled) {
  * balance reader all already consume that shape.
  */
 function tokensFor(chain) {
-  return [...(chain.stables || []), ...(chain.wrappedNative ? [chain.wrappedNative] : [])];
+  return [
+    ...(chain.stables || []),
+    ...(chain.wrappedNative ? [chain.wrappedNative] : []),
+    // Tradeable assets are in the wallet's balance list and in what the market
+    // agent may buy. They are deliberately NOT in `stables`, which is the list an
+    // invoice may be denominated in: nobody wants to be owed in Bitcoin.
+    ...(chain.assets || []),
+  ];
 }
 
 // Chains exposed to the client — enabled only, and WITHOUT any RPC URL. BOTH

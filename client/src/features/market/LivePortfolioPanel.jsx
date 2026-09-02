@@ -184,7 +184,7 @@ export default function LivePortfolioPanel({
           <Wallet size={17} /> Live positions
         </h3>
         <p className="muted small crypto-empty">
-          Pick a network to see what this wallet actually holds. Balances are per network — the
+          Pick a network to see what this wallet actually holds. Balances are per network. The
           same address holds a different balance on each.
         </p>
         {(chains || []).length > 0 && onPickChain && (
@@ -227,7 +227,7 @@ export default function LivePortfolioPanel({
           <div>
             <p className="net-scope-lead">Balances on {chain.name} could not be read</p>
             <p className="net-scope-body">
-              {loadError}. This is a connection problem, not a zero balance — your funds are
+              {loadError}. This is a connection problem rather than a zero balance, so your funds are
               unaffected. Nothing simulated is shown in live mode, so nothing is shown here.
             </p>
             <Button variant="secondary" size="sm" onClick={load}>
@@ -242,7 +242,7 @@ export default function LivePortfolioPanel({
         <div className="live-zero-state">
           <p className="net-scope-lead">This wallet holds nothing on {chain.name} yet</p>
           <p className="net-scope-body">
-            Balance is zero — read successfully, not a failure. Deposit a stablecoin{" "}
+            Balance is zero, and that was read successfully rather than failing. Deposit a stablecoin{" "}
             <strong>on {chain.name}</strong> before trading. Funds sent on any other network will
             not appear here.
           </p>
@@ -273,7 +273,7 @@ export default function LivePortfolioPanel({
             {unreadCount > 0 && (
               <span className="muted caption">
                 Excludes {unreadCount} holding{unreadCount === 1 ? "" : "s"} that could not be read
-                — the real total is higher.
+                so the real total is higher.
               </span>
             )}
           </div>
@@ -308,8 +308,8 @@ export default function LivePortfolioPanel({
                         r.qty.toLocaleString(undefined, { maximumFractionDigits: 6 })
                       )}
                     </td>
-                    <td className="ta-right num">{price ? usd(price) : "—"}</td>
-                    <td className="ta-right num">{value != null ? usd(value) : "—"}</td>
+                    <td className="ta-right num">{price ? usd(price) : "No price"}</td>
+                    <td className="ta-right num">{value != null ? usd(value) : "Not counted"}</td>
                     <td className="ta-right num">
                       {cost != null ? (
                         <>

@@ -83,8 +83,8 @@ export default function CryptoSection() {
       <div className="settings-head">
         <h2 className="section-title">Crypto payments</h2>
         <p className="muted small">
-          Give each invoice its own blockchain address so a client can settle in stablecoin.
-          Testnet only.
+          Give each invoice its own blockchain address so a client can settle in stablecoin. The
+          network is chosen per invoice, and the real ones are among them.
         </p>
       </div>
 

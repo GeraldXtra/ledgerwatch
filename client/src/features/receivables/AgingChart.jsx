@@ -21,9 +21,9 @@ const reduceMotion = () =>
 // enough to hold its own on white, and the darkest is the accent itself.
 const BUCKETS = [
   { key: "current", label: "Current", color: "#8FA8CE" },
-  { key: "d1_30", label: "1–30d", color: "#6B8ABB" },
-  { key: "d31_60", label: "31–60d", color: "#47689F" },
-  { key: "d61_90", label: "61–90d", color: "#2A4A7D" },
+  { key: "d1_30", label: "1 to 30 days", color: "#6B8ABB" },
+  { key: "d31_60", label: "31 to 60 days", color: "#47689F" },
+  { key: "d61_90", label: "61 to 90 days", color: "#2A4A7D" },
   { key: "d90plus", label: "90d+", color: "#16294A" },
 ];
 
@@ -54,7 +54,7 @@ export default function AgingChart({ aging }) {
           <YAxis tick={{ fill: "#64748B", fontSize: 11.5 }} tickLine={false} axisLine={false} width={66} tickFormatter={(v) => compactNgn(v, "").trim()} />
           <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(22,41,74,0.05)" }} />
           {/* minPointSize keeps a small bucket visible when another dominates the
-              linear scale — without it the smaller bars round to sub-pixel and the
+              linear scale. Without it the smaller bars round to sub pixel and the
               chart reads as a single oversized bar. */}
           <Bar
             dataKey="value"

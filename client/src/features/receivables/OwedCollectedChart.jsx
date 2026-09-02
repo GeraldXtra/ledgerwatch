@@ -46,7 +46,7 @@ export default function OwedCollectedChart({ data }) {
           <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
           {/* Invoiced is navy (money owed, neutral); collected is the semantic
               green (money actually received). The old gold Invoiced bar was the
-              mustard tone — gone, with the palette itself left untouched. */}
+              mustard tone, gone, with the palette itself left untouched. */}
           <Bar dataKey="owed" name="Invoiced" fill="#47689F" radius={[6, 6, 0, 0]} maxBarSize={44} minPointSize={2} isAnimationActive={!reduceMotion()} />
           <Bar dataKey="collected" name="Collected" fill="#0A6E4C" radius={[6, 6, 0, 0]} maxBarSize={44} minPointSize={2} isAnimationActive={!reduceMotion()} />
         </BarChart>

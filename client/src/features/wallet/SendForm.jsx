@@ -181,7 +181,7 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
           <p>
             Sending {amount || "funds"} {symbol} to yourself on {chain.name} would succeed, appear
             in your history as a completed transfer, and leave your balance exactly where it
-            started — minus the network fee. Nothing would arrive on any other network.
+            started, minus the network fee. Nothing would arrive on any other network.
           </p>
         </div>
 
@@ -222,7 +222,7 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
         <div className="review-chain-banner">
           <Network size={15} />
           <span>
-            Sending on <strong>{chain.name}</strong> — the funds stay on this network
+            Sending on <strong>{chain.name}</strong>, and the funds stay on this network
           </span>
         </div>
 

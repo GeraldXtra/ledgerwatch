@@ -33,7 +33,7 @@ export default function AlertHistory({ alerts }) {
                 <div className="row">
                   <span className="coin-chip">{a.symbol}</span>
                   {/* Agent recommendation vs what the user actually did. When
-                      they differ the user overrode the agent — worth showing. */}
+                      they differ the user overrode the agent, which is worth showing. */}
                   <span className="muted caption">agent</span>
                   <StatusPill status={a.suggestion} />
                   {a.userAction && (

@@ -103,7 +103,7 @@ export default function TradePanel({ side, alert, portfolio, mode = "paper", onC
           <Lightbulb size={16} />
         </span>
         <div className="grow">
-          <div className="overline">Agent recommendation — {alert.suggestion}</div>
+          <div className="overline">Agent recommendation: {alert.suggestion}</div>
           <p className="muted small" style={{ margin: "4px 0 0" }}>
             {alert.message}
           </p>
@@ -115,7 +115,7 @@ export default function TradePanel({ side, alert, portfolio, mode = "paper", onC
           <AlertTriangle size={15} />
           <span>
             You are choosing to <strong>{side}</strong> while the agent suggested{" "}
-            <strong>{alert.suggestion}</strong>. That is your call — it will be recorded.
+            <strong>{alert.suggestion}</strong>. That is your call, and it will be recorded.
           </span>
         </div>
       )}

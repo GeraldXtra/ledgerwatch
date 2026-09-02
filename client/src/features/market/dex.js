@@ -20,7 +20,18 @@ const QUOTER_ABI = [
 
 const ROUTER_ABI = [
   "function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)",
+  // SwapRouter02's deadline-carrying multicall. See buildSwapTx.
+  "function multicall(uint256 deadline, bytes[] data) payable returns (bytes[] results)",
 ];
+
+/**
+ * How long a signed swap stays valid, in seconds.
+ *
+ * Twenty minutes is the Uniswap interface default and is the right order: long
+ * enough that a briefly congested mempool does not waste the user's gas, short
+ * enough that the price they agreed to is still roughly the price they get.
+ */
+const DEADLINE_SECONDS = Number(import.meta.env?.VITE_SWAP_DEADLINE_SECONDS) || 1200;
 
 export const ERC20_ALLOWANCE_ABI = [
   "function allowance(address owner, address spender) view returns (uint256)",
@@ -116,22 +127,49 @@ export async function bestQuote({ provider, chain, tokenIn, tokenOut, amountIn }
   };
 }
 
-/** Encoded `exactInputSingle` call, ready to estimate, simulate or sign. */
+/**
+ * Encoded swap, ready to estimate, simulate or sign.
+ *
+ * WRAPPED IN `multicall(deadline, [data])`, AND THAT IS THE POINT.
+ *
+ * This used to encode a bare `exactInputSingle`, whose parameter struct has no
+ * deadline field. A signed transaction with no expiry is a STANDING ORDER: it
+ * rests in the mempool indefinitely and executes whenever it is eventually
+ * mined, at any price still above `amountOutMinimum`.
+ *
+ * Measured on Ethereum: 1000 USDC buying WBTC at 1% slippage sets a floor that
+ * the transaction will accept forever, so an underpriced or stalled transaction
+ * mined the next morning after a fall buys at yesterday's floor. On a 1000 USDC
+ * trade with BTC down to 60,000 that is about 236 USD lost, with no revert, no
+ * warning, and a history row reading "confirmed". Nothing bounds the delay, and
+ * the app offers no way to cancel.
+ *
+ * CLAUDE.md section 9 recorded this as unavoidable: "a deadline would require
+ * multicall(uint256, bytes[]), which this code does not use". The first half is
+ * right and the conclusion was wrong. The selector 0x5ae401dc is present in the
+ * deployed router bytecode on every chain in the registry, including the two
+ * added most recently, so the mitigation was available the whole time. It is one
+ * extra encode.
+ */
 export function buildSwapTx({ chain, tokenIn, tokenOut, fee, amountIn, amountOutMinimum, recipient }) {
   const iface = new ethers.Interface(ROUTER_ABI);
+  const inner = iface.encodeFunctionData("exactInputSingle", [
+    {
+      tokenIn,
+      tokenOut,
+      fee,
+      recipient,
+      amountIn,
+      amountOutMinimum,
+      sqrtPriceLimitX96: 0n,
+    },
+  ]);
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS);
   return {
     to: chain.dex.router,
-    data: iface.encodeFunctionData("exactInputSingle", [
-      {
-        tokenIn,
-        tokenOut,
-        fee,
-        recipient,
-        amountIn,
-        amountOutMinimum,
-        sqrtPriceLimitX96: 0n,
-      },
-    ]),
+    data: iface.encodeFunctionData("multicall", [deadline, [inner]]),
+    // Surfaced so the confirm screen can say when the quote stops being valid.
+    deadline,
   };
 }
 

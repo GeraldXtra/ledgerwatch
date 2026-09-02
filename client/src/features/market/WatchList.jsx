@@ -17,7 +17,7 @@ export default function WatchList({ watches, onEdit, onRemove }) {
         <EmptyState
           icon={<Eye size={20} />}
           title="Nothing being watched"
-          hint={'Add a coin above, or ask the agent — try "watch BTC drop 5%" in the chat.'}
+          hint={'Add a coin above, or ask the agent. Try "watch BTC drop 5%" in the chat.'}
         />
       ) : (
         <ul className="plain-list">

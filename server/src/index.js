@@ -6,6 +6,7 @@ const connectDB = require("./config/db");
 const { startAutomation } = require("./services/automation");
 const { initPush } = require("./services/push.service");
 const { verifyEmail } = require("./services/notify.service");
+const { turnstileStatus } = require("./services/turnstile.service");
 const { normalizeCryptoSettings } = require("./services/cryptoSettings.service");
 
 const app = express();
@@ -52,6 +53,7 @@ app.use("/api/automation", require("./routes/automation.routes"));
 app.use("/api/watches", require("./routes/watches.routes"));
 app.use("/api/prices", require("./routes/prices.routes"));
 app.use("/api/markets", require("./routes/markets.routes"));
+app.use("/api/logos", require("./routes/logos.routes"));
 app.use("/api/coins", require("./routes/coins.routes"));
 app.use("/api/alerts", require("./routes/alerts.routes"));
 app.use("/api/portfolio", require("./routes/portfolio.routes"));
@@ -59,6 +61,7 @@ app.use("/api/push", require("./routes/push.routes"));
 app.use("/api/wallet", require("./routes/wallet.routes"));
 app.use("/api/trading", require("./routes/trading.routes"));
 app.use("/api/payment-addresses", require("./routes/paymentAddresses.routes"));
+app.use("/api/bitcoin", require("./routes/bitcoin.routes"));
 
 const PORT = process.env.PORT || 5000;
 
@@ -77,6 +80,29 @@ connectDB()
     // Confirm SMTP at boot too. Both of these used to be discovered only when a
     // user was waiting on a message that never came.
     verifyEmail().catch(() => {});
+
+    /**
+     * Say plainly whether the human check is actually running.
+     *
+     * The widget and the verification are two separate switches: the browser
+     * shows a box when the SITE key is set, and this server only checks it when
+     * the SECRET key is set. Setting one without the other gives a form that
+     * LOOKS defended and is not, which is worse than no widget at all because
+     * nobody goes looking.
+     */
+    {
+      const ts = turnstileStatus();
+      if (!ts.configured) {
+        console.warn(
+          "[turnstile] OFF. TURNSTILE_SECRET_KEY is not set, so sign in and sign up are NOT " +
+            "verified, even if the browser is showing a tick box."
+        );
+      } else if (ts.testMode) {
+        console.warn("[turnstile] TEST MODE. Using Cloudflare's always-passes secret. It blocks nothing.");
+      } else {
+        console.log("[turnstile] ready. Sign in and sign up are verified server side.");
+      }
+    }
 
     app.listen(PORT, () => {
       console.log(`🚀 Server on http://localhost:${PORT}`);

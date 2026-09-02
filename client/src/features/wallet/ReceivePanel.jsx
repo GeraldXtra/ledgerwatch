@@ -43,7 +43,7 @@ export default function ReceivePanel({ address, chain }) {
         </h3>
         <p className="muted small" style={{ margin: "4px 0 0" }}>
           {/* Names the network explicitly. The same address is valid on every
-              chain, so "here is my address" is ambiguous without it — and a
+              chain, so "here is my address" is ambiguous without it, and a
               sender who picks the wrong network delivers to a balance the
               recipient is not looking at. */}
           Share this address to receive testnet funds <strong>on {chain?.name}</strong>. Anything

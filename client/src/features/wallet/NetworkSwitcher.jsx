@@ -94,6 +94,10 @@ export default function NetworkSwitcher({ chains, chainId, address, onChange }) 
     if (!open || !address) return;
     let live = true;
     chains.forEach(async (c) => {
+      // Bitcoin is in this menu but is not an EVM chain: it has no JSON-RPC
+      // provider and getBalance would throw on every open. Its balance lives in
+      // BitcoinPanel, which reads it from a different API entirely.
+      if (c.kind === "bitcoin") return;
       if (requested.current.has(c.chainId)) return;
       requested.current.add(c.chainId);
       try {
@@ -211,7 +215,7 @@ export default function NetworkSwitcher({ chains, chainId, address, onChange }) 
                   another chain; it stayed put and cost a fee. The second
                   sentence is the part that was missing. */}
               <p className="net-note">
-                One address, every network. Your wallet address is the same on all of these — you do
+                One address, every network. Your wallet address is the same on all of these, so you do
                 not need a separate wallet per chain.
                 <br />
                 <strong>Balances are per network and do not move between them.</strong> Funds shown

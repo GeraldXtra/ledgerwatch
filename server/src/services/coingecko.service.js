@@ -149,6 +149,36 @@ async function getPrice(coinId) {
   return prices[coinId] || null;
 }
 
+/**
+ * Logo URLs for a set of coin ids.
+ *
+ * An adapter over the SAME markets cache, exactly like getPrices — NOT a second
+ * cache and NOT a second upstream call. Every /coins/markets row already carries
+ * an `image` field, so the moment a coin's price is in memory its logo is too,
+ * and asking for one costs a Map read. Fetching artwork separately would double
+ * our CoinGecko traffic to retrieve a value we were already given, and give us a
+ * second thing to invalidate and a second way to get rate limited.
+ *
+ * `stale` is passed through for the caller's information, but it means far less
+ * here than it does for a price. A coin's artwork does not move: an hour old
+ * logo URL is still the right logo, whereas an hour old price is a wrong number
+ * presented as a right one. So a caller may safely render a stale logo.
+ *
+ * @returns {Promise<{ logos: Object.<string,string>, stale: boolean, updatedAt: number|null }>}
+ */
+async function getLogosMap(coinIds) {
+  const { markets, stale, updatedAt } = await getMarketsMap(coinIds);
+  const logos = {};
+  for (const [id, m] of Object.entries(markets)) {
+    // Absent rather than present-and-empty. A caller iterating this map should
+    // only ever see ids it can actually draw; handing back "" or null would put
+    // an empty src on an <img> and render the browser's broken image glyph,
+    // which looks worse than the lettered disc it was supposed to replace.
+    if (m && typeof m.image === "string" && m.image) logos[id] = m.image;
+  }
+  return { logos, stale, updatedAt };
+}
+
 // ---- chart ----------------------------------------------------------------
 
 /**
@@ -275,6 +305,7 @@ module.exports = {
   getMarketsMap,
   getPrices,
   getPrice,
+  getLogosMap,
   getChart,
   searchCoins,
   getNgnPrice,

@@ -1,11 +1,20 @@
+<!-- LedgerWatch PWA icon — full bleed.
+     Android crops installed icons to a circle, so the navy runs edge to edge and
+     the crest is inset well inside the safe area. A navy shield on a navy field
+     would vanish, so here the crest is carried by its gold keyline instead of a
+     fill, with the chevron and ledger rule doing the rest. -->
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Full-bleed navy so the icon survives circular/rounded maskable cropping. -->
-  <rect width="512" height="512" fill="#16294A"/>
-  <!-- Ledger-to-chart bars + the watch dot, centred inside the 80% safe zone. -->
-  <g transform="translate(96,96) scale(10)">
-    <rect x="8" y="19" width="4" height="6" rx="1.4" fill="#FFFFFF" opacity="0.62"/>
-    <rect x="14" y="15" width="4" height="10" rx="1.4" fill="#FFFFFF" opacity="0.82"/>
-    <rect x="20" y="11" width="4" height="14" rx="1.4" fill="#FFFFFF"/>
-    <circle cx="22" cy="7.5" r="2.6" fill="#C0A053"/>
+  <defs>
+    <linearGradient id="lwField" x1="256" y1="0" x2="256" y2="512" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#16294A"/>
+      <stop offset="1" stop-color="#0A1529"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#lwField)"/>
+  <g transform="translate(80 80) scale(5.5)">
+    <path d="M14 9H50A4 4 0 0 1 54 13V33C54 41 48 52 32 59.5C16 52 10 41 10 33V13A4 4 0 0 1 14 9Z"
+          stroke="#C0A053" stroke-width="1.6" stroke-opacity="0.9" fill="#0E1C34"/>
+    <path d="M21.8 34L32 23.2L42.2 34" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M22.5 42H41.5" stroke="#C0A053" stroke-width="3.2" stroke-linecap="round"/>
   </g>
 </svg>

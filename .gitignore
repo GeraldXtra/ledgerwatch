@@ -17,7 +17,6 @@ resume-session.txt
 # rule existed. Untracking does NOT remove them from history: treat any phrase in
 # here as compromised and rotate it. See docs/SECURITY.md section 6 for the purge.
 acccountSecretPhrase/
-accountSecretPhrase/
 *.seed
 *.mnemonic
 *secret*phrase*

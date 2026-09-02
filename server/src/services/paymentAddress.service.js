@@ -3,7 +3,7 @@ const Debt = require("../models/Debt");
 const PaymentAddress = require("../models/PaymentAddress");
 const { getChain } = require("../config/chains");
 const { MAX_ADDRESSES_PER_HOUR, confirmationsFor } = require("../config/derivation");
-const { attachTotals } = require("./receivables.service");
+const { attachTotals, toleratedShortfallNgn } = require("./receivables.service");
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -321,10 +321,19 @@ async function resyncActivePaymentAddress(debtId) {
     const paid = rows.length ? rows[0].paid : 0;
     const remainingNgn = Math.max(0, (debt.amount || 0) - paid);
 
-    // Settled within tolerance: stop quoting entirely rather than asking for a
-    // few kobo. Marked `paid` so the watcher stops scanning it and the UI stops
-    // showing an amount due.
-    if (remainingNgn <= (debt.amount || 0) * TOLERANCE || remainingNgn <= 0) {
+    /**
+     * Settled within tolerance: stop quoting entirely rather than asking for a
+     * few kobo. Marked `paid` so the watcher stops scanning it and the UI stops
+     * showing an amount due.
+     *
+     * THE TOLERANCE IS THE SHARED ONE, and it is capped in absolute terms. This
+     * line read `remainingNgn <= debt.amount * TOLERANCE`, which on a 326 million
+     * naira invoice closed the address while 1.6 million was still genuinely
+     * owed, set expectedUsdc to 0, and stopped the watcher scanning it. Of the
+     * three copies of this rule this was the worst, because it makes the invoice
+     * stop ASKING for money it is still owed.
+     */
+    if (remainingNgn <= toleratedShortfallNgn(debt.amount) || remainingNgn <= 0) {
       pa.expectedUsdc = 0;
       pa.status = "paid";
       await pa.save();

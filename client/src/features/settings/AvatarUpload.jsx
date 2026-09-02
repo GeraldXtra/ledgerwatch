@@ -117,7 +117,7 @@ export default function AvatarUpload() {
           <span>
             <strong>Click to upload</strong> or drag an image here
           </span>
-          <span className="muted small">JPEG, PNG or WebP — cropped to a square automatically</span>
+          <span className="muted small">JPEG, PNG or WebP. Cropped to a square automatically</span>
         </div>
 
         <input

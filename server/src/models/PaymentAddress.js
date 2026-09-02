@@ -100,6 +100,24 @@ const paymentAddressSchema = new mongoose.Schema({
   settledNgn: { type: Number, default: 0 },
   overpaidUsdc: { type: Number, default: 0 },
 
+  /**
+   * Money that arrived at this address when the invoice owed nothing.
+   *
+   * It exists because the alternative was a bare `return null` that threw a
+   * confirmed on chain payment away (LW-002). One is sitting in this database:
+   * 7.35 USDC, 131 confirmations deep, swept to the owner's wallet, with no
+   * Payment row anywhere. The money was real and the ledger has no memory of it.
+   *
+   * ASSIGNED from the running total of confirmed transfers that never became a
+   * Payment, not accumulated. That total is already cumulative, so adding to it
+   * counts the same transfer once per pass. It is written on every grace scan
+   * for the life of the address, so it has to converge rather than drift.
+   * (overpaidUsdc is the opposite case and genuinely does accumulate, because
+   * each settlement contributes a separate excess.)
+   */
+  unattributedUsdc: { type: Number, default: 0 },
+  unattributedAt: { type: Date, default: null },
+
   status: {
     type: String,
     enum: ["active", "expired", "paid", "swept", "revoked"],

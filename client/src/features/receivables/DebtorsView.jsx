@@ -95,7 +95,7 @@ export default function DebtorsView() {
                   <td data-label="Outstanding" align="right" className="ta-right num">{ngn(d.totalOutstanding)}</td>
                   <td data-label="Reliability"><ReliabilityBadge score={d.reliabilityScore} band={d.band} /></td>
                   <td data-label="Last activity" align="right" className="ta-right num">
-                    {d.lastActivityAt ? shortDate(d.lastActivityAt) : "—"}
+                    {d.lastActivityAt ? shortDate(d.lastActivityAt) : "Nothing yet"}
                   </td>
                 </tr>
               ))}

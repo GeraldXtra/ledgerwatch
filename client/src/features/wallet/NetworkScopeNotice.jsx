@@ -31,7 +31,7 @@ export default function NetworkScopeNotice({ chain, tone = "inline" }) {
           Everything here happens on <strong>{chain.name}</strong>, and only there.
         </p>
         <p className="net-scope-body">
-          Your address is the same on every network, but <strong>balances are not</strong> — each
+          Your address is the same on every network, but <strong>balances are not</strong>. Each
           chain holds its own. Assets sent on {chain.name} exist only on {chain.name}. Sending to
           your own address does not move anything between networks; it just returns the funds to
           you on this one and costs a fee.
@@ -40,8 +40,7 @@ export default function NetworkScopeNotice({ chain, tone = "inline" }) {
           LedgerWatch does not move assets between networks. That needs a bridge
           {chain.bridge ? (
             <>
-              {" "}
-              — for {chain.name}, use{" "}
+              . For {chain.name}, use{" "}
               <a
                 className="net-scope-link"
                 href={chain.bridge.url}
@@ -55,7 +54,7 @@ export default function NetworkScopeNotice({ chain, tone = "inline" }) {
           ) : (
             // No verified route for this chain. Saying "use a bridge" without
             // naming one beats sending someone to a URL that may not exist.
-            <> — you will need the official bridge for the route you want.</>
+            <>. You will need the official bridge for the route you want.</>
           )}
         </p>
       </div>

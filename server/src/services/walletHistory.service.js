@@ -28,6 +28,19 @@ const TRANSFER_TOPIC =
  */
 const MAX_BLOCK_SPAN = Number(process.env.WALLET_HISTORY_BLOCK_SPAN || 1500);
 
+/**
+ * Same per-chain span story as the payment watcher: the registry carries a
+ * measured `logSpan` and a single global number is wrong across twelve chains.
+ * See paymentWatch.service.js for the measurement and why a too-large span fails
+ * silently rather than loudly.
+ */
+function spanFor(chain) {
+  const override = Number(process.env.WALLET_HISTORY_BLOCK_SPAN);
+  if (Number.isFinite(override) && override > 0) return override;
+  const measured = Number(chain && chain.logSpan);
+  return Number.isFinite(measured) && measured > 0 ? measured : MAX_BLOCK_SPAN;
+}
+
 // How far back a first-time scan reaches. Bounded on purpose: a full-history
 // walk would be thousands of queries for a wallet that is usually days old.
 const LOOKBACK_WINDOWS = Number(process.env.WALLET_HISTORY_WINDOWS || 4);
@@ -92,7 +105,8 @@ async function syncInboundTransfers({ userId, chainId, address }) {
   // A little overlap on resume, so a transfer mined at the boundary while the
   // previous sync was mid-flight cannot fall between the two runs.
   const resumeFrom = saved ? Math.max(0, saved.block - 50) : null;
-  const windows = resumeFrom === null ? LOOKBACK_WINDOWS : Math.max(1, Math.ceil((head - resumeFrom) / MAX_BLOCK_SPAN));
+  const span = spanFor(chain);
+  const windows = resumeFrom === null ? LOOKBACK_WINDOWS : Math.max(1, Math.ceil((head - resumeFrom) / span));
 
   let added = 0;
   let scanned = 0;
@@ -100,8 +114,8 @@ async function syncInboundTransfers({ userId, chainId, address }) {
   let lowest = head;
 
   for (let w = 0; w < Math.min(windows, LOOKBACK_WINDOWS); w++) {
-    const to = head - w * MAX_BLOCK_SPAN;
-    const from = Math.max(resumeFrom ?? 0, to - MAX_BLOCK_SPAN + 1);
+    const to = head - w * span;
+    const from = Math.max(resumeFrom ?? 0, to - span + 1);
     if (to <= 0 || from > to) break;
     scanned++;
     lowest = Math.min(lowest, from);

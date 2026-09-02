@@ -135,7 +135,15 @@ async function dispatchReminder(reminder, debt, owner, { channels = [], force = 
     }
     results.push({
       channel,
-      status: res.ok ? "sent" : res.skipped ? "skipped" : "failed",
+      /**
+       * `queued` is a real outcome, not a failure. On the free WhatsApp provider
+       * the message is prepared and handed back as a wa.me link for the owner to
+       * send with one tap, which is the path working exactly as designed. Folding
+       * it into "skipped" or "failed" would put a red chip in front of the user
+       * for a success, and this app already has a rule about failures that are
+       * not failures.
+       */
+      status: res.ok ? "sent" : res.queued ? "queued" : res.skipped ? "skipped" : "failed",
       providerId: res.providerId,
       // `reason` is the machine-readable cause; `error` is what the user reads.
       // `warning` covers a send that succeeded at the handshake but will not

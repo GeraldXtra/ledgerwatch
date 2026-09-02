@@ -21,6 +21,8 @@ import DebtDetailModal from "./DebtDetailModal";
 import ReminderPanel from "./ReminderPanel";
 import BulkActionBar from "./BulkActionBar";
 import { fetchPaymentAddresses } from "./cryptoApi";
+import { hasWallet } from "../wallet/keystore";
+import { useAuth } from "../../context/AuthContext";
 
 // Lazy, on purpose. This modal reaches ethers (for HD derivation) and qrcode,
 // which together are the largest dependency in the app. Importing it eagerly
@@ -56,6 +58,7 @@ function sortDebts(debts, sort) {
 
 export default function DebtsPanel() {
   const toast = useToast();
+  const { user } = useAuth();
   const [debts, setDebts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -80,6 +83,9 @@ export default function DebtsPanel() {
   const [cryptoDebt, setCryptoDebt] = useState(null);
   const [cryptoIds, setCryptoIds] = useState(() => new Set());
   const [cryptoKey, setCryptoKey] = useState(0);
+  // Set when Generate Reminder had to issue an address first, so the reminder can
+  // be generated as soon as that address exists.
+  const [remindAfterAddress, setRemindAfterAddress] = useState(null);
 
   const debounceRef = useRef(null);
 
@@ -170,10 +176,50 @@ export default function DebtsPanel() {
     toast(`${debt.debtorName}'s debt marked fully paid`, { type: "success" });
     await load();
   }
+  /**
+   * Generate a reminder, issuing the invoice's crypto payment address first if it
+   * does not have one yet.
+   *
+   * WHY THIS CANNOT BE FULLY AUTOMATIC. The address is derived in the browser from
+   * the wallet's own password on branch m/44'/60'/0'/2/<index>. The server holds no
+   * key and must never hold one, so it cannot mint the address itself and the
+   * reminder endpoint can only attach an address that already exists. Asking for
+   * the password once, here, is the closest this can get to automatic without
+   * breaking the single signing path the whole wallet design rests on.
+   *
+   * Order matters: the address must be saved BEFORE the reminder is generated,
+   * because `generateReminderForDebt` looks up the active address and folds the
+   * payment block into the message at generation time. Generating first would
+   * produce a reminder with no payment details and no way to add them afterwards.
+   */
   async function generateReminder(debt) {
-    const { data } = await http.post(`/api/debts/${debt._id}/remind`);
-    setReminder({ debt, result: data });
-    await load();
+    const wantsCrypto =
+      user?.crypto?.enabled !== false && // account setting, defaults on
+      hasWallet() && // a wallet exists in THIS browser for THIS account
+      !cryptoIds.has(String(debt._id)) && // no active address yet
+      (debt.balance ?? debt.amount) > 0; // nothing to ask for otherwise
+
+    if (wantsCrypto) {
+      // Hand off to the issuance modal, which owns the unlock, the atomic index
+      // allocation and the derivation. Remember the debt so the reminder is
+      // generated the moment the address lands.
+      setRemindAfterAddress(debt);
+      setCryptoDebt(debt);
+      return;
+    }
+    await doGenerateReminder(debt);
+  }
+
+  async function doGenerateReminder(debt) {
+    try {
+      const { data } = await http.post(`/api/debts/${debt._id}/remind`);
+      setReminder({ debt, result: data });
+      await load();
+    } catch (err) {
+      // This had no error path at all: a failure produced an unhandled rejection
+      // and the user saw nothing happen.
+      toast(err?.response?.data?.error || "Could not generate the reminder.", { type: "error" });
+    }
   }
 
   async function remindMany(targets, label) {
@@ -336,11 +382,31 @@ export default function DebtsPanel() {
         <Suspense fallback={null}>
         <CryptoPaymentModal
           debt={cryptoDebt}
-          onClose={() => setCryptoDebt(null)}
+          onClose={() => {
+            const pending = remindAfterAddress;
+            setCryptoDebt(null);
+            setRemindAfterAddress(null);
+            // Cancelling the address must not silently cancel the reminder the
+            // user actually asked for. Generate it without the payment block and
+            // say why it is missing, rather than appearing to do nothing.
+            if (pending) {
+              toast("Reminder drafted without payment details, because no address was issued.", { type: "info" });
+              doGenerateReminder(pending);
+            }
+          }}
           onCreated={() => {
             const id = cryptoDebt._id;
+            const pending = remindAfterAddress;
             setCryptoDebt(null);
+            setRemindAfterAddress(null);
             setCryptoKey((k) => k + 1);
+            if (pending) {
+              // Straight on to the reminder. The address now exists, so generation
+              // folds the payment block into the message.
+              toast("Payment address created. Drafting the reminder.", { type: "success" });
+              doGenerateReminder(pending);
+              return;
+            }
             // Land back on the invoice so the new address, QR and amount are
             // there to read immediately rather than being hunted for.
             setDetailId(id);

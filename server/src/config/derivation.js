@@ -31,12 +31,48 @@ function pathForIndex(index) {
 // Confirmation depth before a payment is trusted enough to settle an invoice.
 // Ethereum L1 reorgs a few blocks deep occasionally; L2 testnets settle faster,
 // so a smaller depth is appropriate there. Overridable per chain via env.
+/**
+ * Confirmation depth before a payment is trusted enough to settle an invoice.
+ *
+ * TESTNET AND MAINNET ARE NOT THE SAME PROBLEM. On a testnet a wrong depth costs
+ * nothing: the funds are free and a reorg that unsettles an invoice is an
+ * inconvenience. On mainnet the same reorg means an invoice was marked paid, a
+ * receipt was sent, reminders were cancelled, and the money then ceased to exist.
+ *
+ * The mainnet numbers below are chosen for roughly a minute or more of chain
+ * time, which is the window ordinary reorgs live in, and more where a chain's
+ * finality is weaker in practice:
+ *
+ *   Ethereum    12 x 12s   = 144s   L1 reorgs are shallow but slow to settle
+ *   Base        30 x 2s    = 60s    OP stack, follows L1 for hard finality
+ *   OP Mainnet  30 x 2s    = 60s    same
+ *   Arbitrum   240 x 0.25s = 60s    blocks are very fast, so the count is high
+ *   Polygon    100 x 2s    = 200s   deliberately the most conservative: Polygon
+ *                                   has had materially deeper reorgs than its
+ *                                   block time suggests
+ *   BNB         20 x 3s    = 60s
+ *   Avalanche   30 x 2s    = 60s    fast finality, but not free
+ *
+ * Every one is overridable per chain with CONFIRMATIONS_<chainId>. Raise them
+ * rather than lower them: waiting longer costs a customer some patience, and
+ * settling too early costs the owner the invoice.
+ */
 const DEFAULT_CONFIRMATIONS = {
+  // ---- testnets: free money, shallow depths are fine ----
   11155111: 12, // Ethereum Sepolia
   84532: 5, // Base Sepolia
   421614: 5, // Arbitrum Sepolia
   11155420: 5, // Optimism Sepolia
   80002: 5, // Polygon Amoy
+
+  // ---- mainnets: real money ----
+  1: 12, // Ethereum
+  8453: 30, // Base
+  10: 30, // OP Mainnet
+  42161: 240, // Arbitrum One
+  137: 100, // Polygon
+  56: 20, // BNB Chain
+  43114: 30, // Avalanche C-Chain
 };
 
 function confirmationsFor(chainId) {

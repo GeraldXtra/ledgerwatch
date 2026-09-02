@@ -129,7 +129,7 @@ export default function NotificationsSection() {
     setMsg("");
     try {
       await sendTestNotification();
-      setMsg("Test sent. Switch to another window — it appears when this tab is not focused.");
+      setMsg("Test sent. Switch to another window. It appears when this tab is not focused.");
     } catch (err) {
       setMsg(err?.response?.data?.error || "Could not send a test notification.");
     } finally {
@@ -247,7 +247,7 @@ export default function NotificationsSection() {
         )}
 
         <p className="settings-note">
-          Desktop notifications need the browser running — it can be minimised, but not fully
+          Desktop notifications need the browser running. It can be minimised, but not fully
           quit. On Android install the app first; on iOS 16.4+ add it to your home screen.
         </p>
       </div>
@@ -258,7 +258,7 @@ export default function NotificationsSection() {
           <div className="overline">Automatic reminders</div>
           <p className="muted small" style={{ margin: "4px 0 12px" }}>
             When on, LedgerWatch sends due reminders for you through the channels you pick. Off
-            by default — you stay in control.
+            by default, so you stay in control.
           </p>
         </div>
 
@@ -299,7 +299,7 @@ export default function NotificationsSection() {
         </label>
 
         {/* Said plainly, because a reminder silently sitting in a spam folder
-            looks identical to one that was never sent — and the user would
+            looks identical to one that was never sent, and the user would
             reasonably blame the app rather than their DNS. */}
         {autoSend.enabled && autoSend.email && (
           <p className="muted small settings-note">
@@ -308,7 +308,7 @@ export default function NotificationsSection() {
             Mail providers check whether the sending domain authorised the message; a
             gmail.com sender relayed on your behalf does not match, so it is treated with
             suspicion however well the email is put together. LedgerWatch already does the
-            rest — a proper plain-text alternative, unsubscribe headers, light inline images
+            rest, a proper plain text alternative, unsubscribe headers, light inline images
             and no tracking. Reliable inbox delivery needs a domain you own with SPF, DKIM and
             DMARC records; the README lists the exact records.
           </p>

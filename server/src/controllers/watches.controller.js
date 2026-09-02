@@ -10,7 +10,7 @@ async function create(req, res) {
         .status(400)
         .json({ error: "symbol (or coinId), type and value are required" });
     }
-    const watch = await createWatch(req.user._id, { symbol, type, value, coinId });
+    const watch = await createWatch(req.user._id, { symbol, type, value, coinId }, req.user.tradingMode === "live" ? "live" : "paper");
     return res.status(201).json({ watch });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
@@ -38,7 +38,9 @@ async function update(req, res) {
 // GET /api/watches
 async function list(req, res) {
   try {
-    const watches = await Watch.find({ userId: req.user._id }).sort({ createdAt: -1 });
+    const mode = req.user.tradingMode === "live" ? "live" : "paper";
+    // Only this book's watches. A live user must not see paper watches.
+    const watches = await Watch.find({ userId: req.user._id, mode }).sort({ createdAt: -1 });
     return res.json({ watches });
   } catch (err) {
     console.error("list watches error:", err.message);

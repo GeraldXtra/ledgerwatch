@@ -8,6 +8,7 @@ const {
 const { runPricePass } = require("./market.service");
 const { runPaymentWatchPass } = require("./paymentWatch.service");
 const { notifyUser, signActionToken } = require("./push.service");
+const { emailConfigured } = require("./notify.service");
 
 const DEFAULT_INTERVAL_MS = 60000; // 60s for demo
 
@@ -44,6 +45,32 @@ async function doReminderPass({ userId } = {}) {
   const debtsChecked = candidates.length;
   let generated = 0;
 
+  /**
+   * WHY NOTHING WAS SENT.
+   *
+   * This pass used to report only `generated` and `debtsChecked`, so "the agent
+   * is not sending my reminders" had no answer short of reading the source. There
+   * are six independent reasons a debt produces no email, and five of them are
+   * configuration rather than failure, so nothing errors and nothing is logged.
+   * Counting them is the difference between a silent no-op and a sentence that
+   * names the fix.
+   */
+  const skips = {
+    notDueYet: 0, // due date is in the future — excluded by the query above
+    cadenceNotElapsed: 0, // reminded too recently for this debt's cadence
+    ownerMissing: 0,
+    autoSendOff: 0, // owner has not enabled automatic sending
+    emailChannelOff: 0, // autoSend on, but the email channel is not enabled
+    noEmailAddress: 0, // nothing to send to
+    emailNotConfigured: 0, // SMTP missing on the server
+  };
+
+  // Counted separately because the query already filtered them out: a user who
+  // just added a debtor due next week sees no activity and assumes it is broken.
+  const notDueQuery = { status: { $in: ["pending", "partially_paid"] }, dueDate: { $gt: new Date(now) } };
+  if (userId) notDueQuery.userId = userId;
+  skips.notDueYet = await Debt.countDocuments(notDueQuery);
+
   // Cache users within a pass so we don't refetch the same owner repeatedly.
   const userCache = new Map();
 
@@ -53,7 +80,10 @@ async function doReminderPass({ userId } = {}) {
     const eligible =
       !debt.lastRemindedAt ||
       now - new Date(debt.lastRemindedAt).getTime() >= cadenceMs;
-    if (!eligible) continue;
+    if (!eligible) {
+      skips.cadenceNotElapsed++;
+      continue;
+    }
 
     try {
       const key = String(debt.userId);
@@ -62,7 +92,10 @@ async function doReminderPass({ userId } = {}) {
         owner = await User.findById(debt.userId).select("-passwordHash");
         userCache.set(key, owner);
       }
-      if (!owner) continue; // orphaned debt — skip, don't crash
+      if (!owner) {
+        skips.ownerMissing++;
+        continue; // orphaned debt — skip, don't crash
+      }
 
       const result = await generateReminderForDebt(debt, owner);
       generated++;
@@ -73,7 +106,16 @@ async function doReminderPass({ userId } = {}) {
       // is unconfigured, so this never throws the pass.
       const autoSend = owner.autoSend || {};
       let autoDispatched = false;
-      if (autoSend.enabled) {
+      if (!autoSend.enabled) {
+        skips.autoSendOff++;
+      } else {
+        // Tally the email path specifically. WhatsApp has a manual fallback that
+        // always works; email has none, so a silent skip there is the one people
+        // actually notice and cannot explain.
+        if (!autoSend.email) skips.emailChannelOff++;
+        else if (!debt.debtorEmail) skips.noEmailAddress++;
+        else if (!emailConfigured()) skips.emailNotConfigured++;
+
         const channels = [];
         if (autoSend.whatsapp && debt.debtorPhone) channels.push("whatsapp");
         if (autoSend.email && debt.debtorEmail) channels.push("email");
@@ -119,7 +161,31 @@ async function doReminderPass({ userId } = {}) {
     }
   }
 
-  return { generated, debtsChecked };
+  /**
+   * Say why, in one line, when a pass generates reminders but emails none of
+   * them. Ordered by how often each one is the real answer, and only the top
+   * blocker is printed so the log stays readable on a 60 second timer.
+   */
+  if (debtsChecked > 0 && generated > 0) {
+    const why =
+      (skips.emailNotConfigured && `SMTP is not configured on the server, so ${skips.emailNotConfigured} email(s) were skipped`) ||
+      (skips.autoSendOff && `${skips.autoSendOff} owner(s) have automatic sending switched OFF (Settings > Notifications), so a push was sent instead of an email`) ||
+      (skips.emailChannelOff && `${skips.emailChannelOff} owner(s) have automatic sending on but the EMAIL channel off`) ||
+      (skips.noEmailAddress && `${skips.noEmailAddress} debtor(s) have no email address on file`) ||
+      null;
+    if (why) console.log(`[reminders] generated ${generated}, emailed 0 - ${why}.`);
+  } else if (debtsChecked === 0 && skips.notDueYet > 0) {
+    console.log(
+      `[reminders] nothing to do: 0 debts are past due. ${skips.notDueYet} debt(s) exist but are not due yet - ` +
+        `reminders start on the due date and then repeat every "Re-remind every (days)" days.`
+    );
+  } else if (debtsChecked > 0 && generated === 0 && skips.cadenceNotElapsed === debtsChecked) {
+    console.log(
+      `[reminders] nothing to do: all ${debtsChecked} overdue debt(s) were reminded too recently for their cadence.`
+    );
+  }
+
+  return { generated, debtsChecked, skips };
 }
 
 /**
