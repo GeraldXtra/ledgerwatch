@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ethers } from "ethers";
-import { Check, ChevronDown, Globe, TriangleAlert } from "lucide-react";
+import { Check, ChevronDown, Globe } from "lucide-react";
 import { getProvider } from "./provider";
 
 /**
@@ -41,8 +41,6 @@ export function recallChain(chains) {
 export default function NetworkSwitcher({ chains, chainId, address, onChange }) {
   const [open, setOpen] = useState(false);
   const [balances, setBalances] = useState({});
-  const [confirming, setConfirming] = useState(null); // chain awaiting typed confirm
-  const [typed, setTyped] = useState("");
   const boxRef = useRef(null);
 
   const active = chains.find((c) => c.chainId === chainId) || null;
@@ -117,13 +115,17 @@ export default function NetworkSwitcher({ chains, chainId, address, onChange }) 
     };
   }, [open, address, chains]);
 
+  /**
+   * Every network is picked the same way, mainnet included.
+   *
+   * Choosing a mainnet used to open a gate that asked the user to type the word
+   * MAINNET before the switch would happen. The owner asked for that to go, so
+   * it has. The menu still separates Testnets from Mainnets with their own
+   * headings, and the trigger keeps its `mainnet` class, so which kind of
+   * network you are on is still visible at a glance — it just no longer costs a
+   * dialog to get there.
+   */
   function pick(chain) {
-    // Switching to real money is a decision, not a menu selection.
-    if (!chain.testnet) {
-      setConfirming(chain);
-      setTyped("");
-      return;
-    }
     commit(chain);
   }
 
@@ -131,7 +133,6 @@ export default function NetworkSwitcher({ chains, chainId, address, onChange }) 
     rememberChain(chain.chainId);
     onChange(chain.chainId);
     setOpen(false);
-    setConfirming(null);
   }
 
   const balanceLabel = (c) => {
@@ -156,74 +157,40 @@ export default function NetworkSwitcher({ chains, chainId, address, onChange }) 
 
       {open && (
         <div className="net-menu">
-          {confirming ? (
-            <div className="net-confirm">
-              <div className="against-note">
-                <TriangleAlert size={15} />
-                <span>
-                  <strong>{confirming.name} is a real network.</strong> Transactions here move real
-                  money and cannot be reversed by anyone. Type <code>MAINNET</code> to continue.
-                </span>
-              </div>
-              <input
-                className="input"
-                value={typed}
-                onChange={(e) => setTyped(e.target.value)}
-                placeholder="Type MAINNET"
-                autoFocus
-              />
-              <div className="row" style={{ justifyContent: "flex-end" }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setConfirming(null)}>
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={typed.trim().toUpperCase() !== "MAINNET"}
-                  onClick={() => commit(confirming)}
-                >
-                  Switch to {confirming.name}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <Group
-                label="Testnets"
-                hint="Free test funds. Nothing here is worth money."
-                chains={testnets}
-                chainId={chainId}
-                onPick={pick}
-                balanceLabel={balanceLabel}
-              />
-              {mainnets.length > 0 && (
-                <Group
-                  label="Mainnets"
-                  hint="Real funds. Every transaction is irreversible."
-                  danger
-                  chains={mainnets}
-                  chainId={chainId}
-                  onPick={pick}
-                  balanceLabel={balanceLabel}
-                />
-              )}
-              {/* BOTH HALVES, ALWAYS TOGETHER.
-                  This said only the first sentence, and a user reasonably
-                  concluded that because the address is the same everywhere,
-                  sending to it would let them choose the destination network.
-                  They sent 80 USDC to their own address expecting it to land on
-                  another chain; it stayed put and cost a fee. The second
-                  sentence is the part that was missing. */}
-              <p className="net-note">
-                One address, every network. Your wallet address is the same on all of these, so you do
-                not need a separate wallet per chain.
-                <br />
-                <strong>Balances are per network and do not move between them.</strong> Funds shown
-                on one chain stay there; sending to your own address will not carry them across.
-                Moving assets between networks needs a bridge.
-              </p>
-            </>
+          <Group
+            label="Testnets"
+            hint="Free test funds. Nothing here is worth money."
+            chains={testnets}
+            chainId={chainId}
+            onPick={pick}
+            balanceLabel={balanceLabel}
+          />
+          {mainnets.length > 0 && (
+            <Group
+              label="Mainnets"
+              hint="Real funds. Every transaction is irreversible."
+              danger
+              chains={mainnets}
+              chainId={chainId}
+              onPick={pick}
+              balanceLabel={balanceLabel}
+            />
           )}
+          {/* BOTH HALVES, ALWAYS TOGETHER.
+              This said only the first sentence, and a user reasonably concluded
+              that because the address is the same everywhere, sending to it
+              would let them choose the destination network. They sent 80 USDC to
+              their own address expecting it to land on another chain; it stayed
+              put and cost a fee. The second sentence is the part that was
+              missing. */}
+          <p className="net-note">
+            One address, every network. Your wallet address is the same on all of these, so you do
+            not need a separate wallet per chain.
+            <br />
+            <strong>Balances are per network and do not move between them.</strong> Funds shown on
+            one chain stay there; sending to your own address will not carry them across. Moving
+            assets between networks needs a bridge.
+          </p>
         </div>
       )}
     </div>

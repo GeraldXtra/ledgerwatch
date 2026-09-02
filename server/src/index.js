@@ -7,6 +7,7 @@ const { startAutomation } = require("./services/automation");
 const { initPush } = require("./services/push.service");
 const { verifyEmail } = require("./services/notify.service");
 const { turnstileStatus } = require("./services/turnstile.service");
+const { cgStatus } = require("./services/coingecko.service");
 const { normalizeCryptoSettings } = require("./services/cryptoSettings.service");
 
 const app = express();
@@ -80,6 +81,23 @@ connectDB()
     // Confirm SMTP at boot too. Both of these used to be discovered only when a
     // user was waiting on a message that never came.
     verifyEmail().catch(() => {});
+
+    /**
+     * Say whether CoinGecko is authenticated, for the same reason as the two
+     * above: unkeyed works on a laptop and is rate limited on a host, and the
+     * symptom is the entire market surface going blank at once — no price, no
+     * coin logos, no chart, no coin search — with nothing on screen saying why.
+     */
+    const cg = cgStatus();
+    if (cg.configured) {
+      console.log(`[coingecko] API key configured (${cg.plan} plan)`);
+    } else {
+      console.warn(
+        "[coingecko] NO API KEY. Prices, coin logos, charts and coin search all " +
+          "read this one upstream and will be rate limited on a hosted IP. Set " +
+          "COINGECKO_API_KEY (add COINGECKO_PLAN=pro for a Pro key)."
+      );
+    }
 
     /**
      * Say plainly whether the human check is actually running.

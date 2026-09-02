@@ -277,12 +277,39 @@ function MarketWatch() {
   }, [portfolio, markets]);
 
   // ---- market rows (watched coins joined with live market data) ----
+  /**
+   * A WATCHED COIN KEEPS ITS ROW EVEN WITH NO MARKET DATA.
+   *
+   * This used to drop any coin the markets map did not cover, so when the price
+   * feed was unavailable the table emptied and the screen read "Nothing on your
+   * watchlist" — telling the owner they had added no coins when what had
+   * actually happened was that the upstream went quiet. Hard rule 4: a value we
+   * could not read is shown as unknown, never as absent, and never as zero.
+   *
+   * The watch document carries the coin id and symbol, so the row can always be
+   * drawn. Only the live figures are missing, and `priceUnavailable` says which.
+   */
   const marketRows = useMemo(() => {
     const byCoin = {};
-    for (const w of watches) byCoin[w.coinId] = (byCoin[w.coinId] || 0) + 1;
-    return Object.keys(byCoin)
-      .map((id) => (markets[id] ? { ...markets[id], watchCount: byCoin[id] } : null))
-      .filter(Boolean);
+    for (const w of watches) {
+      if (!byCoin[w.coinId]) byCoin[w.coinId] = { count: 0, symbol: w.symbol };
+      byCoin[w.coinId].count += 1;
+    }
+    return Object.entries(byCoin).map(([id, { count, symbol }]) => {
+      const m = markets[id];
+      if (m) return { ...m, watchCount: count };
+      return {
+        id,
+        symbol: String(symbol || id).toUpperCase(),
+        name: id,
+        image: null,
+        current_price: null,
+        price_change_percentage_24h: null,
+        sparkline: [],
+        watchCount: count,
+        priceUnavailable: true,
+      };
+    });
   }, [watches, markets]);
 
   // ---- actions ----
@@ -451,7 +478,18 @@ function MarketWatch() {
     return map;
   }, [allocation, cashShare]);
 
-  const selectedMarket = detail ? markets[detail] : null;
+  /**
+   * Falls back to the row the table drew.
+   *
+   * Reading only from `markets` meant that when the price feed was down a click
+   * did nothing at all — no modal, no explanation. The placeholder row above
+   * carries enough to open the modal and say what is missing, and the chart
+   * fetches independently, so it may well have history even when the live quote
+   * does not.
+   */
+  const selectedMarket = detail
+    ? markets[detail] || marketRows.find((r) => r.id === detail) || null
+    : null;
   const detailHolding = pf?.holdings.find((h) => h.coinId === detail);
   const detailWatches = watches.filter((w) => w.coinId === detail);
 

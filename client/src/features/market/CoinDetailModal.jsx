@@ -42,12 +42,22 @@ export default function CoinDetailModal({
             <h3 className="section-title">
               {market.name} <span className="muted">{market.symbol}</span>
             </h3>
-            <div className="row" style={{ gap: 8 }}>
-              <span className="mono-strong num" style={{ fontSize: 18 }}>
-                {fmtPrice(market.current_price)}
-              </span>
-              <span className={`num small ${changeCls}`}>{pct(change)} 24h</span>
-            </div>
+            {/* An absent price says so rather than showing a bare "--" that
+                reads like the coin has no value. The chart below fetches on its
+                own and may well have history even when the live quote does
+                not. */}
+            {market.priceUnavailable ? (
+              <div className="muted small">
+                Live price unavailable right now. Your watch is still active.
+              </div>
+            ) : (
+              <div className="row" style={{ gap: 8 }}>
+                <span className="mono-strong num" style={{ fontSize: 18 }}>
+                  {fmtPrice(market.current_price)}
+                </span>
+                <span className={`num small ${changeCls}`}>{pct(change)} 24h</span>
+              </div>
+            )}
           </div>
         </div>
         <Button variant="ghost" icon title="Close" onClick={onClose}>

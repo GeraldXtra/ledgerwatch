@@ -8,8 +8,6 @@ const axios = require("axios");
  * any failure we serve stale cache, flag `stale:true`, log once (throttled), and
  * never throw.
  */
-const API = "https://api.coingecko.com/api/v3";
-
 const MARKETS_TTL = 45 * 1000; // 45s
 const CHART_TTL = 5 * 60 * 1000; // 5 min
 const SEARCH_TTL = 10 * 60 * 1000; // 10 min
@@ -41,12 +39,151 @@ function logError(scope, err) {
   const now = Date.now();
   if (now - lastErrorLogAt < 60000) return;
   lastErrorLogAt = now;
+
+  /**
+   * A pause is not a failure and must not be reported as one.
+   *
+   * When the breaker is open, cgGet throws without going near the network. Left
+   * to the line below, that would print "CoinGecko markets failed: paused for
+   * 240s" once a minute, which reads as the upstream refusing us again and
+   * hides the fact that the ORIGINAL refusal is the thing to fix.
+   */
+  if (err && err.cgPaused) {
+    console.warn(`CoinGecko ${scope} skipped — ${err.message}. Serving cached data.`);
+    return;
+  }
+
   const status = err && err.response && err.response.status;
   console.error(
     `CoinGecko ${scope} failed${status ? ` (${status})` : ""}: ${
       err ? err.message : "unknown"
     } — serving cached data`
   );
+  // The single most common cause in production, and not guessable from the
+  // status alone, so it is said out loud next to the failure rather than left
+  // for somebody to rediscover.
+  if (isRefusal(status) && !cgConfig().keyed) {
+    console.error(
+      "CoinGecko refused an unauthenticated request. Hosted IPs are rate limited " +
+        "far below a laptop's allowance — set COINGECKO_API_KEY (and " +
+        "COINGECKO_PLAN=pro for a Pro key). Prices, coin logos, charts and coin " +
+        "search all read this one upstream, so they go dark together."
+    );
+  }
+}
+
+// ---- upstream transport ----------------------------------------------------
+
+/**
+ * THE ONE PLACE THIS PROCESS TALKS TO COINGECKO.
+ *
+ * WHY THIS EXISTS. Every call used to be a bare `axios.get` against
+ * `api.coingecko.com` with no API key. That works from a laptop and fails on a
+ * host: CoinGecko rate limits the keyless endpoint hard, and shared datacenter
+ * IPs (Render, Railway, Fly, Vercel, AWS) burn the quota long before this app
+ * asks for anything. The failure was invisible in exactly the way section 12
+ * warns about, because every caller swallows its own error and serves cache —
+ * and on a fresh deploy the cache is EMPTY, so "serve stale" served nothing.
+ *
+ * The visible symptom was the whole market surface going dark at once: no live
+ * price, no coin logos (they are the `image` field of the same markets row), no
+ * chart, and no coin search. Four separate-looking bugs, one cause.
+ *
+ * Set COINGECKO_API_KEY. A demo key goes to api.coingecko.com with the
+ * `x-cg-demo-api-key` header; a Pro key needs COINGECKO_PLAN=pro, which switches
+ * the host to pro-api.coingecko.com and the header to `x-cg-pro-api-key`.
+ * Sending a demo key to the pro host, or the reverse, is a 401 — hence one
+ * function deciding both together rather than two settings that can disagree.
+ */
+function cgConfig() {
+  const key = String(process.env.COINGECKO_API_KEY || "").trim();
+  const pro = String(process.env.COINGECKO_PLAN || "").trim().toLowerCase() === "pro";
+  if (!key) return { base: "https://api.coingecko.com/api/v3", headers: {}, keyed: false };
+  return pro
+    ? {
+        base: "https://pro-api.coingecko.com/api/v3",
+        headers: { "x-cg-pro-api-key": key },
+        keyed: true,
+      }
+    : {
+        base: "https://api.coingecko.com/api/v3",
+        headers: { "x-cg-demo-api-key": key },
+        keyed: true,
+      };
+}
+
+/**
+ * A CIRCUIT BREAKER, because retrying a 429 is what turns a slow hour into a
+ * dead one.
+ *
+ * There was no 429 handling at all. Under a sustained rate limit every request
+ * from every browser tab, plus the automation loop, kept hammering the endpoint
+ * that was already refusing us — which is precisely how a temporary limit
+ * becomes a permanent one. When CoinGecko says no, we stop asking until it is
+ * plausibly worth asking again, and serve cache in the meantime.
+ *
+ * `Retry-After` is honoured when sent, because it is the upstream telling us the
+ * answer; otherwise the wait doubles from 15s to a 5 minute ceiling. Any success
+ * clears it, so recovery is immediate rather than waiting out the last backoff.
+ */
+const MIN_BACKOFF_MS = 15 * 1000;
+const MAX_BACKOFF_MS = 5 * 60 * 1000;
+let blockedUntil = 0;
+let backoffMs = 0;
+
+/** Refusals that mean "stop asking", as opposed to a one-off network blip. */
+function isRefusal(status) {
+  return status === 429 || status === 401 || status === 403 || status === 451;
+}
+
+function noteFailure(err) {
+  const status = err && err.response && err.response.status;
+  if (!isRefusal(status)) return; // a timeout or 5xx is worth retrying next tick
+  const headers = (err.response && err.response.headers) || {};
+  const retryAfter = Number(headers["retry-after"]);
+  const wait =
+    Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(MAX_BACKOFF_MS, retryAfter * 1000)
+      : Math.min(MAX_BACKOFF_MS, backoffMs ? backoffMs * 2 : MIN_BACKOFF_MS);
+  backoffMs = wait;
+  blockedUntil = Date.now() + wait;
+}
+
+/**
+ * @returns {{configured:boolean, plan:string, pausedForMs:number}} for the boot
+ * log and anything that wants to explain an empty screen to a human.
+ */
+function cgStatus() {
+  const { keyed } = cgConfig();
+  return {
+    configured: keyed,
+    plan: keyed
+      ? String(process.env.COINGECKO_PLAN || "demo").trim().toLowerCase()
+      : "none",
+    pausedForMs: Math.max(0, blockedUntil - Date.now()),
+  };
+}
+
+async function cgGet(path, params) {
+  const paused = blockedUntil - Date.now();
+  if (paused > 0) {
+    // Not an exception in the "something is wrong" sense — it is this module
+    // deliberately declining to make things worse. Flagged so logError can say
+    // so rather than reporting it as a fresh upstream failure every time.
+    const err = new Error(`paused for ${Math.ceil(paused / 1000)}s after a rate limit`);
+    err.cgPaused = true;
+    throw err;
+  }
+  const { base, headers } = cgConfig();
+  try {
+    const { data } = await axios.get(`${base}${path}`, { params, headers, timeout: TIMEOUT });
+    backoffMs = 0;
+    blockedUntil = 0; // a success means the limit has lifted; recover at once
+    return data;
+  } catch (err) {
+    noteFailure(err);
+    throw err;
+  }
 }
 
 // Map a raw /coins/markets row to a trimmed shape for the UI.
@@ -93,14 +230,11 @@ async function getMarketsMap(coinIds) {
     await singleFlight(key, async () => {
       try {
         console.log(`CoinGecko GET markets [${stale.join(",")}]`);
-        const { data } = await axios.get(`${API}/coins/markets`, {
-          params: {
-            vs_currency: "usd",
-            ids: stale.join(","),
-            sparkline: true,
-            price_change_percentage: "24h,7d",
-          },
-          timeout: TIMEOUT,
+        const data = await cgGet("/coins/markets", {
+          vs_currency: "usd",
+          ids: stale.join(","),
+          sparkline: true,
+          price_change_percentage: "24h,7d",
         });
         const ts = Date.now();
         for (const row of data || []) {
@@ -194,9 +328,9 @@ async function getChart(coinId, days) {
     await singleFlight("chart:" + key, async () => {
       try {
         console.log(`CoinGecko GET chart ${coinId} ${days}d`);
-        const { data } = await axios.get(`${API}/coins/${coinId}/market_chart`, {
-          params: { vs_currency: "usd", days },
-          timeout: TIMEOUT,
+        const data = await cgGet(`/coins/${encodeURIComponent(coinId)}/market_chart`, {
+          vs_currency: "usd",
+          days,
         });
         chartCache.set(key, {
           data: Array.isArray(data && data.prices) ? data.prices : [],
@@ -229,10 +363,7 @@ async function searchCoins(q) {
     await singleFlight("search:" + key, async () => {
       try {
         console.log(`CoinGecko GET search "${key}"`);
-        const { data } = await axios.get(`${API}/search`, {
-          params: { query: key },
-          timeout: TIMEOUT,
-        });
+        const data = await cgGet("/search", { query: key });
         const coins = (data && Array.isArray(data.coins) ? data.coins : [])
           .slice(0, 15)
           .map((c) => ({
@@ -281,10 +412,7 @@ async function getNgnPrice(coinId = "usd-coin") {
   await singleFlight(`ngn:${coinId}`, async () => {
     try {
       console.log(`CoinGecko GET simple/price [${coinId} in ngn]`);
-      const { data } = await axios.get(`${API}/simple/price`, {
-        params: { ids: coinId, vs_currencies: "ngn" },
-        timeout: TIMEOUT,
-      });
+      const data = await cgGet("/simple/price", { ids: coinId, vs_currencies: "ngn" });
       const ngn = data && data[coinId] && data[coinId].ngn;
       if (typeof ngn === "number" && ngn > 0) ngnCache.set(coinId, { ngn, ts: Date.now() });
     } catch (err) {
@@ -309,6 +437,7 @@ module.exports = {
   getChart,
   searchCoins,
   getNgnPrice,
+  cgStatus,
   MARKETS_TTL,
   CHART_TTL,
   SEARCH_TTL,

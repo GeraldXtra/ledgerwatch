@@ -117,7 +117,16 @@ export default function MarketTable({ rows, onSelect, live }) {
                       </div>
                     </td>
                     <td data-label="Price" align="right" className="ta-right num">
-                      <AnimatedPrice value={m.current_price} />
+                      {/* An unreadable price says so. It used to be dropped from
+                          the table entirely, which read as "you follow no coins"
+                          rather than "the feed is down". */}
+                      {m.priceUnavailable ? (
+                        <span className="muted small" title="The price feed did not answer for this coin. Your watch is still active.">
+                          Unavailable
+                        </span>
+                      ) : (
+                        <AnimatedPrice value={m.current_price} />
+                      )}
                     </td>
                     <td data-label="24h" align="right" className={`ta-right num ${changeCls}`}>
                       {pct(change)}

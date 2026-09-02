@@ -54,7 +54,12 @@ body {
 /* Paper has tooth. This is two almost invisible washes, not a texture image:
    it stops a large flat area of #f7f5f1 reading as flat grey on a wide screen. */
 .lw-shell {
-  min-height: 100vh;
+  min-height: 100vh; /* fallback for browsers without dynamic viewport units */
+  min-height: 100dvh; /* phones: 100vh measures the viewport with the URL bar
+                         HIDDEN, so on iOS Safari and Chrome Android a 100vh box
+                         is taller than what you can actually see and its bottom
+                         sits under the browser chrome. dvh tracks the visible
+                         height instead. */
   display: flex;
   flex-direction: column;
   background:
@@ -146,12 +151,34 @@ body {
    2. THE MASTHEAD AND ITS DOUBLE RULE
    --------------------------------------------------------------------------- */
 
-.lw-mast {
+/**
+ * THE CHROME IS ONE STICKY BLOCK.
+ *
+ * The masthead and the rail were each `position: sticky; top: 0`, as siblings.
+ * Two stickies sharing an offset do not stack — each pins at 0 on its own — so
+ * the moment the page scrolled, the rail came to rest underneath the masthead
+ * and its navigation vanished behind it (rail z-index 39, masthead 40). Wrong at
+ * every width, worst on a phone.
+ *
+ * Sticking the wrapper instead means the rail is laid out below the masthead and
+ * therefore cannot collide with it, whatever height either one takes at any
+ * breakpoint. No magic offset to keep in sync.
+ *
+ * The blur lives here too, once. It used to be applied to both children, so a
+ * phone composited two stacked backdrop-filters for one bar of chrome, which is
+ * one of the more expensive things you can ask a mobile GPU to do on every
+ * scroll frame.
+ */
+.lw-chrome {
   position: sticky;
   top: 0;
   z-index: 40;
-  background: color-mix(in srgb, var(--canvas) 88%, transparent);
+  background: color-mix(in srgb, var(--canvas) 92%, transparent);
   backdrop-filter: saturate(1.4) blur(10px);
+}
+
+.lw-mast {
+  background: transparent;
 }
 
 .lw-mast-inner {
@@ -257,12 +284,10 @@ body {
    the brass.
    --------------------------------------------------------------------------- */
 
+/* Static: the sticky lives on .lw-chrome, which is this element's parent. See
+   the note there — these two used to pin independently and overlap. */
 .lw-rail {
-  position: sticky;
-  top: 0;
-  z-index: 39;
-  background: color-mix(in srgb, var(--canvas) 92%, transparent);
-  backdrop-filter: saturate(1.4) blur(10px);
+  background: transparent;
   border-bottom: 1px solid var(--border);
 }
 
@@ -1052,6 +1077,7 @@ body {
      inside itself rather than running off the bottom of the page, where the
      chain you wanted would be just as unreachable as it was off the left. */
   max-height: min(64vh, 420px);
+  max-height: min(64dvh, 420px);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -1551,7 +1577,12 @@ body {
 
 .ed {
   background: var(--canvas);
-  min-height: 100vh;
+  min-height: 100vh; /* fallback for browsers without dynamic viewport units */
+  min-height: 100dvh; /* phones: 100vh measures the viewport with the URL bar
+                         HIDDEN, so on iOS Safari and Chrome Android a 100vh box
+                         is taller than what you can actually see and its bottom
+                         sits under the browser chrome. dvh tracks the visible
+                         height instead. */
 }
 
 .ed-wrap {
@@ -2016,7 +2047,12 @@ body {
    --------------------------------------------------------------------------- */
 
 .gate {
-  min-height: 100vh;
+  min-height: 100vh; /* fallback for browsers without dynamic viewport units */
+  min-height: 100dvh; /* phones: 100vh measures the viewport with the URL bar
+                         HIDDEN, so on iOS Safari and Chrome Android a 100vh box
+                         is taller than what you can actually see and its bottom
+                         sits under the browser chrome. dvh tracks the visible
+                         height instead. */
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
   background: var(--canvas);

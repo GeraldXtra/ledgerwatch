@@ -1286,7 +1286,13 @@ legend {
 .modal-panel {
   width: 100%;
   max-width: 560px;
+  /* 88vh measures the viewport with the phone's URL bar HIDDEN, so on iOS
+     Safari and Chrome Android the panel was taller than the visible area and
+     its bottom — where the confirm and cancel buttons live — sat underneath the
+     browser chrome with no way to reach it. dvh tracks the height you can
+     actually see. The vh line stays as the fallback for older browsers. */
   max-height: 88vh;
+  max-height: 88dvh;
   overflow-y: auto;
   background: var(--card);
   border-radius: 12px;
@@ -1366,7 +1372,9 @@ legend {
 /* ---------------- auth ---------------- */
 /* legacy single-column wrap (kept for any other consumer) */
 .auth-wrap {
-  min-height: 100vh;
+  min-height: 100vh; /* fallback */
+  min-height: 100dvh; /* see the modal note: vh hides content under the phone's
+                         browser chrome, dvh does not */
   display: grid;
   place-items: center;
   padding: 24px;
@@ -1376,7 +1384,9 @@ legend {
 
 /* ---- split-screen auth ---- */
 .auth-split {
-  min-height: 100vh;
+  min-height: 100vh; /* fallback */
+  min-height: 100dvh; /* see the modal note: vh hides content under the phone's
+                         browser chrome, dvh does not */
   display: grid;
   grid-template-columns: 1fr 1.1fr;
 }
@@ -1679,7 +1689,9 @@ legend {
 }
 
 .center-screen {
-  min-height: 100vh;
+  min-height: 100vh; /* fallback */
+  min-height: 100dvh; /* see the modal note: vh hides content under the phone's
+                         browser chrome, dvh does not */
   display: grid;
   place-items: center;
   background: var(--canvas);
@@ -4221,7 +4233,12 @@ input[type="checkbox"] {
 
 .settings-nav {
   position: sticky;
-  top: 88px;
+  /* Must clear the sticky chrome (.lw-chrome = masthead + rail), which is about
+     96px on a desktop. 88px was measured against the old shell and left this
+     tucking under the rail as you scrolled the settings page. Below 900px the
+     rule further down makes this static, so this offset is desktop and
+     iPad-landscape only. */
+  top: 112px;
   display: flex;
   flex-direction: column;
   gap: 2px;

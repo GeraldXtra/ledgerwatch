@@ -110,7 +110,22 @@ export default function Dashboard() {
     <ToastProvider>
       <PushBridge />
       <div className="lw-shell">
-        <header className="lw-mast">
+        {/* ONE STICKY ELEMENT, NOT TWO.
+            The masthead and the rail were each `position: sticky; top: 0` as
+            siblings. Two stickies pinned to the same offset do not stack: each
+            one pins at 0 independently, so as soon as the page scrolled the rail
+            came to rest UNDERNEATH the masthead and its links disappeared behind
+            it. It was wrong at every width and worst on a phone, where the
+            chrome is a bigger share of the screen and there is more scrolling.
+
+            Wrapping them makes the chrome a single sticky block, so the rail can
+            only ever sit below the masthead no matter how tall either becomes —
+            at any breakpoint, in any font, in any language. The alternative,
+            giving the rail `top: <masthead height>`, needs a magic number per
+            breakpoint and breaks the moment the brand wraps or a font loads
+            late. */}
+        <div className="lw-chrome">
+          <header className="lw-mast">
           <div className="lw-mast-inner">
             <NavLink to="/app/receivables" className="lw-brand">
               <LogoMark size={30} />
@@ -176,10 +191,11 @@ export default function Dashboard() {
                 anything stated here is a guess dressed as chrome, and a label
                 that cannot know the truth must not assert it. Both screens say
                 it themselves where they actually know: the wallet through its
-                network pill and its mainnet banner, the market through its mode
-                toggle. */}
-          </div>
-        </nav>
+                network pill, which styles a mainnet differently from a testnet,
+                and the market through its mode toggle. */}
+            </div>
+          </nav>
+        </div>
 
         {/* Keyed on the route so the entrance replays on navigation. */}
         <main key={tab} className="lw-body lw-stack">

@@ -1,22 +1,15 @@
-import { TriangleAlert } from "lucide-react";
-
 /**
- * Shown on every wallet and trading screen whenever the selected chain is a
- * mainnet. Persistent by design: the testnet and mainnet versions of these
- * screens are otherwise identical, and the only thing distinguishing "practice"
- * from "irreversible" would be a chain name in a dropdown.
+ * Deliberately renders nothing.
  *
- * Renders nothing on a testnet, so callers can drop it in unconditionally.
+ * This used to show a persistent red "MAINNET. REAL FUNDS." banner on every
+ * wallet and trading screen whenever the selected chain was a mainnet. The owner
+ * asked for it to be removed, so it is gone.
+ *
+ * Kept as a no-op component rather than deleted so the five call sites do not
+ * need touching and the banner can be restored by reverting this one file. The
+ * network name and its mainnet/testnet styling still appear in NetworkSwitcher,
+ * which remains the thing that tells a user which chain they are on.
  */
-export default function MainnetBanner({ chain }) {
-  if (!chain || chain.testnet) return null;
-  return (
-    <div className="mainnet-banner">
-      <TriangleAlert size={16} />
-      <span>
-        <strong>MAINNET. REAL FUNDS.</strong> You are on {chain.name}. Transactions here move real
-        money, confirm in seconds and cannot be reversed by us or by anyone else.
-      </span>
-    </div>
-  );
+export default function MainnetBanner() {
+  return null;
 }
