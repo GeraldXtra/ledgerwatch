@@ -301,7 +301,12 @@ function MarketWatch() {
       return {
         id,
         symbol: String(symbol || id).toUpperCase(),
-        name: id,
+        // "matic-network" reads as a database key, not a coin. Title-cased so a
+        // row waiting on the price feed still looks like part of the product.
+        name: String(id)
+          .split("-")
+          .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+          .join(" "),
         image: null,
         current_price: null,
         price_change_percentage_24h: null,
