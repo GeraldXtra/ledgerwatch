@@ -45,6 +45,9 @@ app.get("/api/health", (req, res) => {
 });
 
 // Routes
+// Public, carries no secret, and exists so an empty market screen can be
+// diagnosed from a browser rather than from a server log. See the controller.
+app.use("/api/status", require("./routes/status.routes"));
 app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/debts", require("./routes/debts.routes"));
 app.use("/api/debtors", require("./routes/debtors.routes"));

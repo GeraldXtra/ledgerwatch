@@ -8,10 +8,49 @@ const axios = require("axios");
  * any failure we serve stale cache, flag `stale:true`, log once (throttled), and
  * never throw.
  */
-const MARKETS_TTL = 45 * 1000; // 45s
-const CHART_TTL = 5 * 60 * 1000; // 5 min
-const SEARCH_TTL = 10 * 60 * 1000; // 10 min
 const TIMEOUT = 9000;
+
+/**
+ * TTLs, AND WHY THEY ARE NOT CONSTANTS ANY MORE.
+ *
+ * These were tuned for a laptop with a developer's own allowance. In production
+ * the browser polls /api/markets every ten seconds, so a 45 second markets TTL
+ * is about eighty upstream calls an hour for that endpoint alone, before charts,
+ * logos, coin search and the invoice rate. An authenticated key absorbs that
+ * comfortably. A keyless request does not: the free allowance is per IP, it is
+ * small, and on a shared datacenter IP most of it is already spent by somebody
+ * else before this app asks for anything.
+ *
+ * So when there is no key the TTLs widen. That is not a degraded mode for its
+ * own sake — it is the difference between a cache that refills and one that gets
+ * refused on every attempt and therefore stays empty, which is what makes every
+ * price, logo and chart blank at once. A price a couple of minutes old beats no
+ * price at all, and a chart is historical data that barely moves.
+ *
+ * Set COINGECKO_API_KEY and the tighter numbers apply automatically.
+ */
+const KEYLESS_TTL_FACTOR = 4;
+
+function ttlFactor() {
+  return cgConfig().keyed ? 1 : KEYLESS_TTL_FACTOR;
+}
+
+const BASE_MARKETS_TTL = 45 * 1000; // 45s keyed, 3 min keyless
+const BASE_CHART_TTL = 5 * 60 * 1000; // 5 min keyed, 20 min keyless
+const BASE_SEARCH_TTL = 10 * 60 * 1000; // 10 min keyed, 40 min keyless
+
+const marketsTtl = () => BASE_MARKETS_TTL * ttlFactor();
+const chartTtl = () => BASE_CHART_TTL * ttlFactor();
+const searchTtl = () => BASE_SEARCH_TTL * ttlFactor();
+
+/**
+ * Exported for callers that report cache age. These keep the keyed values so a
+ * consumer's arithmetic does not change shape; the live TTL is read through the
+ * functions above.
+ */
+const MARKETS_TTL = BASE_MARKETS_TTL;
+const CHART_TTL = BASE_CHART_TTL;
+const SEARCH_TTL = BASE_SEARCH_TTL;
 
 // ---- caches ---------------------------------------------------------------
 const marketsCache = new Map(); // coinId -> { data, ts }
@@ -150,17 +189,64 @@ function noteFailure(err) {
 }
 
 /**
- * @returns {{configured:boolean, plan:string, pausedForMs:number}} for the boot
- * log and anything that wants to explain an empty screen to a human.
+ * The last thing the upstream actually said, so a blank screen can be explained
+ * instead of guessed at.
+ *
+ * Every price, coin logo and chart in this product comes from one provider, and
+ * when it stops answering all three go blank at once with nothing on screen or
+ * in the API saying why. Diagnosing that from the outside meant reading server
+ * logs, which is not available on most hosts and is not something the owner
+ * should need. This records the outcome of the most recent call so
+ * `GET /api/status` can state the cause in one line.
+ *
+ * Deliberately holds no URL and no key — only a status code and the provider's
+ * own message, both of which are safe to show.
+ */
+let lastUpstream = null; // { at, ok, status, message }
+
+function noteUpstream(ok, err) {
+  lastUpstream = {
+    at: Date.now(),
+    ok,
+    status: (err && err.response && err.response.status) || null,
+    message: ok ? null : (err && err.message) || "unknown",
+  };
+}
+
+/**
+ * @returns {object} for the boot log, and for GET /api/status, which is how a
+ * human finds out why the market screens are empty.
  */
 function cgStatus() {
   const { keyed } = cgConfig();
+  const paused = Math.max(0, blockedUntil - Date.now());
   return {
     configured: keyed,
-    plan: keyed
-      ? String(process.env.COINGECKO_PLAN || "demo").trim().toLowerCase()
-      : "none",
-    pausedForMs: Math.max(0, blockedUntil - Date.now()),
+    plan: keyed ? String(process.env.COINGECKO_PLAN || "demo").trim().toLowerCase() : "none",
+    pausedForMs: paused,
+    cachedCoins: marketsCache.size,
+    cachedCharts: chartCache.size,
+    lastUpstream,
+    /**
+     * The whole diagnosis in one sentence, because the fields above still need
+     * somebody to know what they imply.
+     */
+    diagnosis: (() => {
+      if (lastUpstream && lastUpstream.ok) return "Upstream healthy.";
+      if (!lastUpstream) return "No upstream call made yet since this process started.";
+      if (isRefusal(lastUpstream.status) && !keyed) {
+        return (
+          `CoinGecko refused with ${lastUpstream.status} and no API key is set. ` +
+          "This is the usual cause of blank prices, missing coin logos and empty " +
+          "charts on a hosted server: the keyless allowance is per IP and shared " +
+          "datacenter IPs are normally already spent. Set COINGECKO_API_KEY."
+        );
+      }
+      if (isRefusal(lastUpstream.status)) {
+        return `CoinGecko refused with ${lastUpstream.status} despite a key being set. Check the key is valid and that COINGECKO_PLAN matches it (demo keys are not Pro keys).`;
+      }
+      return `Last upstream call failed: ${lastUpstream.message}`;
+    })(),
   };
 }
 
@@ -179,9 +265,11 @@ async function cgGet(path, params) {
     const { data } = await axios.get(`${base}${path}`, { params, headers, timeout: TIMEOUT });
     backoffMs = 0;
     blockedUntil = 0; // a success means the limit has lifted; recover at once
+    noteUpstream(true, null);
     return data;
   } catch (err) {
     noteFailure(err);
+    noteUpstream(false, err);
     throw err;
   }
 }
@@ -222,7 +310,7 @@ async function getMarketsMap(coinIds) {
   const now = Date.now();
   const stale = ids.filter((id) => {
     const e = marketsCache.get(id);
-    return !e || now - e.ts > MARKETS_TTL;
+    return !e || now - e.ts > marketsTtl();
   });
 
   if (stale.length > 0) {
@@ -255,7 +343,7 @@ async function getMarketsMap(coinIds) {
     if (e) {
       markets[id] = e.data;
       served++;
-      if (now - e.ts > MARKETS_TTL) servedStale++;
+      if (now - e.ts > marketsTtl()) servedStale++;
       updatedAt = updatedAt == null ? e.ts : Math.max(updatedAt, e.ts);
     }
   }
@@ -322,7 +410,7 @@ async function getChart(coinId, days) {
   const key = `${coinId}:${days}`;
   const now = Date.now();
   const cached = chartCache.get(key);
-  const fresh = cached && now - cached.ts <= CHART_TTL;
+  const fresh = cached && now - cached.ts <= chartTtl();
 
   if (!fresh) {
     await singleFlight("chart:" + key, async () => {
@@ -344,7 +432,7 @@ async function getChart(coinId, days) {
 
   const entry = chartCache.get(key);
   if (!entry) return { prices: [], stale: true, updatedAt: null };
-  return { prices: entry.data, stale: now - entry.ts > CHART_TTL, updatedAt: entry.ts };
+  return { prices: entry.data, stale: now - entry.ts > chartTtl(), updatedAt: entry.ts };
 }
 
 // ---- search ---------------------------------------------------------------
@@ -357,7 +445,7 @@ async function searchCoins(q) {
   if (!key) return { coins: [], stale: false };
   const now = Date.now();
   const cached = searchCache.get(key);
-  const fresh = cached && now - cached.ts <= SEARCH_TTL;
+  const fresh = cached && now - cached.ts <= searchTtl();
 
   if (!fresh) {
     await singleFlight("search:" + key, async () => {
@@ -381,7 +469,7 @@ async function searchCoins(q) {
 
   const entry = searchCache.get(key);
   if (!entry) return { coins: [], stale: true };
-  return { coins: entry.data, stale: now - entry.ts > SEARCH_TTL };
+  return { coins: entry.data, stale: now - entry.ts > searchTtl() };
 }
 
 // ---- NGN rate for crypto receivables --------------------------------------
