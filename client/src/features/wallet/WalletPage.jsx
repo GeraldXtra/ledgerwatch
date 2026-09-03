@@ -21,7 +21,7 @@ import { Link } from "react-router-dom";
 import { Button, Card, SkeletonLines, ToastProvider } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { getProvider, ERC20_ABI, rpcErrorReason } from "./provider";
-import { fetchUsdPrices, totalUsd } from "./usdValue";
+import { fetchUsdPrices, totalUsd, coinIdForSymbol, stableUsdPrice } from "./usdValue";
 import {
   hasWallet,
   getStoredAddress,
@@ -265,12 +265,51 @@ function WalletInner() {
        * the whole panel wait on CoinGecko would let a price outage hide balances
        * that were read perfectly well.
        */
-      fetchUsdPrices(rows.map((r) => r.symbol))
-        .then((p) => {
-          setUsdPrices(p);
-          setPricesFailed(false);
-        })
-        .catch(() => setPricesFailed(true));
+      /**
+       * KEEP ASKING UNTIL THE PRICES ACTUALLY ARRIVE.
+       *
+       * This was a single attempt. When the server's price cache was still cold
+       * it answered with an empty map, which is a RESOLVED promise, so the code
+       * recorded it as a success, wrote `{}` into state and never asked again —
+       * every row read "No price" until the page was reloaded by hand. That is
+       * why the wallet needed constant refreshing.
+       *
+       * Prices are keyed by SYMBOL and a dollar price is the same on every
+       * chain, so a late answer arriving after the user has switched network is
+       * harmless: it can only fill a gap, never contradict the current chain.
+       * That is why this needs no cancellation guard, and it is worth saying out
+       * loud because the same pattern WOULD be unsafe for balances.
+       */
+      (async () => {
+        const symbols = rows.map((r) => r.symbol);
+        // What we can legitimately expect a number for. A custom token nobody
+        // has a mapping for is not a failure and must not drive a retry.
+        const priceable = symbols.filter(
+          (s) => stableUsdPrice(s) != null || coinIdForSymbol(s)
+        );
+
+        let merged = {};
+        for (let attempt = 0; attempt <= 3; attempt++) {
+          let got = {};
+          try {
+            got = await fetchUsdPrices(symbols);
+          } catch {
+            /* keep whatever earlier attempts produced */
+          }
+          merged = { ...merged, ...got };
+          setUsdPrices(merged);
+
+          const missing = priceable.filter(
+            (s) => !Number.isFinite(merged[String(s).toUpperCase()])
+          );
+          setPricesFailed(missing.length > 0);
+          if (missing.length === 0) return;
+
+          // Widening backoff: the usual cause is a cold cache upstream that
+          // fills within a few seconds, and hammering it would only slow that.
+          await new Promise((r) => setTimeout(r, 3000 * Math.pow(2, attempt)));
+        }
+      })();
     } catch (err) {
       setBalances(null);
       setBalError(rpcErrorReason(err));

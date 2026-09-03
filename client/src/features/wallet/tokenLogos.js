@@ -119,26 +119,97 @@ async function flush() {
   try {
     const { data } = await http.get("/api/logos", { params: { ids: ids.join(",") } });
     const byId = data?.logos || {};
+
+    /**
+     * AN EMPTY ANSWER IS NOT AN ANSWER, AND THIS IS THE BUG THAT HID THE LOGOS.
+     *
+     * This used to write `cache.set(key, null)` for every symbol the response
+     * did not cover. `null` in this cache means "asked, and this token has no
+     * artwork" — a PERMANENT answer that stops us ever asking again. But the
+     * server returns an empty map whenever its own price cache is still cold or
+     * the upstream refused it, which is a TRANSIENT condition. One unlucky first
+     * request therefore marked every token in the wallet as having no logo for
+     * the rest of the session, and only a page reload cleared it.
+     *
+     * It bit mainnet hardest and testnet barely at all, which made it look like
+     * a mainnet-specific fault: a testnet wallet asks about two coins, a mainnet
+     * wallet about fifteen, so mainnet was far likelier to catch the cold cache.
+     *
+     * The response carries `stale`, and a live response proves itself by
+     * containing at least one logo. Only then is an absent id a real "no
+     * artwork". Otherwise it is a miss, and a miss gets a cooldown and a retry.
+     * This is the same rule the logo attachment in the mailer had to learn: a
+     * cache must never latch a failure.
+     */
+    const answered = Object.keys(byId).length > 0;
+    const trustworthy = answered && !data?.stale;
+
+    let missed = false;
     for (const key of batch) {
       const id = idFor.get(key);
       const url = id ? byId[id] : null;
-      cache.set(key, typeof url === "string" && url ? url : null);
-      failedUntil.delete(key);
+
+      if (typeof url === "string" && url) {
+        cache.set(key, url);
+        failedUntil.delete(key);
+      } else if (trustworthy) {
+        cache.set(key, null); // genuinely has no artwork; stop asking
+        failedUntil.delete(key);
+      } else {
+        missed = true; // transient: leave the cache alone and try again
+        failedUntil.set(key, Date.now() + RETRY_AFTER_MS);
+      }
     }
+    if (missed) scheduleRetry(batch);
   } catch {
     /**
      * The wallet is fully usable without this. Every balance, every value and
      * every action already rendered; only the disc art is missing, and the
      * lettered disc is what was there before this feature existed. So the
      * failure is recorded as a retry cooldown and nothing else — no toast, no
-     * error state, and above all nothing written into `cache`, which would
-     * turn one bad minute into a lettered wallet for the rest of the session.
+     * error state, and above all nothing written into `cache`, which would turn
+     * one bad minute into a lettered wallet for the rest of the session.
      */
     const until = Date.now() + RETRY_AFTER_MS;
     for (const key of batch) failedUntil.set(key, until);
+    scheduleRetry(batch);
   }
 
   notify();
+}
+
+/**
+ * Come back and ask again, rather than waiting for the component to remount.
+ *
+ * Without this, a first attempt that missed left the wallet lettered until the
+ * user reloaded the page — which is exactly what they had to keep doing. The
+ * effect in TokenLogo only re-runs when its symbol changes, so nothing else was
+ * ever going to ask a second time.
+ *
+ * Bounded on purpose: a handful of widening attempts, then it stops. A wallet
+ * left open overnight must not sit in a retry loop against an endpoint that has
+ * already said no, and the lettered disc is a perfectly good permanent outcome.
+ */
+const MAX_RETRIES = 4;
+const retriesFor = new Map(); // SYMBOL -> attempts already made
+
+function scheduleRetry(batch) {
+  const due = batch.filter((key) => (retriesFor.get(key) || 0) < MAX_RETRIES);
+  if (due.length === 0) return;
+
+  // Widening backoff from the cooldown, so a provider that is rate limiting us
+  // gets progressively more room rather than the same pressure every minute.
+  const attempt = Math.min(...due.map((key) => retriesFor.get(key) || 0));
+  const delay = RETRY_AFTER_MS * Math.pow(2, attempt);
+
+  for (const key of due) retriesFor.set(key, (retriesFor.get(key) || 0) + 1);
+
+  setTimeout(() => {
+    for (const key of due) {
+      failedUntil.delete(key);
+      requestLogo(key);
+    }
+  }, delay);
 }
 
 /**

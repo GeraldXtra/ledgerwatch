@@ -47,19 +47,54 @@ export default function CoinChart({ coinId, defaultDays = 7 }) {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
 
+  /**
+   * RETRIES, because one attempt was not enough and "No chart data" was a lie.
+   *
+   * This fetched once. The server builds its chart cache on demand from the
+   * price provider, so the very first request for a coin can come back empty
+   * while that fill is still in flight or after a rate limited attempt — and an
+   * empty `prices` array is a RESOLVED response, not an error, so the old code
+   * treated it as "this coin has no history" and rendered the empty state
+   * permanently. Reopening the modal was the only way to try again, which is
+   * why the chart appeared only after a reload.
+   *
+   * An empty series is therefore retried like a failure, with a widening delay,
+   * and only the last attempt is allowed to conclude there is genuinely nothing.
+   */
   useEffect(() => {
     let active = true;
     setLoading(true);
     setFailed(false);
-    http
-      .get(`/api/coins/${coinId}/chart`, { params: { days } })
-      .then(({ data: res }) => {
+
+    (async () => {
+      for (let attempt = 0; attempt <= 3; attempt++) {
+        try {
+          const { data: res } = await http.get(`/api/coins/${coinId}/chart`, {
+            params: { days },
+          });
+          if (!active) return;
+          const series = (res.prices || []).map(([t, p]) => ({ t, p }));
+          if (series.length >= 2) {
+            setData(series);
+            setFailed(false);
+            setLoading(false);
+            return;
+          }
+        } catch {
+          if (!active) return;
+        }
+
+        if (attempt === 3) {
+          if (!active) return;
+          setFailed(true);
+          setLoading(false);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 2500 * Math.pow(2, attempt)));
         if (!active) return;
-        const series = (res.prices || []).map(([t, p]) => ({ t, p }));
-        setData(series);
-      })
-      .catch(() => active && setFailed(true))
-      .finally(() => active && setLoading(false));
+      }
+    })();
+
     return () => {
       active = false;
     };

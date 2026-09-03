@@ -4,7 +4,9 @@ import QRCode from "qrcode";
 import { Link } from "react-router-dom";
 import { AlertTriangle, Check, Copy, Droplets, ExternalLink, RefreshCw, Wallet } from "lucide-react";
 import { Button, Card, SkeletonLines } from "../../components/ui";
+import TokenLogo from "../../components/TokenLogo";
 import { getProvider, ERC20_ABI, rpcErrorReason } from "../wallet/provider";
+import { coinIdForSymbol, stableUsdPrice } from "../wallet/usdValue";
 import { fetchTxs } from "../wallet/walletApi";
 import { usd, signedUsd } from "./format";
 import { tokensForChain } from "./tradeability";
@@ -135,8 +137,29 @@ export default function LivePortfolioPanel({
     return acc;
   }, [swaps]);
 
+  /**
+   * ONE SYMBOL TABLE, THE SAME ONE THE WALLET USES.
+   *
+   * This used to strip a leading "W" and look the remainder up in a second map:
+   * `symbol.toUpperCase().replace(/^W/, "")`. It worked by coincidence for WETH
+   * and WBTC and broke everywhere else it mattered — WETH.e became "ETH.E" and
+   * matched nothing, and it had no idea that a dollar stablecoin is a dollar, so
+   * a wallet holding USDC read "No price" here even when the feed was healthy.
+   *
+   * `usdValue.js` already owns this mapping for the wallet. Sharing it means a
+   * token cannot be priced on one screen and unpriced on the other, which is the
+   * exact drift the token logo module warns about for the same reason.
+   */
   const priceFor = (symbol) => {
-    const coinId = coinIdBySymbol?.[symbol.toUpperCase().replace(/^W/, "")];
+    // A dollar stablecoin is a dollar. No feed involved, so this holds on a
+    // testnet and while the price provider is unreachable.
+    const stable = stableUsdPrice(symbol);
+    if (stable != null) return stable;
+
+    // The wallet's own table first, then the watch-derived one, which covers
+    // coins the user searched for and added that the static map never listed.
+    const coinId =
+      coinIdForSymbol(symbol) || coinIdBySymbol?.[String(symbol).toUpperCase()] || null;
     const m = coinId ? markets[coinId] : null;
     return m && typeof m.current_price === "number" ? m.current_price : null;
   };
@@ -300,7 +323,17 @@ export default function LivePortfolioPanel({
                 const pl = value != null && cost != null ? value - cost : null;
                 return (
                   <tr key={r.address}>
-                    <td>{r.symbol}</td>
+                    {/* The same disc the wallet draws, from the same shared
+                        cache, so a token cannot appear with artwork on one
+                        screen and without it on the other. An unreadable row
+                        keeps the lettered disc rather than a confident brand
+                        mark sitting next to "could not be read". */}
+                    <td>
+                      <span className="cell-lead">
+                        <TokenLogo symbol={r.symbol} size={22} unknown={r.unknown} />
+                        {r.symbol}
+                      </span>
+                    </td>
                     <td className="ta-right num">
                       {r.unknown ? (
                         <span className="muted caption">could not be read</span>
