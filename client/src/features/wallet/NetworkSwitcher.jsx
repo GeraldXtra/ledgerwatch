@@ -157,25 +157,32 @@ export default function NetworkSwitcher({ chains, chainId, address, onChange }) 
 
       {open && (
         <div className="net-menu">
-          <Group
-            label="Testnets"
-            hint="Free test funds. Nothing here is worth money."
-            chains={testnets}
-            chainId={chainId}
-            onPick={pick}
-            balanceLabel={balanceLabel}
-          />
+          {/* MAINNETS FIRST, AND THEY ARE THE DEFAULT.
+              Testnets used to head this list because they were the only thing
+              enabled. Real networks are now the ordinary case and the reason
+              somebody opens this menu, so they sit at the top where the thumb
+              already is, and the practice networks follow underneath for anyone
+              who wants them. The mainnet group also no longer carries the
+              `danger` styling: a red-tinted group made the normal case look like
+              a warning. */}
           {mainnets.length > 0 && (
             <Group
-              label="Mainnets"
+              label="Networks"
               hint="Real funds. Every transaction is irreversible."
-              danger
               chains={mainnets}
               chainId={chainId}
               onPick={pick}
               balanceLabel={balanceLabel}
             />
           )}
+          <Group
+            label="Test networks"
+            hint="Free test funds. Nothing here is worth money."
+            chains={testnets}
+            chainId={chainId}
+            onPick={pick}
+            balanceLabel={balanceLabel}
+          />
           {/* BOTH HALVES, ALWAYS TOGETHER.
               This said only the first sentence, and a user reasonably concluded
               that because the address is the same everywhere, sending to it

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertCircle, ChevronDown, Wand2 } from "lucide-react";
+import { AlertCircle, ChevronDown } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { Button, Field, Input } from "../components/ui";
@@ -24,7 +24,6 @@ import Turnstile, { turnstileEnabled } from "../components/Turnstile";
  */
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const DEMO = { email: "demo@ledgerwatch.app", password: "demo1234" };
 
 export default function AuthPage() {
   const { login, register, verifyEmail, resendCode } = useAuth();
@@ -290,30 +289,12 @@ export default function AuthPage() {
 
           {!pending && (
             <>
-              {!isRegister && (
-                <div className="gate-demo">
-                  <div className="grow">
-                    <span className="lw-label">Have a look around first</span>
-                    <div className="muted caption num">
-                      {DEMO.email} &middot; {DEMO.password}
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setForm((f) => ({
-                        ...f,
-                        email: DEMO.email,
-                        password: DEMO.password,
-                      }));
-                      setFieldErrors({});
-                      setError("");
-                    }}
-                  >
-                    <Wand2 size={13} /> Fill it in
-                  </Button>
-                </div>
-              )}
+              {/* The shared demo account is no longer offered here. It printed a
+                  working email and password on the public sign-in page with a
+                  button that filled them in, which invited anyone who found the
+                  site to sign in as that account. It is the owner's own account
+                  for testing, not a product feature. The credentials still work
+                  for whoever knows them; they are simply not advertised. */}
 
               <form onSubmit={onSubmit} className="stack-sm" noValidate>
                 {isRegister && (

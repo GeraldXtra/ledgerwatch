@@ -54,6 +54,55 @@ const SYMBOL_TO_COIN_ID = {
   CAKE: "pancakeswap-token",
 };
 
+/**
+ * DOLLAR STABLECOINS ARE WORTH A DOLLAR. WE DO NOT ASK ANYBODY.
+ *
+ * USDC was being priced by looking up "usd-coin" through the price API like any
+ * other token, so whenever that upstream was unavailable the wallet reported
+ * "There is no dollar price for USDC, so it is not counted here" and dropped the
+ * single most commonly held balance in the product out of the total. That is
+ * absurd on its face: the entire purpose of a dollar stablecoin is that one of
+ * them is one dollar, and the invoice side of this app already relies on exactly
+ * that — paymentAddress.service treats 1 USDC as 1 USD when it quotes what a
+ * debtor owes.
+ *
+ * So these are priced locally, and a network outage can no longer empty the
+ * wallet total. It also means testnet USDC prices correctly, where a real quote
+ * would never have existed at all.
+ *
+ * ON DEPEGS, HONESTLY: a stablecoin can trade below a dollar, and during one of
+ * those events this figure is optimistic by whatever the gap is. That is
+ * accepted deliberately. The alternative on show today is not "an accurate
+ * price", it is NO price and a balance excluded from the total, which is wrong
+ * by 100% rather than by a fraction of a percent.
+ *
+ * Keys are uppercase because every lookup here uppercases first. Arbitrum's USDT
+ * reports as USD₮0 and Avalanche's as USDt, which is why the same coin appears
+ * more than once.
+ */
+const STABLE_USD = new Set([
+  "USDC",
+  "USDC.E",
+  "USDT",
+  "USDT0",
+  "USD₮0",
+  "USDBC",
+  "DAI",
+  "BUSD",
+  "TUSD",
+  "USDP",
+  "FDUSD",
+  "PYUSD",
+]);
+
+/**
+ * A dollar stablecoin's price, or null if this symbol is not one.
+ * @returns {number|null}
+ */
+export function stableUsdPrice(symbol) {
+  return STABLE_USD.has(String(symbol || "").trim().toUpperCase()) ? 1 : null;
+}
+
 export function coinIdForSymbol(symbol) {
   return SYMBOL_TO_COIN_ID[String(symbol || "").trim().toUpperCase()] || null;
 }
@@ -66,18 +115,46 @@ export function coinIdForSymbol(symbol) {
  * caller must render that as unpriced rather than as zero.
  */
 export async function fetchUsdPrices(symbols) {
-  const wanted = [...new Set(symbols.map(coinIdForSymbol).filter(Boolean))];
-  if (!wanted.length) return {};
-
-  const { data } = await http.get("/api/prices", { params: { ids: wanted.join(",") } });
-  const byId = data?.prices || {};
-
+  const list = symbols || [];
   const out = {};
-  for (const symbol of symbols) {
-    const id = coinIdForSymbol(symbol);
-    const usd = id && byId[id] ? Number(byId[id].usd) : null;
-    if (Number.isFinite(usd)) out[String(symbol).toUpperCase()] = usd;
+
+  /**
+   * Stablecoins first, and WITHOUT a network call.
+   *
+   * Settled before the request rather than after it so that a failed or slow
+   * upstream cannot take them down with it. This is why the wallet still totals
+   * correctly when the price provider is unreachable.
+   */
+  const needsQuote = [];
+  for (const symbol of list) {
+    const stable = stableUsdPrice(symbol);
+    if (stable != null) out[String(symbol).toUpperCase()] = stable;
+    else needsQuote.push(symbol);
   }
+
+  const wanted = [...new Set(needsQuote.map(coinIdForSymbol).filter(Boolean))];
+  if (!wanted.length) return out;
+
+  try {
+    const { data } = await http.get("/api/prices", { params: { ids: wanted.join(",") } });
+    const byId = data?.prices || {};
+    for (const symbol of needsQuote) {
+      const id = coinIdForSymbol(symbol);
+      const usd = id && byId[id] ? Number(byId[id].usd) : null;
+      if (Number.isFinite(usd)) out[String(symbol).toUpperCase()] = usd;
+    }
+  } catch {
+    /**
+     * The stablecoin prices resolved above are still returned.
+     *
+     * This used to throw, which lost them along with everything else — one dead
+     * request and a wallet holding nothing but USDC reported no value at all.
+     * A partial answer is the correct outcome: `totalUsd` already reports which
+     * symbols it could not price, so the caller shows the caveat rather than a
+     * confidently wrong total.
+     */
+  }
+
   return out;
 }
 

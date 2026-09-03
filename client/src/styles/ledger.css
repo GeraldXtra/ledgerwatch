@@ -1640,7 +1640,14 @@ body {
 }
 
 .ed-hero {
-  padding: 62px 0 54px;
+  /* padding-BLOCK, never the shorthand.
+     This element carries `ed-wrap ed-hero` together, and `.ed-wrap` sets the
+     page gutter with `padding: 0 32px`. A `padding` shorthand here is declared
+     later in the file at equal specificity, so it silently reset that gutter to
+     ZERO and the hero text ran flush to both screen edges — invisible on a wide
+     monitor because the 1180px max-width still left whitespace, and glaring on
+     every phone. Setting only the block axis leaves the gutter alone. */
+  padding-block: 62px 54px;
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
   gap: 60px;
@@ -1882,7 +1889,9 @@ body {
 
 /* Sections, separated by rules rather than by alternating grey bands. */
 .ed-section {
-  padding: 62px 0;
+  /* Block axis only — this is used as `ed-section ed-wrap` and the shorthand
+     would wipe the page gutter. See the note on .ed-hero. */
+  padding-block: 62px;
   border-top: 1px solid var(--border);
 }
 .ed-section.tint {
@@ -2027,7 +2036,8 @@ body {
 }
 
 .ed-foot {
-  padding: 34px 0;
+  /* Used as `ed-wrap ed-foot`, so block axis only or the gutter is lost. */
+  padding-block: 34px;
   border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -2418,7 +2428,10 @@ body {
   .ed-hero {
     grid-template-columns: minmax(0, 1fr);
     gap: 44px;
-    padding: 46px 0 40px;
+    /* Block axis only, for the same reason as the base rule: the shorthand
+       would take the page gutter away again at exactly the widths that need
+       it most. */
+    padding-block: 46px 40px;
   }
   .ed-spread {
     grid-template-columns: minmax(0, 1fr);
@@ -2498,7 +2511,10 @@ body {
     padding: 0 18px;
   }
   .ed-section {
-    padding: 46px 0;
+    /* Block axis only. The shorthand here undid the 18px gutter set two rules
+       above, which is the whole reason the landing copy touched the screen
+       edge on a phone. */
+    padding-block: 46px;
   }
   .ed-strap .hide-sm {
     display: none;
