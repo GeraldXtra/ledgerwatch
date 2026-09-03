@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Coins } from "lucide-react";
 import {
   getLogoUrl,
   markLogoBroken,
@@ -7,36 +8,24 @@ import {
 } from "../features/wallet/tokenLogos";
 
 /**
- * A token disc: the real coin logo when there is one, the lettered disc when
- * there is not.
+ * A token disc: the real coin logo when there is one, a plain coin mark when
+ * there is not yet.
  *
- * WHY THE LETTERS ARE ALWAYS RENDERED
+ * NO LETTERS, BY DESIGN. This used to draw the first three characters of the
+ * symbol as a placeholder, so a row waiting on its artwork read "ETH", "WET",
+ * "USD". The owner asked for that to go: it looked like a substitute for the
+ * logo rather than a moment before it. What stands in now is a neutral coin
+ * glyph on the same disc, which reads as "loading" and never as "this is the
+ * token's mark".
  *
- * The lettered disc is not an error state, it is the floor. It is drawn on the
- * first frame and stays underneath the image for the whole of its life, so the
- * three states this component can be in — URL not known yet, URL loading, URL
- * failed — all look like exactly what the wallet looked like before logos
- * existed. There is never an empty hole waiting for a network round trip and
- * never a broken image glyph, and because the image is laid over the letters
- * rather than swapped with them, the row does not move when one arrives.
- *
- * A chain with no artwork therefore sits next to a chain that has some and
- * looks deliberate rather than broken.
+ * The glyph is the floor. It is drawn on the first frame and stays underneath
+ * the image, so the three states this component can be in — URL not known
+ * yet, URL loading, URL failed — all occupy the identical box. Because the
+ * image is laid over it rather than swapped with it, the row does not move
+ * when the artwork arrives. And because resolved URLs are persisted by the
+ * logo cache, on every visit after the first the artwork is there from the
+ * first frame and the glyph is never seen at all.
  */
-
-/**
- * First three alphanumerics of the symbol, uppercased.
- *
- * This must keep matching `mark()` in features/wallet/WalletPage.jsx. It is four
- * lines and that file's copy is not exported; if either is ever changed, change
- * both, or a wallet mid load will re-letter its discs as the logos resolve.
- */
-function letters(symbol) {
-  return String(symbol || "?")
-    .replace(/[^A-Za-z0-9]/g, "")
-    .slice(0, 3)
-    .toUpperCase();
-}
 
 /**
  * The logo URL for a symbol, re-rendering when the shared cache learns one.
@@ -109,7 +98,11 @@ export default function TokenLogo({
 
   return (
     <span className={cls} style={{ "--tk-size": `${size}px` }} title={title}>
-      <span className="tk-logo-letters">{letters(symbol)}</span>
+      {/* Keeps the `tk-logo-letters` class so the existing stylesheet still
+          fades it out the moment the real artwork decodes. */}
+      <span className="tk-logo-letters" aria-hidden="true">
+        <Coins size={Math.max(12, Math.round(size * 0.5))} />
+      </span>
       {wantsImage ? (
         <img
           className="tk-logo-img"

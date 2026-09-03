@@ -275,7 +275,7 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
           </span>
         </h3>
         <p className="muted small" style={{ margin: "4px 0 0" }}>
-          Testnet funds only. This transfer stays on {chain.name}.
+          This transfer stays on {chain.name}.
         </p>
       </div>
 

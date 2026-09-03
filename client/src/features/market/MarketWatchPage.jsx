@@ -35,7 +35,6 @@ import PortfolioPanel from "./PortfolioPanel";
 import TradingModeToggle from "./TradingModeToggle";
 import LiveSwapModal from "./LiveSwapModal";
 import LivePortfolioPanel from "./LivePortfolioPanel";
-import MainnetBanner from "../wallet/MainnetBanner";
 import { tradeability } from "./tradeability";
 import { toSpendAmount } from "./amount";
 import { fetchChains } from "../wallet/walletApi";
@@ -520,12 +519,6 @@ function MarketWatch() {
       />
 
       <TradingModeToggle mode={mode} onChange={setMode} />
-
-      {/* The banner renders nothing on a testnet, so it is dropped in
-          unconditionally. It belongs here as much as on the wallet: live mode
-          signs real swaps, and the only thing distinguishing practice from
-          irreversible would otherwise be a chain name in a dropdown. */}
-      {mode === "live" && <MainnetBanner chain={liveChain} />}
 
       {error && <p className="error-text">{error}</p>}
 

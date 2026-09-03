@@ -448,9 +448,9 @@ export default function LandingPage() {
                 </span>
                 <h3>The last word is yours</h3>
                 <p>
-                  Test networks sit beside the real ones, and moving to a real one asks you to
-                  confirm it in writing. Whichever you are on, nothing leaves this browser without
-                  the password you type at that moment.
+                  Every network you can reach is a real one, and every transaction on any of them
+                  is signed by you. Nothing leaves this browser without the password you type at
+                  that moment.
                 </p>
               </div>
             </Reveal>

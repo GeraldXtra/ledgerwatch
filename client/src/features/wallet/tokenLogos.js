@@ -28,6 +28,49 @@ const KEY = (symbol) => String(symbol || "").trim().toUpperCase();
 const cache = new Map();
 
 /**
+ * THE CACHE OUTLIVES THE PAGE, the way a wallet's artwork does.
+ *
+ * Resolved URLs are written to localStorage and read back on the next visit,
+ * so a logo that has been seen once is drawn on the first frame of every later
+ * load, on every network, and with no connection at all. That is how MetaMask
+ * behaves and it is what the owner asked for: the mark for USDC is the mark
+ * for USDC, whichever chain is selected and whether or not the price feed is
+ * answering today.
+ *
+ * Only real URLs are persisted. A `null` (no artwork) is a per session answer
+ * that may have been a transient miss, and writing it to disk would turn one
+ * bad minute into a lettered wallet forever, which is the latching failure this
+ * project keeps having to unlearn.
+ */
+const STORE_KEY = "ledgerwatch.logos.v1";
+
+function persistLogos() {
+  try {
+    const out = {};
+    for (const [key, url] of cache) if (typeof url === "string" && url) out[key] = url;
+    localStorage.setItem(STORE_KEY, JSON.stringify(out));
+  } catch {
+    /* private mode or a full store: the session cache still works */
+  }
+}
+
+function loadPersistedLogos() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    if (!obj || typeof obj !== "object") return;
+    for (const [key, url] of Object.entries(obj)) {
+      if (typeof url === "string" && url) cache.set(KEY(key), url);
+    }
+  } catch {
+    /* a corrupt entry is ignored and rewritten on the next success */
+  }
+}
+
+loadPersistedLogos();
+
+/**
  * SYMBOL -> timestamp after which a FAILED lookup may be retried.
  *
  * Kept separate from `cache` deliberately. This project has been bitten before
@@ -87,6 +130,10 @@ export function markLogoBroken(symbol) {
   const key = KEY(symbol);
   if (!key || broken.has(key)) return;
   broken.add(key);
+  // Drop the dead URL from the persisted set too, so the next visit asks for a
+  // fresh one rather than reloading a file that is known to 404.
+  cache.delete(key);
+  persistLogos();
   notify();
 }
 
@@ -160,6 +207,7 @@ async function flush() {
         failedUntil.set(key, Date.now() + RETRY_AFTER_MS);
       }
     }
+    persistLogos();
     if (missed) scheduleRetry(batch);
   } catch {
     /**

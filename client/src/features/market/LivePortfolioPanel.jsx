@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
 import QRCode from "qrcode";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Check, Copy, Droplets, ExternalLink, RefreshCw, Wallet } from "lucide-react";
+import { AlertTriangle, Check, Copy, ExternalLink, RefreshCw, Wallet } from "lucide-react";
 import { Button, Card, SkeletonLines } from "../../components/ui";
 import TokenLogo from "../../components/TokenLogo";
 import { getProvider, ERC20_ABI, rpcErrorReason } from "../wallet/provider";
@@ -281,12 +281,6 @@ export default function LivePortfolioPanel({
               </Button>
             </div>
           </div>
-
-          {chain.testnet && chain.faucet && (
-            <a className="faucet-link" href={chain.faucet} target="_blank" rel="noopener noreferrer">
-              <Droplets size={14} /> Get free {chain.nativeSymbol} from the {chain.name} faucet
-            </a>
-          )}
         </div>
       ) : (
         <>

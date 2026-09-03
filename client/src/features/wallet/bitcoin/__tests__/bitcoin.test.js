@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import * as btc from "@scure/btc-signer";
 
 import {
@@ -12,11 +12,22 @@ import {
 
 import {
   DUST_LIMIT_SATS,
+  RBF_SEQUENCE,
   buildP2wpkhSpend,
   estimateFee,
   estimateVsize,
+  planCancel,
+  planP2wpkhSpend,
   selectUtxos,
+  validateDestination,
 } from "../tx.js";
+
+import {
+  cacheBitcoinAddress,
+  clearBitcoinAddressCache,
+  isPlausibleBitcoinAddress,
+  readCachedBitcoinAddress,
+} from "../addressCache.js";
 
 /**
  * TEST VECTORS ONLY. Never a phrase anybody has used.
@@ -349,5 +360,225 @@ describe("building and signing a spend", () => {
     // input total = amount sent + fee + change. Nothing is created and nothing
     // disappears; anything not claimed by an output is fee, by definition.
     expect(result.inputTotal).toBe(50000 + result.fee + result.change);
+  });
+
+  it("marks every input replaceable under BIP 125", () => {
+    // 0xffffffff is FINAL and cannot be bumped. A stuck payment with that
+    // sequence sits in the mempool for up to two weeks with the coins locked.
+    const result = spend({
+      utxos: [
+        { txid: "aa".repeat(32), vout: 0, value: 30000, confirmed: true },
+        { txid: "bb".repeat(32), vout: 1, value: 30000, confirmed: true },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    const tx = decode(result.hex);
+    expect(tx.inputsLength).toBe(2);
+    for (let i = 0; i < tx.inputsLength; i++) {
+      expect(tx.getInput(i).sequence).toBe(RBF_SEQUENCE);
+    }
+    expect(RBF_SEQUENCE).toBeLessThan(0xfffffffe);
+  });
+});
+
+describe("planning before signing", () => {
+  const network = "testnet";
+  const account = deriveBitcoinAccount(TEST_MNEMONIC, network);
+  const privateKey = deriveBitcoinPrivateKey(TEST_MNEMONIC, network);
+  const destination = "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx";
+  const utxos = [
+    { txid: "aa".repeat(32), vout: 0, value: 120000, confirmed: true },
+    { txid: "bb".repeat(32), vout: 0, value: 80000, confirmed: true },
+    { txid: "cc".repeat(32), vout: 0, value: 5000, confirmed: true },
+  ];
+  const args = {
+    utxos,
+    fromAddress: account.address,
+    toAddress: destination,
+    amountSats: 150000,
+    feeRateSatPerVb: 12,
+    network,
+  };
+
+  it("plans with no key and the signed transaction matches the plan to the satoshi", () => {
+    const plan = planP2wpkhSpend(args);
+    expect(plan.ok).toBe(true);
+    expect(plan.inputs).toHaveLength(2);
+    expect(plan.inputs.map((u) => u.txid)).toEqual(["aa".repeat(32), "bb".repeat(32)]);
+
+    // The review screen shows `plan`; the signer is handed the same inputs.
+    const built = buildP2wpkhSpend({ ...args, forceInputs: plan.inputs, privateKey });
+    expect(built.ok).toBe(true);
+    expect(built.fee).toBe(plan.fee);
+    expect(built.change).toBe(plan.change);
+    expect(built.vsize).toBe(plan.vsize);
+    expect(built.inputs).toEqual(plan.inputs);
+  });
+
+  it("with forced inputs spends exactly those and refuses if they cannot cover", () => {
+    const one = [utxos[2]];
+    const short = planP2wpkhSpend({ ...args, forceInputs: one, amountSats: 4000 });
+    expect(short.ok).toBe(false);
+    expect(short.reason).toMatch(/cannot cover/i);
+
+    const fine = planP2wpkhSpend({ ...args, forceInputs: [utxos[0]], amountSats: 100000 });
+    expect(fine.ok).toBe(true);
+    expect(fine.inputs).toEqual([utxos[0]]);
+  });
+
+  it("validates a destination for the right network before anything else", () => {
+    expect(validateDestination(destination, "testnet").ok).toBe(true);
+    const wrong = validateDestination(BIP84_FIRST_MAINNET_ADDRESS, "testnet");
+    expect(wrong.ok).toBe(false);
+    expect(wrong.reason).toMatch(/not usable on testnet/i);
+    expect(validateDestination("", "testnet").ok).toBe(false);
+    expect(validateDestination("not an address", "mainnet").ok).toBe(false);
+  });
+
+  it("refuses a fee rate below the minimum relay rate rather than assuming one", () => {
+    expect(planP2wpkhSpend({ ...args, feeRateSatPerVb: 0 }).ok).toBe(false);
+    expect(planP2wpkhSpend({ ...args, feeRateSatPerVb: NaN }).ok).toBe(false);
+    expect(planP2wpkhSpend({ ...args, feeRateSatPerVb: 0.5 }).ok).toBe(false);
+  });
+});
+
+describe("replace by fee", () => {
+  const network = "testnet";
+  const account = deriveBitcoinAccount(TEST_MNEMONIC, network);
+  const privateKey = deriveBitcoinPrivateKey(TEST_MNEMONIC, network);
+  const destination = "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx";
+  const inputs = [{ txid: "aa".repeat(32), vout: 0, value: 200000, confirmed: true }];
+  const original = buildP2wpkhSpend({
+    utxos: inputs,
+    fromAddress: account.address,
+    toAddress: destination,
+    amountSats: 50000,
+    feeRateSatPerVb: 5,
+    privateKey,
+    network,
+  });
+  const replacing = { fee: original.fee, feeRateSatPerVb: original.feeRateSatPerVb };
+
+  it("accepts a replacement that pays the old fee plus its own relay cost at a higher rate", () => {
+    const bumped = buildP2wpkhSpend({
+      utxos: inputs,
+      forceInputs: original.inputs,
+      fromAddress: account.address,
+      toAddress: destination,
+      amountSats: 50000,
+      feeRateSatPerVb: 8,
+      privateKey,
+      network,
+      allowUnconfirmed: true,
+      replacing,
+    });
+    expect(bumped.ok).toBe(true);
+    expect(bumped.fee).toBeGreaterThanOrEqual(original.fee + bumped.vsize);
+    // Same coins, same payee, same amount: only the fee and the change moved.
+    expect(decode(bumped.hex).inputsLength).toBe(1);
+    expect(bumped.inputs).toEqual(original.inputs);
+    expect(bumped.txid).not.toBe(original.txid);
+  });
+
+  it("refuses a replacement that does not raise the rate, and says the minimum", () => {
+    const same = planP2wpkhSpend({
+      utxos: inputs,
+      forceInputs: original.inputs,
+      fromAddress: account.address,
+      toAddress: destination,
+      amountSats: 50000,
+      feeRateSatPerVb: 5,
+      network,
+      allowUnconfirmed: true,
+      replacing,
+    });
+    expect(same.ok).toBe(false);
+    expect(same.reason).toMatch(/must pay at least|higher than/i);
+  });
+
+  it("plans a cancellation back to the sender that clears the BIP 125 rules", () => {
+    const cancel = planCancel({
+      inputs: original.inputs,
+      fromAddress: account.address,
+      feeRateSatPerVb: 9,
+      network,
+      replacing,
+    });
+    expect(cancel.ok).toBe(true);
+    expect(cancel.fee).toBeGreaterThanOrEqual(original.fee + cancel.vsize);
+    // Everything except the fee comes home.
+    expect(cancel.amountSats + cancel.fee).toBe(200000);
+
+    const signed = buildP2wpkhSpend({
+      utxos: original.inputs,
+      forceInputs: original.inputs,
+      fromAddress: account.address,
+      toAddress: account.address,
+      amountSats: cancel.amountSats,
+      feeRateSatPerVb: 9,
+      privateKey,
+      network,
+      allowUnconfirmed: true,
+      replacing,
+      allowFeeAboveAmount: true,
+    });
+    expect(signed.ok).toBe(true);
+    expect(decode(signed.hex).outputsLength).toBe(1);
+  });
+});
+
+describe("the cached receive address", () => {
+  const store = new Map();
+  const fakeStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+    key: (i) => Array.from(store.keys())[i] ?? null,
+    get length() {
+      return store.size;
+    },
+  };
+  const mainnet = BIP84_FIRST_MAINNET_ADDRESS;
+  const evmA = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const evmB = "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+
+  beforeEach(() => {
+    store.clear();
+    globalThis.localStorage = fakeStorage;
+  });
+
+  it("does not hand one keystore's address to another keystore", () => {
+    // Wallet A unlocks Bitcoin once. Then the owner imports phrase B into the
+    // same account. The address remembered for A must NOT appear for B: it is
+    // an address B cannot sign for, and a customer paid there loses the coins.
+    cacheBitcoinAddress("user1", "mainnet", mainnet, evmA);
+    expect(readCachedBitcoinAddress("user1", "mainnet", evmA)).toBe(mainnet);
+    expect(readCachedBitcoinAddress("user1", "mainnet", evmB)).toBeNull();
+  });
+
+  it("keeps networks apart", () => {
+    cacheBitcoinAddress("user1", "mainnet", mainnet, evmA);
+    expect(readCachedBitcoinAddress("user1", "testnet", evmA)).toBeNull();
+  });
+
+  it("refuses to cache or return anything that is not an address of that network", () => {
+    cacheBitcoinAddress("user1", "mainnet", "tb1qnotmainnet", evmA);
+    expect(readCachedBitcoinAddress("user1", "mainnet", evmA)).toBeNull();
+    // A value smuggled into the slot by hand is still checked on the way out.
+    store.set(`ledgerwatch.wallet.btc.user1.${evmA.toLowerCase()}.mainnet`, "garbage");
+    expect(readCachedBitcoinAddress("user1", "mainnet", evmA)).toBeNull();
+    expect(isPlausibleBitcoinAddress(mainnet, "mainnet")).toBe(true);
+    expect(isPlausibleBitcoinAddress(mainnet, "testnet")).toBe(false);
+  });
+
+  it("clears every entry for an account, including the old key shape", () => {
+    cacheBitcoinAddress("user1", "mainnet", mainnet, evmA);
+    store.set("ledgerwatch.wallet.btc.user1.mainnet", mainnet); // pre fix format
+    cacheBitcoinAddress("user2", "mainnet", mainnet, evmA);
+    clearBitcoinAddressCache("user1");
+    expect(readCachedBitcoinAddress("user1", "mainnet", evmA)).toBeNull();
+    expect(store.has("ledgerwatch.wallet.btc.user1.mainnet")).toBe(false);
+    // Another account's cache is untouched.
+    expect(readCachedBitcoinAddress("user2", "mainnet", evmA)).toBe(mainnet);
   });
 });

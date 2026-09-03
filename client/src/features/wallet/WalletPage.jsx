@@ -5,9 +5,7 @@ import {
   ArrowUpRight,
   Check,
   Copy,
-  Droplets,
   History,
-  Info,
   Inbox,
   PlusCircle,
   DownloadCloud,
@@ -44,6 +42,8 @@ import Identicon from "./Identicon";
 import TokenLogo from "../../components/TokenLogo";
 import { prefetchLogos } from "./tokenLogos";
 import BitcoinPanel from "./BitcoinPanel";
+import { clearBitcoinAddressCache } from "./bitcoin/addressCache";
+import HoldingDetail from "./HoldingDetail";
 import CreateWalletModal from "./CreateWalletModal";
 import ImportWalletModal from "./ImportWalletModal";
 import AddTokenModal from "./AddTokenModal";
@@ -124,6 +124,8 @@ function WalletInner() {
   const [backedUp, setBackedUp] = useState(() => isBackedUp());
   const [backupDismissed, setBackupDismissed] = useState(false);
   const [addTokenOpen, setAddTokenOpen] = useState(false);
+  // The balance row that was clicked, or null. Opens the coin detail for it.
+  const [detail, setDetail] = useState(null);
   const [tab, setTab] = useState("tokens");
   // Which panel is open in the drawer beneath the wallet, or null for none. The
   // frame above stays a wallet and never turns into a form.
@@ -150,14 +152,6 @@ function WalletInner() {
   const selected = selectableChains.find((c) => c.chainId === chainId) || null;
   const isBitcoin = Boolean(selected && selected.kind === "bitcoin");
   const chain = isBitcoin ? null : selected;
-
-  // A zero native balance means nothing can be sent from this chain at all.
-  // Surfaced persistently rather than at the moment of signing. An UNKNOWN
-  // balance is not a zero one: warning "no gas" when the figure simply could not
-  // be read would be a guess presented as a fact.
-  const noGas = Boolean(
-    balances && balances.some((b) => b.native && !b.unknown && Number(b.amount) === 0)
-  );
 
   /**
    * Net worth on THIS network, plus what could not be counted. The caveat is
@@ -374,6 +368,12 @@ function WalletInner() {
   }, [loadBalances, loadTxs]);
 
   function onWalletReady(addr) {
+    // A new or imported keystore is a different wallet. Any Bitcoin address
+    // remembered for the old one must not be shown for this one: it would be an
+    // address this device can no longer sign for. The cache is also keyed on
+    // the keystore address, so this is belt and braces rather than the only
+    // guard.
+    clearBitcoinAddressCache(user?._id);
     setAddress(addr);
     setLegacy(null);
     setCreateOpen(false);
@@ -436,6 +436,7 @@ function WalletInner() {
       return;
     }
     clearWallet();
+    clearBitcoinAddressCache(user?._id);
     await clearAddress().catch(() => {});
     // Keep context in step, or the "has a wallet but not on this device" card
     // would appear immediately after deliberately removing it.
@@ -551,7 +552,6 @@ function WalletInner() {
   }
 
   // --------------------------------------------------------------- active ----
-  const isMainnet = Boolean(chain && !chain.testnet);
 
   return (
     <>
@@ -605,23 +605,20 @@ function WalletInner() {
             <BitcoinPanel
               userId={user?._id}
               network={selected.chainId === "bitcoin" ? "mainnet" : "testnet"}
+              // The keystore's address is part of the Bitcoin address cache key.
+              // Passing it as a prop means importing a different phrase while
+              // this panel is open re-keys the cache immediately, rather than on
+              // the next mount.
+              evmAddress={address}
             />
           )}
 
           {!isBitcoin && (
             <>
-          {/* The badge has to follow the chain. A hardcoded testnet label sitting
-              above a mainnet balance would be the most dangerous string in the
-              application. */}
-          {isMainnet && (
-            <div className="mm-notice bad">
-              <TriangleAlert size={16} />
-              <span className="grow">
-                <strong>{chain.name} is a real network.</strong> Everything here moves real money
-                and nothing can be reversed by anyone, including us.
-              </span>
-            </div>
-          )}
+          {/* The "this is a real network" notice that sat here is gone at the
+              owner's request. The network pill in the switcher still styles a
+              mainnet differently, and every send still takes a password typed
+              for that transaction, which is the control that actually matters. */}
 
           {/* A wallet whose phrase was never written down is one cleared browser
               away from being unrecoverable. Not stolen, just gone, with the owner
@@ -729,19 +726,6 @@ function WalletInner() {
               </span>
               Collected
             </button>
-            {chain?.faucet && (
-              <a
-                className="mm-action"
-                href={chain.faucet}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <span className="ring">
-                  <Droplets size={19} />
-                </span>
-                Faucet
-              </a>
-            )}
           </div>
 
           {/* ---- tokens and activity ---- */}
@@ -775,7 +759,21 @@ function WalletInner() {
                     const value =
                       !b.unknown && Number.isFinite(price) ? Number(b.amount) * price : null;
                     return (
-                      <div className="mm-row" key={`${b.symbol}-${b.address || "native"}`}>
+                      <div
+                        className="mm-row"
+                        key={`${b.symbol}-${b.address || "native"}`}
+                        role="button"
+                        tabIndex={0}
+                        title={`About ${b.symbol}`}
+                        style={{ cursor: "pointer" }}
+                        onClick={() => setDetail(b)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setDetail(b);
+                          }
+                        }}
+                      >
                         <TokenLogo
                           symbol={b.symbol}
                           native={b.native}
@@ -828,30 +826,6 @@ function WalletInner() {
                   </div>
                 )}
               </div>
-
-              {noGas && (
-                <div className="mm-notice">
-                  <TriangleAlert size={16} />
-                  <span className="grow">
-                    You hold no {chain?.nativeSymbol} on {chain?.name}, so nothing can be sent from
-                    this network at all. Not a transfer, not a sweep, not a trade. Your token
-                    balances are untouched.
-                    {chain?.testnet && chain?.faucet && (
-                      <>
-                        {" "}
-                        <a
-                          href={chain.faucet}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mm-linkish"
-                        >
-                          Get free {chain.nativeSymbol} from the faucet
-                        </a>
-                      </>
-                    )}
-                  </span>
-                </div>
-              )}
 
               <div className="mm-foot">
                 <label className="toggle-inline">
@@ -935,16 +909,17 @@ function WalletInner() {
         </div>
       )}
 
-      {/* Stated rather than implied. Someone holding Bitcoin or Solana will
-          otherwise reasonably assume this wallet covers them. */}
-      <div className="mm-drawer">
-        <p className="settings-note" style={{ marginTop: 18 }}>
-          <Info size={15} />
-          This wallet is <strong>EVM only</strong>, meaning Ethereum and the chains compatible with
-          it. Bitcoin, Solana, Cosmos and TON use different key derivation and signing, so they are
-          not supported here.
-        </p>
-      </div>
+      {/* The "EVM only" note that stood here was false: Bitcoin lives in this
+          same wallet, one entry up in the network menu. */}
+
+      {detail && (
+        <HoldingDetail
+          balance={detail}
+          chain={chain}
+          price={usdPrices[String(detail.symbol).toUpperCase()]}
+          onClose={() => setDetail(null)}
+        />
+      )}
 
       {addTokenOpen && chain && (
         <AddTokenModal

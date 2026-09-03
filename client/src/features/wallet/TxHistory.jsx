@@ -35,7 +35,7 @@ export default function TxHistory({ txs, chain, chains, onReceive }) {
       <EmptyState
         icon={<ArrowUpRight size={20} />}
         title="No transactions yet"
-        hint="Sends you make from this wallet appear here. Fund the wallet from a testnet faucet to get started."
+        hint="Sends you make from this wallet appear here."
         action={
           onReceive && (
             <Button variant="primary" size="sm" onClick={onReceive}>

@@ -106,6 +106,78 @@
   font-feature-settings: "cv01", "ss03", "cv10";
 }
 
+/* =========================================================================
+   DARK  the same ledger after the lamps are lit
+
+   Every colour above is a token, so a dark theme is the same tokens with
+   different values and nothing else: no component knows which theme it is
+   in. The attribute is set on <html> by a tiny inline script in index.html
+   before the first paint (so a dark page never flashes light) and by
+   src/theme.js when the toggle in the masthead is pressed. The system
+   preference decides when nobody has chosen.
+
+   The neutrals stay WARM. A dark theme that goes cold blue grey is the same
+   stock utility palette the light one was rewritten away from. This is ink on
+   dark paper, not a terminal.
+
+   The accents are lifted a step so they carry on a dark ground, and the
+   brass that carried TEXT on paper (gold-700) becomes light so it still reads.
+   White on --accent-600 stays above 7:1.
+   ========================================================================= */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --navy-100: #1e2b3d;
+  --navy-50: #161f2c;
+
+  --accent-800: #a9c3e2;
+  --accent-700: #7d9fc6;
+  --accent-600: #2f4f76; /* PRIMARY. White on this is about 7.5:1 */
+  --accent-500: #3d6190;
+  --accent-400: #5f83ad;
+  --accent-100: var(--navy-100);
+  --accent-50: var(--navy-50);
+  --ring: rgba(125, 159, 198, 0.38);
+
+  --gold-700: #dcc07a; /* carries text on dark paper */
+  --gold-600: #c9a95d;
+  --gold-500: #b08d3f;
+  --gold-400: #8c7136;
+  --gold-200: #3b3322;
+  --gold-100: #2c2719;
+  --gold-50: #232016;
+
+  --canvas: #101317;
+  --canvas-2: #14181d;
+  --card: #181c22;
+  --well: #1d222a;
+  --canvas-deep: #0b0e12;
+  --hero-tint: #151a20;
+  --border: #272d36;
+  --border-hi: #353d49;
+  --ink: #f1efe9;
+  --body: #c8c4bb;
+  --muted: #918c82;
+  --faint: #6b665e;
+
+  --pos-text: #72d0a9;
+  --pos-bg: #14302a;
+  --neg-text: #f08c7e;
+  --neg-bg: #3b201c;
+  --warn-text: #e2c26c;
+  --warn-bg: #342d18;
+  --neutral-text: #b6b1a7;
+  --neutral-bg: #23282f;
+
+  --sh-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --sh-md: 0 2px 4px rgba(0, 0, 0, 0.35), 0 10px 24px rgba(0, 0, 0, 0.4);
+  --sh-lg: 0 4px 10px rgba(0, 0, 0, 0.4), 0 24px 48px rgba(0, 0, 0, 0.5);
+  --sh-hero: 0 28px 68px rgba(0, 0, 0, 0.6), 0 10px 24px rgba(0, 0, 0, 0.4);
+  --sh-pop: 0 0 0 1px var(--border), 0 14px 36px rgba(0, 0, 0, 0.55),
+    0 4px 12px rgba(0, 0, 0, 0.35);
+  --sh-modal: 0 20px 48px rgba(0, 0, 0, 0.65), 0 8px 18px rgba(0, 0, 0, 0.4);
+}
+
 * {
   box-sizing: border-box;
 }

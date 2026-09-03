@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { Check, Copy, Droplets, Network } from "lucide-react";
+import { Check, Copy, Network } from "lucide-react";
 import { Button } from "../../components/ui";
 import NetworkScopeNotice from "./NetworkScopeNotice";
 
@@ -46,8 +46,8 @@ export default function ReceivePanel({ address, chain }) {
               chain, so "here is my address" is ambiguous without it, and a
               sender who picks the wrong network delivers to a balance the
               recipient is not looking at. */}
-          Share this address to receive testnet funds <strong>on {chain?.name}</strong>. Anything
-          sent on a different network will not appear here.
+          Share this address to receive funds <strong>on {chain?.name}</strong>. Anything sent on a
+          different network will not appear here.
         </p>
       </div>
 
@@ -61,12 +61,6 @@ export default function ReceivePanel({ address, chain }) {
       </div>
 
       <NetworkScopeNotice chain={chain} />
-
-      {chain?.faucet && (
-        <a className="faucet-link" href={chain.faucet} target="_blank" rel="noopener noreferrer">
-          <Droplets size={14} /> Get free {chain.nativeSymbol} from the {chain.name} faucet
-        </a>
-      )}
     </div>
   );
 }

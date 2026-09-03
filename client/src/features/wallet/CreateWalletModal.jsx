@@ -43,7 +43,7 @@ export default function CreateWalletModal({ onClose, onDone }) {
   return (
     <Modal label="Create wallet" onClose={onClose}>
       <div className="row space-between">
-        <h3 className="section-title">Create a testnet wallet</h3>
+        <h3 className="section-title">Create a wallet</h3>
         <Button variant="ghost" icon title="Close" onClick={onClose}>
           <X size={15} />
         </Button>

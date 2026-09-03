@@ -219,7 +219,10 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
           </div>
         </div>
         <div className="row wrap">
-          <span className="testnet-badge">Testnet</span>
+          {/* A hardcoded "Testnet" badge sat here, on the panel that shows the
+              address a real payer is given. On a mainnet address it labelled
+              real money as practice. Removed rather than made conditional: the
+              chain name is already the card title. */}
           <span className={`pill ${STATUS_TONE[pa.status] || "pending"}`}>
             <span className="pill-dot" />
             {STATUS_LABEL[pa.status] || pa.status}

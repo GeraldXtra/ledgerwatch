@@ -1,9 +1,9 @@
-import { Droplets, Fuel, TriangleAlert } from "lucide-react";
+import { Fuel, TriangleAlert } from "lucide-react";
 import { formatNative, shortfallMessage } from "./gas";
 
 /**
  * The one place a gas shortfall is explained, shared by send, sweep, approve and
- * swap so the wording and the faucet link never drift between them.
+ * swap so the wording never drifts between them.
  *
  * Renders nothing when the transaction is affordable, so callers can drop it in
  * unconditionally.
@@ -15,19 +15,7 @@ export default function GasNotice({ plan, chain }) {
     return (
       <div className="against-note">
         <TriangleAlert size={15} />
-        <span>
-          {shortfallMessage(plan, chain)}
-          {chain && chain.testnet && chain.faucet && (
-            <>
-              {" "}
-              <a href={chain.faucet} target="_blank" rel="noopener noreferrer" className="linklike">
-                <Droplets size={13} style={{ verticalAlign: "-2px" }} /> Get free {chain.nativeSymbol}{" "}
-                from the {chain.name} faucet
-              </a>
-              .
-            </>
-          )}
-        </span>
+        <span>{shortfallMessage(plan, chain)}</span>
       </div>
     );
   }

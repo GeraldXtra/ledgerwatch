@@ -168,7 +168,7 @@ export default function NetworkSwitcher({ chains, chainId, address, onChange }) 
           {mainnets.length > 0 && (
             <Group
               label="Networks"
-              hint="Real funds. Every transaction is irreversible."
+              hint=""
               chains={mainnets}
               chainId={chainId}
               onPick={pick}
@@ -177,7 +177,7 @@ export default function NetworkSwitcher({ chains, chainId, address, onChange }) 
           )}
           <Group
             label="Test networks"
-            hint="Free test funds. Nothing here is worth money."
+            hint=""
             chains={testnets}
             chainId={chainId}
             onPick={pick}
@@ -210,7 +210,7 @@ function Group({ label, hint, chains, chainId, onPick, balanceLabel, danger }) {
     <div className={`net-group${danger ? " danger" : ""}`}>
       <div className="net-group-head">
         <span className="overline">{label}</span>
-        <span className="muted caption">{hint}</span>
+        {hint ? <span className="muted caption">{hint}</span> : null}
       </div>
       {chains.map((c) => (
         <button

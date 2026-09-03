@@ -54,6 +54,20 @@ const userSchema = new mongoose.Schema({
   // handled at read time in the login path rather than by a migration.
   emailVerified: { type: Boolean, default: false },
   emailVerification: { type: emailVerificationSchema, default: () => ({}) },
+  /**
+   * Password reset codes. The same SHAPE as email verification, kept as a
+   * SEPARATE state on purpose: a reset code must never be able to confirm an
+   * email address, and a verification code must never be able to change a
+   * password. Sharing one field would give one credential two powers.
+   */
+  passwordReset: { type: emailVerificationSchema, default: () => ({}) },
+  /**
+   * Sign in with Google. `googleId` is Google's stable subject id for the
+   * person, which does not change if they rename their account. Sparse, so the
+   * many password accounts with no Google id do not collide on null.
+   */
+  googleId: { type: String, default: null, index: true, sparse: true },
+  authProvider: { type: String, enum: ["password", "google"], default: "password" },
   bankDetails: { type: bankDetailsSchema, default: {} },
   autoSend: { type: autoSendSchema, default: () => ({}) },
   // Public wallet address only — private keys never touch the server (Phase 4).

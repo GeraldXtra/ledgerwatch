@@ -10,6 +10,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { Avatar, Footer, ToastProvider, useToast } from "../components/ui";
 import LogoMark from "../components/LogoMark";
+import ThemeToggle from "../components/ThemeToggle";
 import useSlidingIndicator from "../hooks/useSlidingIndicator";
 import { ensureServiceWorker, onForegroundPush } from "../api/push";
 
@@ -142,6 +143,8 @@ export default function Dashboard() {
               <Avatar name={user.name} src={user.avatarUrl} />
               <span className="hide-sm">{user.name}</span>
             </NavLink>
+
+            <ThemeToggle />
 
             <button
               type="button"

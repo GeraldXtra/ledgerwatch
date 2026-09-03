@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { FlaskConical, Lock, TriangleAlert, Wallet } from "lucide-react";
+import { FlaskConical, Lock, Wallet } from "lucide-react";
 import { Button, useToast } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { hasWallet } from "../wallet/keystore";
@@ -91,13 +91,9 @@ export default function TradingModeToggle({ mode, onChange }) {
         </p>
       )}
 
-      {mode === "live" && (
-        <p className="mode-note danger">
-          <TriangleAlert size={13} />
-          Live mode spends real funds from your wallet. Every trade is quoted, checked and signed by
-          you individually.
-        </p>
-      )}
+      {/* The persistent "live mode spends real funds" note is gone at the
+          owner's request. The toast on switching still says it once, and every
+          trade is still quoted, checked and signed individually. */}
     </div>
   );
 }

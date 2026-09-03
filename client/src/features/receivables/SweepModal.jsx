@@ -36,23 +36,6 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
 
   const dest = destination || mainAddress;
 
-  /**
-   * Does this sweep touch a real network?
-   *
-   * Derived from the addresses and the chain registry, NOT from `rows`, which is
-   * a per address progress map keyed by id and has no chain on it at all. An
-   * earlier version of this called `rows.some(...)` on that object, which would
-   * have thrown the moment the modal opened.
-   */
-  const sweepsRealMoney = useMemo(
-    () =>
-      (addresses || []).some((pa) => {
-        const c = (chains || []).find((x) => x.chainId === pa.chainId);
-        return Boolean(c && !c.testnet);
-      }),
-    [addresses, chains]
-  );
-
   // Plan every selected address up front, so the review screen shows real
   // figures and real gas requirements rather than estimates made after the fact.
   useEffect(() => {
@@ -166,16 +149,6 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
         onClose={onClose}
         disabled={phase === "running"}
       />
-
-      {/* A sweep moves whatever is actually at these addresses. On a real
-          network that is real money, so the badge follows the chain rather than
-          asserting testnet. A sweep can span chains, so ANY mainnet among the
-          selected addresses makes the whole operation a real money one. */}
-      {sweepsRealMoney ? (
-        <span className="mainnet-badge">MAINNET. REAL FUNDS</span>
-      ) : (
-        <span className="testnet-badge">Testnet only</span>
-      )}
 
       {planError ? (
         <p className="error-text" style={{ margin: 0 }}>

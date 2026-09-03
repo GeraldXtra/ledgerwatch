@@ -107,7 +107,7 @@ export default function DebtList({
                       <div className="lead-sub num">
                         {debt.debtorPhone || "no phone on file"}
                         {hasCrypto && (
-                          <span className="crypto-chip" title="Awaiting a USDC payment on a testnet address">
+                          <span className="crypto-chip" title="Awaiting a crypto payment">
                             <Coins size={11} /> USDC
                           </span>
                         )}

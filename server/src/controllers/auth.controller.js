@@ -6,6 +6,11 @@ const publicUser = require("../utils/publicUser");
 const { buildCryptoUpdate } = require("../services/cryptoSettings.service");
 const { verifyTurnstile } = require("../services/turnstile.service");
 const { issueCode, checkCode } = require("../services/emailVerification.service");
+const {
+  issueResetCode,
+  checkResetCode,
+  clearResetState,
+} = require("../services/passwordReset.service");
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SALT_ROUNDS = 10;
@@ -142,6 +147,128 @@ async function login(req, res) {
   } catch (err) {
     console.error("login error:", err.message);
     return res.status(500).json({ error: "Login failed" });
+  }
+}
+
+/**
+ * POST /api/auth/forgot-password
+ * Body: { email, turnstileToken }
+ *
+ * Always answers the same way whether or not the address exists, including
+ * when the real account is inside its resend cooldown. Any difference in the
+ * response would let somebody test which emails have accounts here.
+ */
+async function forgotPassword(req, res) {
+  try {
+    const { email, turnstileToken } = req.body || {};
+    if (!email) return res.status(400).json({ error: "email is required" });
+
+    // This endpoint sends mail to whatever address it is given, so it is gated
+    // by the same human check as registration. Without it, it is an open relay
+    // for mailing anyone repeatedly at the reputation of our own domain.
+    const human = await verifyTurnstile(turnstileToken, req.ip);
+    if (!human.ok) return res.status(400).json({ error: human.error, turnstile: true });
+
+    const generic = {
+      ok: true,
+      message:
+        "If that address has an account, a code is on its way. If you asked a moment ago, give it a minute before asking again.",
+    };
+    const user = await User.findOne({ email: String(email).toLowerCase().trim() });
+    if (!user) return res.status(200).json(generic);
+
+    const sent = await issueResetCode(user);
+    if (!sent.ok && sent.reason === "cooldown") return res.status(200).json(generic);
+    if (!sent.ok) return res.status(200).json({ ...generic, emailSent: false });
+    return res.status(200).json({ ...generic, expiresAt: sent.expiresAt });
+  } catch (err) {
+    console.error("forgot password error:", err.message);
+    return res.status(500).json({ error: "Could not start the password reset" });
+  }
+}
+
+/**
+ * POST /api/auth/resend-reset-code
+ * Body: { email }
+ * The reset screen's "send a new code". Throttled by the service's cooldown;
+ * answers generically for the same reason as forgotPassword.
+ */
+async function resendResetCode(req, res) {
+  try {
+    const { email } = req.body || {};
+    if (!email) return res.status(400).json({ error: "email is required" });
+    const generic = {
+      ok: true,
+      message:
+        "If that address has an account, a new code is on its way. If you asked a moment ago, give it a minute.",
+    };
+    const user = await User.findOne({ email: String(email).toLowerCase().trim() });
+    if (!user) return res.status(200).json(generic);
+    const sent = await issueResetCode(user);
+    return res.status(200).json({ ...generic, emailSent: sent.ok });
+  } catch (err) {
+    console.error("resend reset code error:", err.message);
+    return res.status(500).json({ error: "Could not send a new code" });
+  }
+}
+
+/**
+ * POST /api/auth/reset-password
+ * Body: { email, code, newPassword }
+ *
+ * Checks the code, refuses a password that is the same as the current one,
+ * writes the new hash, spends the code, and issues NO session. The person
+ * signs in with the password they just chose, which is the one proof that the
+ * reset actually worked.
+ */
+async function resetPassword(req, res) {
+  try {
+    const { email, code, newPassword } = req.body || {};
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ error: "email, code and newPassword are required" });
+    }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters" });
+    }
+
+    const user = await User.findOne({ email: String(email).toLowerCase().trim() });
+    // Same shape as a wrong code, so this cannot be used to discover accounts.
+    if (!user) return res.status(400).json({ error: "That code is not correct." });
+
+    const check = await checkResetCode(user, code);
+    if (!check.ok) {
+      return res.status(400).json({
+        error: check.error,
+        expired: Boolean(check.expired),
+        reason: check.reason,
+      });
+    }
+
+    /**
+     * The new password must actually be new. Somebody who reset because they
+     * suspect the old one leaked, then typed the old one again from habit, has
+     * changed nothing and believes they have. Compared against the stored hash
+     * rather than any plain text, because the plain text does not exist here.
+     */
+    const unchanged = await bcrypt.compare(String(newPassword), user.passwordHash);
+    if (unchanged) {
+      return res.status(400).json({
+        error: "That is already your password. Choose a different one.",
+        reason: "same-password",
+      });
+    }
+
+    user.passwordHash = await bcrypt.hash(String(newPassword), SALT_ROUNDS);
+    clearResetState(user);
+    await user.save();
+
+    return res.status(200).json({
+      ok: true,
+      message: "Your password has been changed. Please sign in with it.",
+    });
+  } catch (err) {
+    console.error("reset password error:", err.message);
+    return res.status(500).json({ error: "Could not change the password" });
   }
 }
 
@@ -287,5 +414,13 @@ async function resendVerificationCode(req, res) {
 }
 
 module.exports = {
+  register,
+  login,
+  me,
+  updateMe,
   verifyEmailCode,
-  resendVerificationCode, register, login, me, updateMe };
+  resendVerificationCode,
+  forgotPassword,
+  resendResetCode,
+  resetPassword,
+};

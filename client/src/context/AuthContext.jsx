@@ -74,6 +74,40 @@ export function AuthProvider({ children }) {
     return data;
   }, []);
 
+  // ---- password reset: three calls, and none of them starts a session ----
+  const forgotPassword = useCallback(async (email, turnstileToken) => {
+    const { data } = await http.post("/api/auth/forgot-password", { email, turnstileToken });
+    return data;
+  }, []);
+
+  const resendResetCode = useCallback(async (email) => {
+    const { data } = await http.post("/api/auth/resend-reset-code", { email });
+    return data;
+  }, []);
+
+  const resetPassword = useCallback(async (email, code, newPassword) => {
+    const { data } = await http.post("/api/auth/reset-password", { email, code, newPassword });
+    return data;
+  }, []);
+
+  /**
+   * Sign in with Google ends with a token in the URL fragment. This turns it
+   * into a session by storing it and loading the account behind it. If that
+   * load fails the token is discarded rather than left in storage pointing at
+   * nothing.
+   */
+  const loginWithToken = useCallback(async (token) => {
+    setToken(token);
+    try {
+      const { data } = await http.get("/api/auth/me");
+      setUser(data.user);
+      return data.user;
+    } catch (err) {
+      setToken(null);
+      throw err;
+    }
+  }, []);
+
   const updateProfile = useCallback(async (updates) => {
     const { data } = await http.patch("/api/auth/me", updates);
     setUser(data.user);
@@ -91,6 +125,10 @@ export function AuthProvider({ children }) {
     register,
     verifyEmail,
     resendCode,
+    forgotPassword,
+    resendResetCode,
+    resetPassword,
+    loginWithToken,
     logout,
     updateProfile,
     applyUser,

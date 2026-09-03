@@ -132,10 +132,6 @@ export default function LiveSwapModal({
         </Button>
       </div>
 
-      <span className={chain.testnet ? "testnet-badge" : "mainnet-badge"}>
-        {chain.testnet ? `${chain.name} · testnet` : `${chain.name} · REAL FUNDS`}
-      </span>
-
       {done ? (
         <>
           <div className="crypto-notice">

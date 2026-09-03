@@ -112,9 +112,6 @@ function cryptoBlockHtml(pa, chain, qrCid, hasLogo = false) {
       <td style="background:#f4f7fa;padding:12px 18px;border-bottom:1px solid #e1e7f0;
                  font:600 13px ${FONT};color:#16294a">
         Or pay in ${pa.tokenSymbol}
-        <span style="display:inline-block;margin-left:6px;padding:2px 8px;border-radius:999px;
-                     background:#f4eddc;color:#7a5e1b;font-size:10px;font-weight:700;
-                     letter-spacing:.06em">TESTNET</span>
       </td>
     </tr>
     <tr>

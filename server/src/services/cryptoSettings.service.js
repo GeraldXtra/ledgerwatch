@@ -96,7 +96,7 @@ function buildCryptoUpdate(patch) {
   if (patch.defaultChainId !== undefined) {
     const chainId = Number(patch.defaultChainId);
     if (!getChain(chainId)) {
-      throw httpError(400, "That network is not available. Pick one of the enabled testnets.");
+      throw httpError(400, "That network is not available. Pick one of the enabled networks.");
     }
     updates["crypto.defaultChainId"] = chainId;
   }

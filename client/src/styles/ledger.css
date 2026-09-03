@@ -67,6 +67,12 @@ body {
     var(--canvas);
 }
 
+/* The paper wash above is a near white glow, which on a dark ground reads as
+   a stain. Dark paper is flat. */
+:root[data-theme="dark"] .lw-shell {
+  background: var(--canvas);
+}
+
 .lw-body {
   flex: 1;
   width: 100%;
@@ -3033,6 +3039,9 @@ body {
 
 .mm-mark {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+:root[data-theme="dark"] .mm-mark {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 /* ---- the front page -------------------------------------------------------- */
