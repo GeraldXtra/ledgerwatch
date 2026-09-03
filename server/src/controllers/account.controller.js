@@ -9,7 +9,9 @@ const SimTrade = require("../models/SimTrade");
 const Portfolio = require("../models/Portfolio");
 const PaymentAddress = require("../models/PaymentAddress");
 const WalletTx = require("../models/WalletTx");
+const PushSubscription = require("../models/PushSubscription");
 const publicUser = require("../utils/publicUser");
+const signToken = require("../utils/token");
 
 const SALT_ROUNDS = 10;
 
@@ -88,9 +90,12 @@ async function changePassword(req, res) {
     if (!match) return res.status(400).json({ error: "Current password is incorrect" });
 
     user.passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    // Sign every other session out. The one making this request is reissued
+    // below so the person is not logged out of the device they are using.
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
     await user.save();
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, token: signToken(user._id, user.tokenVersion) });
   } catch (err) {
     console.error("changePassword error:", err.message);
     return res.status(500).json({ error: "Failed to change password" });
@@ -113,6 +118,21 @@ async function wipeUserData(userId) {
     // that no longer existed.
     PaymentAddress.deleteMany({ userId }),
     WalletTx.deleteMany({ userId }),
+    /**
+     * LW-030. Push subscriptions were left behind as orphans, and the wallet
+     * history cursors stayed on the User document. The cursor one was the
+     * bad half: every WalletTx row was deleted but the scan resumed from the
+     * old cursor, so every inbound transfer the wallet had ever received was
+     * permanently invisible, with no way to get it back from the UI. Clearing
+     * the cursors makes the next History open re-walk the lookback, and the
+     * discovered-token list goes with them since it is derived from the same
+     * scan.
+     */
+    PushSubscription.deleteMany({ userId }),
+    User.updateOne(
+      { _id: userId },
+      { $set: { walletHistoryCursors: [], discoveredTokens: [] } }
+    ),
   ]);
 }
 

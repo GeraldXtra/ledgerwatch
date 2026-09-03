@@ -68,6 +68,12 @@ const userSchema = new mongoose.Schema({
    */
   googleId: { type: String, default: null, index: true, sparse: true },
   authProvider: { type: String, enum: ["password", "google"], default: "password" },
+  /**
+   * Bumped on every password change or reset. Sessions carry the version they
+   * were signed with and are refused once it differs, which is how changing a
+   * password signs the other devices out. See utils/token.js.
+   */
+  tokenVersion: { type: Number, default: 0 },
   bankDetails: { type: bankDetailsSchema, default: {} },
   autoSend: { type: autoSendSchema, default: () => ({}) },
   // Public wallet address only — private keys never touch the server (Phase 4).
@@ -195,6 +201,53 @@ const userSchema = new mongoose.Schema({
         address: { type: String, required: true },
         symbol: { type: String, required: true },
         decimals: { type: Number, required: true },
+      },
+    ],
+    default: [],
+  },
+
+  /**
+   * Tokens that ARRIVED at the wallet which nobody told the wallet about.
+   *
+   * The inbound scan reads every ERC-20 Transfer addressed to the wallet, not
+   * only the registry's. A contract it has never seen is looked up on chain
+   * (symbol, name, decimals) and recorded here so the wallet can say "0.5 XYZ
+   * arrived, add it?" rather than silently holding a balance the owner cannot
+   * see. NOTHING IS ADDED AUTOMATICALLY: on a real network most unsolicited
+   * tokens are spam or phishing bait, so the owner decides, and an ignored
+   * token stays ignored.
+   *
+   * `symbol`/`name`/`decimals` are what the contract said about itself and
+   * nothing more; `impersonates` is set when that symbol matches a verified
+   * registry token on the same chain, which is the classic phishing shape.
+   * `address` is stored lowercase for matching; the client checksums it.
+   */
+  discoveredTokens: {
+    type: [
+      {
+        _id: false,
+        chainId: { type: Number, required: true },
+        address: { type: String, required: true },
+        symbol: { type: String, default: null },
+        name: { type: String, default: null },
+        decimals: { type: Number, default: null },
+        // symbol AND decimals were both read from the contract. A token that
+        // could not be read can be ignored but never added: its balance could
+        // not be rendered correctly.
+        readable: { type: Boolean, default: false },
+        // A contract that did not answer is retried on later syncs, a few
+        // times, so a transient RPC failure is never latched as "not a token".
+        lookupAttempts: { type: Number, default: 0 },
+        lastLookupAt: { type: Date, default: null },
+        impersonates: { type: String, default: null },
+        firstSeenAt: { type: Date, default: Date.now },
+        firstSeenBlock: { type: Number, default: null },
+        firstTxHash: { type: String, default: null },
+        firstFrom: { type: String, default: null },
+        // Decimal string, like WalletTx.value. Null when decimals were unreadable.
+        firstAmount: { type: String, default: null },
+        status: { type: String, enum: ["new", "added", "ignored"], default: "new" },
+        decidedAt: { type: Date, default: null },
       },
     ],
     default: [],

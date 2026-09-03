@@ -39,6 +39,8 @@ async function chains(req, res) {
 // Body is a standard JSON-RPC request (single object or a batch array), so the
 // client can point ethers.JsonRpcProvider straight at this URL. The upstream RPC
 // URL (which may carry the Alchemy key) never reaches the browser.
+const MAX_BATCH = 24;
+
 async function rpc(req, res) {
   try {
     const chain = getChain(req.params.chainId);
@@ -47,6 +49,17 @@ async function rpc(req, res) {
     const body = req.body;
     const items = Array.isArray(body) ? body : [body];
     if (items.length === 0) return res.status(400).json({ error: "Empty request" });
+
+    /**
+     * BOUNDED. The only ceiling on a batch used to be the global 3 MB body
+     * limit, which is roughly fifty thousand calls in one request against the
+     * operator's upstream key, from any registered account, occupying a single
+     * concurrency slot. ethers is configured with batchMaxCount 1 on this
+     * client, so anything past a couple of dozen is not a wallet talking.
+     */
+    if (items.length > MAX_BATCH) {
+      return res.status(413).json({ error: `At most ${MAX_BATCH} calls per request` });
+    }
 
     for (const item of items) {
       if (!item || typeof item.method !== "string" || !ALLOWED_METHODS.has(item.method)) {
@@ -234,7 +247,182 @@ async function updateTxStatus(req, res) {
   }
 }
 
+/**
+ * GET /api/wallet/spend  -> { spent24h, currency: "USD", swaps }
+ *
+ * The dollar value of every live swap this account signed in the last twenty
+ * four hours, across every chain. This is the figure the daily trading cap is
+ * measured against. It used to be hardcoded to zero on the client, which made
+ * the daily cap arithmetic reduce to the per trade cap and the daily limit
+ * did not exist. A per session counter in browser memory reset on reload, so
+ * it did not exist either.
+ *
+ * Counted from WalletTx, which every swap writes on broadcast, so a reload, a
+ * second tab or a second device all see the same number. The cash leg is the
+ * input on a buy and the output on a sell; whichever side the dollar is on.
+ */
+const CASH_RE = /^(USDC|USDT|USD₮0|USDT0|USDt)$/i;
+
+async function spend24h(req, res) {
+  try {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const rows = await WalletTx.find({
+      userId: req.user._id,
+      kind: "swap",
+      status: { $ne: "failed" },
+      createdAt: { $gte: since },
+    })
+      .select("side symbol value tokenOutSymbol amountOut")
+      .lean();
+
+    let spent = 0;
+    for (const t of rows) {
+      if (t.side === "buy" && CASH_RE.test(t.symbol || "")) spent += Number(t.value) || 0;
+      else if (t.side === "sell" && CASH_RE.test(t.tokenOutSymbol || "")) spent += Number(t.amountOut) || 0;
+    }
+    return res.json({ spent24h: Number(spent.toFixed(2)), currency: "USD", swaps: rows.length });
+  } catch (err) {
+    console.error("wallet spend24h error:", err.message);
+    return res.status(500).json({ error: "Could not compute recent spend" });
+  }
+}
+
+/**
+ * Discovered tokens for one chain, shaped for the wallet. The address is
+ * stored lowercase for matching; the explorer link is built here so the
+ * client never has to know an explorer URL.
+ */
+function shapeDiscovered(list, chain) {
+  return (list || [])
+    .filter((d) => d.chainId === chain.chainId)
+    .map((d) => ({
+      chainId: d.chainId,
+      address: d.address,
+      symbol: d.symbol,
+      name: d.name,
+      decimals: d.decimals,
+      readable: Boolean(d.readable),
+      lookupAttempts: d.lookupAttempts || 0,
+      impersonates: d.impersonates || null,
+      firstSeenAt: d.firstSeenAt,
+      firstSeenBlock: d.firstSeenBlock,
+      firstTxHash: d.firstTxHash,
+      firstFrom: d.firstFrom,
+      firstAmount: d.firstAmount,
+      status: d.status,
+      explorer: chain.explorer ? `${chain.explorer}/token/${d.address}` : null,
+      explorerTx: chain.explorer && d.firstTxHash ? `${chain.explorer}/tx/${d.firstTxHash}` : null,
+    }))
+    .sort((a, b) => new Date(b.firstSeenAt) - new Date(a.firstSeenAt));
+}
+
+/**
+ * GET /api/wallet/discovered?chainId=  -> { tokens, sync }
+ *
+ * Runs the inbound scan first, so opening the wallet is what notices a token
+ * that arrived while it was closed. The scan never throws; when it fails the
+ * known list is still returned and `sync.failed` says so, because "nothing
+ * new" and "could not look" are different facts and the wallet shows them
+ * differently.
+ */
+async function discovered(req, res) {
+  try {
+    const chain = getChain(req.query.chainId);
+    if (!chain) return res.status(400).json({ error: "Unknown or disabled chain" });
+
+    let sync = { failed: false, skipped: true };
+    if (req.user.walletAddress) {
+      const { syncInboundTransfers } = require("../services/walletHistory.service");
+      sync = await syncInboundTransfers({
+        userId: req.user._id,
+        chainId: chain.chainId,
+        address: req.user.walletAddress,
+      }).catch((err) => {
+        console.error("[wallet] discovery sync failed:", err.message);
+        return { failed: true };
+      });
+    }
+
+    const user = await User.findById(req.user._id).select("discoveredTokens").lean();
+    return res.json({ tokens: shapeDiscovered(user && user.discoveredTokens, chain), sync });
+  } catch (err) {
+    console.error("wallet discovered error:", err.message);
+    return res.status(500).json({ error: "Could not check for new tokens" });
+  }
+}
+
+/**
+ * POST /api/wallet/discovered/:chainId/:address  { action: add | ignore | restore }
+ *
+ * The owner's decision about a token that arrived uninvited. `add` puts it in
+ * the custom token list with the decimals READ FROM ITS CONTRACT, which is the
+ * only reason a token that could not be read is refused here: a balance shown
+ * with guessed decimals is a wrong number, and this wallet does not show
+ * those. `ignore` keeps it off every list until `restore`.
+ */
+async function discoveredAct(req, res) {
+  try {
+    const chain = getChain(req.params.chainId);
+    if (!chain) return res.status(400).json({ error: "Unknown or disabled chain" });
+    const address = String(req.params.address || "").toLowerCase();
+    if (!ADDRESS_RE.test(address)) return res.status(400).json({ error: "Invalid contract address" });
+    const action = req.body && req.body.action;
+    if (!["add", "ignore", "restore"].includes(action)) {
+      return res.status(400).json({ error: "Action must be add, ignore or restore" });
+    }
+
+    const user = await User.findById(req.user._id).select("discoveredTokens customTokens");
+    if (!user) return res.status(404).json({ error: "Account not found" });
+    const entry = (user.discoveredTokens || []).find(
+      (d) => d.chainId === chain.chainId && d.address === address
+    );
+    if (!entry) return res.status(404).json({ error: "That token is not on your discovered list" });
+
+    if (action === "add") {
+      if (!entry.readable || entry.decimals == null || !entry.symbol) {
+        return res.status(409).json({
+          error:
+            "This contract could not be read as a standard token, so its balance cannot be shown correctly. It can be ignored, or added by hand once you have checked it on the explorer.",
+        });
+      }
+      const d = Number(entry.decimals);
+      if (!Number.isInteger(d) || d < 0 || d > 36) {
+        return res.status(409).json({ error: "This token reports decimals outside the supported range" });
+      }
+      const exists = (user.customTokens || []).some(
+        (t) => t.chainId === chain.chainId && String(t.address).toLowerCase() === address
+      );
+      if (!exists) {
+        user.customTokens.push({
+          chainId: chain.chainId,
+          address,
+          symbol: String(entry.symbol).slice(0, 24),
+          decimals: d,
+        });
+      }
+      entry.status = "added";
+    } else if (action === "ignore") {
+      entry.status = "ignored";
+    } else {
+      // restore: back to undecided. If it had been added, the custom token
+      // stays; removing it is the existing remove-token action's job.
+      entry.status = entry.status === "added" ? "added" : "new";
+    }
+    entry.decidedAt = new Date();
+    await user.save();
+
+    return res.json({
+      tokens: shapeDiscovered(user.discoveredTokens, chain),
+      customTokens: user.customTokens,
+    });
+  } catch (err) {
+    console.error("wallet discoveredAct error:", err.message);
+    return res.status(500).json({ error: "Could not update that token" });
+  }
+}
+
 module.exports = {
+  spend24h,
   chains,
   rpc,
   setAddress,
@@ -242,4 +430,6 @@ module.exports = {
   listTxs,
   recordTx,
   updateTxStatus,
+  discovered,
+  discoveredAct,
 };

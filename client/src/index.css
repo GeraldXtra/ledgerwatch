@@ -66,6 +66,31 @@
   --neutral-text: #5d5952;
   --neutral-bg:   #efece5;
 
+  /* Charts. Recharts takes colours as SVG attributes, so every chart used to
+     carry its own hex values and none of them knew the theme had changed: a
+     navy bar on a navy card, grey grid lines on a dark ground. These are the
+     only colours a chart may use. The aging ramp reads as WEIGHT (older money
+     is heavier); on dark paper that means brighter, which is why the dark
+     block reverses it rather than dimming it. */
+  --chart-grid: #eef2f7;
+  --chart-axis: #e5e8ed;
+  --chart-tick: #64748b;
+  --chart-cursor: rgba(22, 41, 74, 0.05);
+  --chart-cursor-line: #d6dbe3;
+  --chart-empty: #e5e8ed;
+  --chart-dot-ring: #ffffff;
+  --chart-navy: #47689f;
+  --chart-pos: #0a6e4c;
+  --chart-ramp-1: #8fa8ce;
+  --chart-ramp-2: #6b8abb;
+  --chart-ramp-3: #47689f;
+  --chart-ramp-4: #2a4a7d;
+  --chart-ramp-5: #16294a;
+  --chart-alloc-3: #8fa0b8;
+  --chart-alloc-4: #c7a98f;
+  --chart-alloc-5: #7fb39b;
+  --chart-alloc-6: #b0899e;
+
   /* Shadows are WARM tinted, not black. Black shadows on warm paper turn it
      grey and are the fastest way to make a warm palette look dirty. Elevation
      changes alpha and spread, never colour. */
@@ -168,6 +193,25 @@
   --warn-bg: #342d18;
   --neutral-text: #b6b1a7;
   --neutral-bg: #23282f;
+
+  --chart-grid: #232a34;
+  --chart-axis: #2e3642;
+  --chart-tick: #8f99a8;
+  --chart-cursor: rgba(169, 195, 226, 0.08);
+  --chart-cursor-line: #3a4452;
+  --chart-empty: #2a313b;
+  --chart-dot-ring: #181c22;
+  --chart-navy: #6f92c4;
+  --chart-pos: #3fae86;
+  --chart-ramp-1: #34506f;
+  --chart-ramp-2: #4a6a91;
+  --chart-ramp-3: #6386b4;
+  --chart-ramp-4: #86a5cf;
+  --chart-ramp-5: #aac3e3;
+  --chart-alloc-3: #9aa9bf;
+  --chart-alloc-4: #cfae92;
+  --chart-alloc-5: #86bca3;
+  --chart-alloc-6: #b995a8;
 
   --sh-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
   --sh-md: 0 2px 4px rgba(0, 0, 0, 0.35), 0 10px 24px rgba(0, 0, 0, 0.4);
@@ -5056,7 +5100,10 @@ input[type="checkbox"] {
 }
 .mode-btn:hover:not(:disabled) { color: var(--ink); }
 .mode-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-.mode-btn.active { background: var(--card); color: var(--ink); box-shadow: var(--sh-1); }
+/* LW-042: this referenced --sh-1, which was defined nowhere, so the whole
+   declaration was invalid and the active toggle sat flat while every other
+   active segmented control in the app had elevation. */
+.mode-btn.active { background: var(--card); color: var(--ink); box-shadow: var(--sh-sm); }
 .mode-btn.active.live { color: var(--warn-text); }
 .mode-note {
   display: flex;

@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { Button, Card, SkeletonLines, ToastProvider } from "../../components/ui";
+import { Button, Card, SkeletonLines, ToastProvider, useToast } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { getProvider, ERC20_ABI, rpcErrorReason } from "./provider";
 import { fetchUsdPrices, totalUsd, coinIdForSymbol, stableUsdPrice } from "./usdValue";
@@ -36,7 +36,10 @@ import {
   updateTxStatus,
   saveAddress,
   saveCustomToken,
+  fetchDiscoveredTokens,
+  actOnDiscoveredToken,
 } from "./walletApi";
+import NewTokensCard from "./NewTokensCard";
 import NetworkSwitcher, { recallChain } from "./NetworkSwitcher";
 import Identicon from "./Identicon";
 import TokenLogo from "../../components/TokenLogo";
@@ -115,6 +118,9 @@ function WalletInner() {
   const { user, applyUser } = useAuth();
   const [chains, setChains] = useState([]);
   const [chainId, setChainId] = useState(null);
+  // The server's mainnet switch. Bitcoin mainnet is offered only when it is on,
+  // so the one flag gates every real money network, EVM and Bitcoin alike.
+  const [enableMainnet, setEnableMainnet] = useState(false);
   const [address, setAddress] = useState(getStoredAddress());
   const [legacy, setLegacy] = useState(() => getLegacyWallet());
   const [claiming, setClaiming] = useState(false);
@@ -144,11 +150,22 @@ function WalletInner() {
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const toast = useToast();
+  // Tokens that arrived which this wallet was never told about, on the
+  // current chain. Null until the first check, and the card renders nothing
+  // for null, so a chain switch never shows the previous chain's list.
+  const [discovered, setDiscovered] = useState(null);
+  const [discoverySyncFailed, setDiscoverySyncFailed] = useState(false);
+  const [discoveredBusy, setDiscoveredBusy] = useState(null);
+  const [discoveredError, setDiscoveredError] = useState("");
 
   // The menu shows the EVM chains the server allows plus Bitcoin. `chains` stays
   // the EVM-only list everywhere else in this file, so no EVM code path can ever
   // be handed a Bitcoin entry by accident.
-  const selectableChains = useMemo(() => [...chains, ...BITCOIN_CHAINS], [chains]);
+  const selectableChains = useMemo(
+    () => [...chains, ...BITCOIN_CHAINS.filter((c) => c.testnet || enableMainnet)],
+    [chains, enableMainnet]
+  );
   const selected = selectableChains.find((c) => c.chainId === chainId) || null;
   const isBitcoin = Boolean(selected && selected.kind === "bitcoin");
   const chain = isBitcoin ? null : selected;
@@ -176,6 +193,7 @@ function WalletInner() {
     setLegacy(getLegacyWallet());
     setBalances(null);
     setTxs([]);
+    setDiscovered(null);
   }, [user?._id]);
 
   // Load the config driven chain list once. The server already filters disabled
@@ -186,6 +204,7 @@ function WalletInner() {
       .then((d) => {
         const usable = (d.chains || []).filter((c) => c.testnet || d.enableMainnet);
         setChains(usable);
+        setEnableMainnet(Boolean(d.enableMainnet));
         // Restore the chain chosen earlier this session rather than snapping
         // back to the first in the list on every reload.
         if (usable.length) setChainId((prev) => prev || recallChain(usable));
@@ -358,14 +377,71 @@ function WalletInner() {
     }
   }, [address, chain]);
 
+  /**
+   * Ask the server whether anything arrived that this wallet does not know
+   * about. The server scans the chain as part of answering, so opening the
+   * wallet is what notices an arrival. A failed check keeps the previous
+   * list and says so; it is not a balance and not a payment, so it never
+   * blocks either.
+   */
+  const loadDiscovered = useCallback(async () => {
+    if (!address || !chain) return;
+    setDiscovered(null);
+    setDiscoveredError("");
+    try {
+      const { tokens, sync } = await fetchDiscoveredTokens(chain.chainId);
+      setDiscovered(tokens);
+      setDiscoverySyncFailed(Boolean(sync && sync.failed));
+    } catch {
+      setDiscovered([]);
+      setDiscoverySyncFailed(true);
+    }
+  }, [address, chain]);
+
   useEffect(() => {
     loadBalances();
     loadTxs();
+    loadDiscovered();
     // Backup state can change on another screen (Settings, wallet backup), so it
     // is re-read whenever this page becomes active rather than trusted from the
     // first render.
     setBackedUp(isBackedUp());
-  }, [loadBalances, loadTxs]);
+  }, [loadBalances, loadTxs, loadDiscovered]);
+
+  /**
+   * The owner's decision on a token that arrived uninvited. Adding uses the
+   * decimals the server read from the contract and refreshes the balances,
+   * which is where the token then appears with an "added" label like any
+   * other imported token.
+   */
+  async function decideDiscovered(t, action) {
+    if (!chain) return;
+    setDiscoveredBusy(t.address);
+    setDiscoveredError("");
+    try {
+      const { tokens, customTokens } = await actOnDiscoveredToken({
+        chainId: chain.chainId,
+        address: t.address,
+        action,
+      });
+      setDiscovered(tokens);
+      if (action === "add") {
+        // Updating the account's token list changes `chainTokens`, which
+        // re-runs the balance load with the new token included.
+        if (applyUser && user) applyUser({ ...user, customTokens });
+        setBalances(null);
+        toast(`${t.symbol} is now shown in your wallet on ${chain.name}.`, { type: "success" });
+      } else if (action === "ignore") {
+        toast(`${t.symbol || "That token"} will stay off your lists.`, { type: "info" });
+      }
+    } catch (err) {
+      setDiscoveredError(
+        err?.response?.data?.error || "Could not update that token just now. Try again."
+      );
+    } finally {
+      setDiscoveredBusy(null);
+    }
+  }
 
   function onWalletReady(addr) {
     // A new or imported keystore is a different wallet. Any Bitcoin address
@@ -410,8 +486,11 @@ function WalletInner() {
       setBalances(null);
       loadBalances();
     } catch (err) {
-      /* the modal stays open; the user can retry or cancel */
-      console.error("add token failed:", err?.response?.data?.error || err.message);
+      // The modal stays open so the user can retry or cancel, and the failure
+      // is SAID (LW-028): it used to go to the console only, so the button
+      // appeared to do nothing and got clicked again.
+      const reason = err?.response?.data?.error || err.message || "Could not add that token.";
+      toast(reason, { type: "error" });
     }
   }
 
@@ -444,6 +523,7 @@ function WalletInner() {
     setAddress(null);
     setBalances(null);
     setTxs([]);
+    setDiscovered(null);
   }
 
   async function copyAddr() {
@@ -728,6 +808,21 @@ function WalletInner() {
             </button>
           </div>
 
+          {/* Tokens that arrived uninvited. The wallet recommends; the owner
+              decides. Renders nothing until the first check has answered. */}
+          {chain && discovered && (
+            <NewTokensCard
+              chain={chain}
+              tokens={discovered}
+              syncFailed={discoverySyncFailed}
+              busyAddress={discoveredBusy}
+              error={discoveredError}
+              onAdd={(t) => decideDiscovered(t, "add")}
+              onIgnore={(t) => decideDiscovered(t, "ignore")}
+              onRestore={(t) => decideDiscovered(t, "restore")}
+            />
+          )}
+
           {/* ---- tokens and activity ---- */}
           <div className="mm-tabs">
             <button
@@ -876,6 +971,12 @@ function WalletInner() {
           >
             {panel === "send" && chain && (
               <SendForm
+                // Remount on a network change. Without this the form's recipient,
+                // amount, selected TOKEN ADDRESS and gas estimate survived a
+                // switch and the send went out on the new chain with the old
+                // chain's token contract. React reuses an instance in place
+                // unless the key changes; the key changes.
+                key={chain.chainId}
                 address={address}
                 chain={chain}
                 onSent={() => {
@@ -892,9 +993,12 @@ function WalletInner() {
                 }}
               />
             )}
-            {panel === "receive" && chain && <ReceivePanel address={address} chain={chain} />}
+            {panel === "receive" && chain && (
+              <ReceivePanel key={chain.chainId} address={address} chain={chain} />
+            )}
             {panel === "collected" && chain && (
               <CollectedPanel
+                key={chain.chainId} // a sweep must never carry one chain's plan onto another
                 chain={chain}
                 mainAddress={address}
                 sweepDestination={user?.crypto?.sweepDestination}

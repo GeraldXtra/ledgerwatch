@@ -16,7 +16,10 @@ const router = express.Router();
 router.use(requireAuth);
 
 router.get("/quote", quote); // preview figures — reserves nothing
-router.post("/allocate", allocate); // reserve an index (atomic)
+// Throttled per user HERE, at the step that actually burns a derivation index.
+// The hourly cap used to count addresses created at the next step, so this
+// endpoint, the one that consumes the index, had no limit at all (LW-014).
+router.post("/allocate", require("../middleware/rateLimit").allocate, allocate); // reserve an index (atomic)
 router.post("/", create); // record the browser-derived address
 router.get("/", list);
 router.patch("/:id/revoke", revoke);

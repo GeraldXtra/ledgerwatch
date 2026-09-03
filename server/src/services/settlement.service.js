@@ -77,7 +77,21 @@ async function onInvoiceSettled({
 
   // The address is only re-quoted for a PARTIAL payment; on full settlement it is
   // closed by the resync helper instead.
-  const activeAddress = fullyPaid ? null : pa || (await PaymentAddress.findOne({ debtId: debt._id, status: "active" }));
+  /**
+   * ALWAYS RE-READ. NEVER TRUST THE COPY THAT WAS PASSED IN.
+   *
+   * The crypto watcher resyncs the address before firing this event, but
+   * resync loads and saves its OWN document. The `pa` the watcher then passes
+   * here is the stale in memory copy from before the resync, and `pa ||` let it
+   * win. So on a 500,000 naira invoice where 200 USDC had just arrived, the
+   * database said 167.65 USDC remaining and the receipt said "send 367.65": the
+   * payer was asked for the full amount again, the exact sum they had just
+   * paid. Reading from the database here costs one query and cannot be stale.
+   */
+  void pa;
+  const activeAddress = fullyPaid
+    ? null
+    : await PaymentAddress.findOne({ debtId: debt._id, status: "active" });
 
   /**
    * RESOLVE THE CHAIN FROM THE ADDRESS, not only from the argument (LW-007).

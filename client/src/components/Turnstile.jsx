@@ -24,6 +24,7 @@ const SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render
 const SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || "";
 
 let scriptPromise = null;
+let scriptEl = null;
 function loadTurnstile() {
   if (window.turnstile) return Promise.resolve(window.turnstile);
   if (scriptPromise) return scriptPromise;
@@ -37,11 +38,44 @@ function loadTurnstile() {
       // Let a later attempt retry rather than caching the failure for the life
       // of the page. A blocked script on one load is often fine on the next.
       scriptPromise = null;
+      scriptEl = null;
       reject(new Error("Could not load the verification widget."));
     };
+    scriptEl = el;
     document.head.appendChild(el);
   });
   return scriptPromise;
+}
+
+/**
+ * THE THIRD PARTY SCRIPT DOES NOT FOLLOW THE USER INTO THE WALLET.
+ *
+ * Turnstile is the only script from another origin this application loads,
+ * and it was loaded once and left resident for the life of the page. On a
+ * single page app that meant the Cloudflare script was still present when the
+ * person navigated from sign in to the wallet and typed their keystore
+ * password. docs/SECURITY.md forbids exactly that.
+ *
+ * Called when the sign in page unmounts. It removes the script element, drops
+ * the global the widget installed, and forgets the load, so the next visit to
+ * sign in fetches it fresh. Code that already ran cannot be un-run, which is
+ * why the Content Security Policy is the real control: it stops any script in
+ * this page from sending anything to any host but the API. This is the second
+ * layer, so the surface is as small as it can be made.
+ */
+export function unloadTurnstile() {
+  try {
+    if (scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl);
+  } catch {
+    /* already gone */
+  }
+  scriptEl = null;
+  scriptPromise = null;
+  try {
+    if (window.turnstile) delete window.turnstile;
+  } catch {
+    window.turnstile = undefined;
+  }
 }
 
 export const turnstileEnabled = Boolean(SITE_KEY);

@@ -285,9 +285,37 @@ async function rpcCall(chain, method, params, opts = {}) {
   }
 }
 
+/**
+ * The typed sibling of rpcCall, for the callers where "null" is ambiguous.
+ *
+ * `rpcCall` collapses "every endpoint failed", "the chain answered with an
+ * error", "unparseable body" and "the chain genuinely answered null" into one
+ * null. For most reads that is fine. For a receipt check it is not: the first
+ * three mean "try again later" and only the last means "this transaction does
+ * not exist". Returning the distinction lets the watcher stop marking payments
+ * as reorged because an endpoint was down.
+ *
+ * @returns {Promise<{ok:true, result:any}|{ok:false, reason:string}>}
+ */
+async function rpcCallTyped(chain, method, params, opts = {}) {
+  const res = await sendToChain(chain, { jsonrpc: "2.0", id: 1, method, params }, opts);
+  if (!res.ok) {
+    const summary = res.attempts.map((a) => `${a.host}: ${a.reason}`).join(" | ");
+    return { ok: false, reason: `all ${res.total} endpoint(s) failed: ${summary}` };
+  }
+  try {
+    const json = JSON.parse(res.text);
+    if (json.error) return { ok: false, reason: `rpc error: ${json.error.message}` };
+    return { ok: true, result: json.result === undefined ? null : json.result };
+  } catch {
+    return { ok: false, reason: `${res.host} returned unparseable JSON` };
+  }
+}
+
 module.exports = {
   sendToChain,
   rpcCall,
+  rpcCallTyped,
   endpointHost,
   describeError,
   DEFAULT_TIMEOUT_MS,

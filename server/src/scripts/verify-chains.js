@@ -255,7 +255,12 @@ async function verifyChain(chain) {
   }
 
   // ---- 4. a filtered log query at the span the watchers use ------------------
-  const span = Number(chain.logSpan) || Number(process.env.PAYMENT_WATCH_BLOCK_SPAN) || 1500;
+  // The SAME rule the watcher applies: the measured span, capped by the env
+  // var if one is set. The two used to differ, so this certified a span the
+  // watcher never ran.
+  const measured = Number(chain.logSpan) || 1500;
+  const cap = Number(process.env.PAYMENT_WATCH_BLOCK_SPAN);
+  const span = Number.isFinite(cap) && cap > 0 ? Math.min(measured, cap) : measured;
 
   /**
    * The log probe runs against EVERY endpoint, not just the first that answers.
@@ -342,6 +347,42 @@ async function verifyChain(chain) {
       .forEach((p) =>
         add(false, `  ${p.host}`, `CANNOT serve eth_call (${p.reason}). Balances, decimals and quotes fail here.`)
       );
+  }
+
+  /**
+   * AT LEAST ONE ENDPOINT MUST SERVE eth_getTransactionReceipt.
+   *
+   * The blind spot that let BNB Chain report 84 of 84 PASS while unable to
+   * settle a single payment: its only endpoint refused this one method, the
+   * watcher read the refusal as a reorg, and nothing here asked. A real
+   * transaction from the head block is used, so a "null" answer would mean the
+   * endpoint is lying about the chain, not that the hash was made up.
+   */
+  {
+    const head = await rpcAny(liveUrls, "eth_getBlockByNumber", ["latest", false]);
+    const sample = head.ok && head.result && Array.isArray(head.result.transactions)
+      ? head.result.transactions[0]
+      : null;
+    if (!sample) {
+      add(false, "eth_getTransactionReceipt", "could not fetch a sample transaction from the head block to probe with");
+    } else {
+      const receiptProbes = await pool(endpoints.filter((e) => e.ok), 2, async (e) => {
+        const r = await rpc(e.url, "eth_getTransactionReceipt", [sample]);
+        const usable = r.ok && r.result && typeof r.result === "object";
+        const host = e.host || new URL(e.url).hostname;
+        return { host, ok: usable, reason: usable ? "" : r.reason || "null receipt for a real transaction" };
+      });
+      const serving = receiptProbes.filter((p) => p.ok);
+      add(
+        serving.length > 0,
+        "eth_getTransactionReceipt",
+        serving.length === receiptProbes.length
+          ? `all ${receiptProbes.length} endpoint(s) serve it`
+          : serving.length > 0
+            ? `${serving.length} of ${receiptProbes.length}: ${receiptProbes.filter((p) => !p.ok).map((p) => `${p.host} ${p.reason}`).join("; ")}`
+            : `NO endpoint serves it. Confirmed payments on this chain can never settle: ${receiptProbes.map((p) => `${p.host} ${p.reason}`).join("; ")}`
+      );
+    }
   }
 
   // A chain whose log queries rest on a single endpoint is a single point of

@@ -23,6 +23,7 @@ const Alert = require("../models/Alert");
 const SimTrade = require("../models/SimTrade");
 const Portfolio = require("../models/Portfolio");
 const WalletTx = require("../models/WalletTx");
+const PaymentAddress = require("../models/PaymentAddress");
 
 const { getPrices } = require("../services/coingecko.service");
 const { createWatch, approveAlert, getPortfolio } = require("../services/market.service");
@@ -153,7 +154,12 @@ async function main() {
     Alert.deleteMany({ userId }),
     SimTrade.deleteMany({ userId }),
     Portfolio.deleteMany({ userId }),
-    WalletTx.deleteMany({ userId }), // locally-recorded testnet tx history
+    WalletTx.deleteMany({ userId }), // locally-recorded tx history
+    // LW-031. This was the one wipe that skipped PaymentAddress, so re-seeding
+    // an account that had issued an address left an `active` row whose debt no
+    // longer existed, and every automation pass selected it, made RPC calls for
+    // it, and could never settle it. The account wipe got this fix first.
+    PaymentAddress.deleteMany({ userId }),
   ]);
 
   // 3) Live prices once (fallback if CoinGecko is down).

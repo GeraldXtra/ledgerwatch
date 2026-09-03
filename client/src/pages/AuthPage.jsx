@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import http from "../api/http";
 import { Button, Field, Input } from "../components/ui";
 import LogoMark from "../components/LogoMark";
-import Turnstile, { turnstileEnabled } from "../components/Turnstile";
+import Turnstile, { turnstileEnabled, unloadTurnstile } from "../components/Turnstile";
 
 /** Google's four colour mark, inline so nothing is fetched from anywhere. */
 function GoogleMark() {
@@ -81,6 +81,10 @@ export default function AuthPage() {
   const isRegister = mode === "register";
   const isForgot = mode === "forgot";
   const isReset = mode === "reset";
+
+  // Leaving this page removes the Cloudflare widget script from the document,
+  // so it is not resident when the wallet asks for a keystore password.
+  useEffect(() => () => unloadTurnstile(), []);
 
   /**
    * Sign in with Google lands back here with the outcome in the URL FRAGMENT:

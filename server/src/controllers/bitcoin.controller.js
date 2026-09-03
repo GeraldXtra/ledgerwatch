@@ -24,14 +24,13 @@ const bitcoin = require("../services/bitcoin.service");
  * ---------------------------------------------------------------------------
  * A NOTE ON MAINNET
  * ---------------------------------------------------------------------------
- * CLAUDE.md hard rule 6 and SECURITY.md section 5 gate EVM mainnet behind
- * ENABLE_MAINNET, which is false. That gate covers `config/chains.js` and does not
- * reach here, and Bitcoin mainnet was explicitly asked for, so `network=mainnet`
- * works. Read that decision with open eyes: the four read routes only ever touch a
- * public block explorer and are harmless, but `POST /broadcast` relays real money
- * on the real network. Whoever owns the mainnet gate should decide whether
- * broadcast belongs behind it, and this comment exists so that decision is made
- * on purpose rather than discovered later.
+ * The same ENABLE_MAINNET switch that gates the EVM mainnets in
+ * `config/chains.js` gates Bitcoin mainnet BROADCAST here: `POST /broadcast`
+ * with `network=mainnet` answers 403 unless it is `true`. The four read routes
+ * only ever touch a public block explorer and are allowed on either network,
+ * because reading a balance moves nothing. An earlier version of this comment
+ * said the gate did not reach here; it does now, so that one setting is the
+ * whole answer to "can this deployment move real money".
  */
 
 /**
@@ -117,6 +116,23 @@ async function txs(req, res) {
  */
 async function broadcast(req, res) {
   const { rawTx, network } = req.body || {};
+
+  /**
+   * THE SAME GATE AS EVERY OTHER REAL MONEY NETWORK. The note above asked
+   * whoever owns the mainnet switch to decide whether this relay belongs behind
+   * it. It does: a server with mainnet switched off must not relay a real
+   * Bitcoin transaction for anyone, demo account included. The client hides
+   * the mainnet entry when the flag is off; this is the half that holds when
+   * the client is bypassed.
+   */
+  if (network === "mainnet" && String(process.env.ENABLE_MAINNET).toLowerCase() !== "true") {
+    return res.status(403).json({
+      error: "Bitcoin mainnet is switched off on this server. Set ENABLE_MAINNET=true to relay real transactions.",
+      kind: "invalid",
+      resendUnsafe: false,
+    });
+  }
+
   const outcome = await bitcoin.broadcast(rawTx, network);
 
   if (!outcome.ok) {

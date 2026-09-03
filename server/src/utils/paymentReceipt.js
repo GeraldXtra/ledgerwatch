@@ -76,12 +76,18 @@ function buildPaymentReceiptEmail({
       : `Thank you. There is ${ngn(remainingNgn)} naira still outstanding on this invoice.`,
   ];
 
-  if (!fullyPaid && stillOwedToken > 0 && payToAddress) {
+  /**
+   * The network is REQUIRED here, exactly as it is in the HTML half below.
+   * This branch used to make it optional, so the plain text alternative, which
+   * is what WhatsApp and many mail clients show, could print an address with no
+   * network at all. The same address exists on every EVM chain and a payment
+   * sent on the wrong one is gone. No network, no address.
+   */
+  if (!fullyPaid && stillOwedToken > 0 && payToAddress && payToChainName) {
     lines.push(
       "",
       `To settle the rest in ${stillOwedSymbol}, send ${Number(stillOwedToken).toFixed(2)} ${stillOwedSymbol}` +
-        (payToChainName ? ` on ${payToChainName}` : "") +
-        ` to:`,
+        ` on ${payToChainName}, and only on ${payToChainName}, to:`,
       payToAddress,
       "",
       "That amount already reflects what you have just paid, and is held at the rate you were originally quoted."

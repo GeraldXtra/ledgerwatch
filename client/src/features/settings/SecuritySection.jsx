@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ShieldCheck } from "lucide-react";
-import http from "../../api/http";
+import http, { setToken } from "../../api/http";
 import { Button, Field, Input, useToast } from "../../components/ui";
 
 export default function SecuritySection() {
@@ -25,12 +25,16 @@ export default function SecuritySection() {
     }
     setBusy(true);
     try {
-      await http.post("/api/auth/me/password", {
+      const { data } = await http.post("/api/auth/me/password", {
         currentPassword: pw.currentPassword,
         newPassword: pw.newPassword,
       });
+      // Changing the password signs every OTHER device out. The server reissues
+      // a session for this one so the person is not logged out of the screen
+      // they are standing on.
+      if (data && data.token) setToken(data.token);
       setPw({ currentPassword: "", newPassword: "", confirm: "" });
-      toast("Password changed.", { type: "success" });
+      toast("Password changed. Other devices have been signed out.", { type: "success" });
     } catch (err) {
       setError(err?.response?.data?.error || "Could not change your password");
     } finally {

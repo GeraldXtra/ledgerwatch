@@ -1,8 +1,20 @@
 const Anthropic = require("@anthropic-ai/sdk");
 const { formatDate } = require("../utils/reminderTemplate");
 
-// Model per PROJECT_KICKOFF section 5.
 const MODEL = "claude-sonnet-4-6";
+
+/**
+ * LW-010. The SDK's defaults are a ten minute timeout and two retries, which
+ * is a worst case near half an hour on ONE call. That call is awaited inside
+ * the reminder pass, which runs under the automation loop's overlap guard, so
+ * for that whole window every tick logged "previous pass still running" and
+ * returned: no reminders, no price pass, and no payment watch. A confirmed
+ * payment sat undetected while the log looked like healthy overlap protection.
+ *
+ * A reminder draft that has not come back in thirty seconds is not coming
+ * back, and the template fallback is right there.
+ */
+const REQUEST_TIMEOUT_MS = Number(process.env.ANTHROPIC_TIMEOUT_MS || 30000);
 
 let client = null;
 
@@ -13,7 +25,11 @@ let client = null;
 function getClient() {
   if (!process.env.ANTHROPIC_API_KEY) return null;
   if (!client) {
-    client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    client = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY,
+      timeout: REQUEST_TIMEOUT_MS,
+      maxRetries: 1,
+    });
   }
   return client;
 }

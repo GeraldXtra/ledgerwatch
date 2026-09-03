@@ -30,9 +30,22 @@ const paymentSchema = new mongoose.Schema({
    */
   txHash: { type: String, default: undefined },
 
+  /**
+   * EVERY transfer this payment settled, not just the one whose hash is the
+   * idempotency key above. A crypto settlement can credit several confirmed
+   * transfers at once, keyed on the newest. If the address document's
+   * `settledPaymentId` stamps then failed to save, the older transfers looked
+   * unsettled and were credited AGAIN on the next new transfer. With every
+   * hash recorded here, the watcher can find the payment for any of them and
+   * repair the stamps instead of paying twice.
+   */
+  txHashes: { type: [String], default: undefined },
+
   createdAt: { type: Date, default: Date.now },
 });
 
 paymentSchema.index({ txHash: 1 }, { unique: true, sparse: true });
+// Lookup for the repair path: "which payment settled this transfer?"
+paymentSchema.index({ txHashes: 1 }, { sparse: true });
 
 module.exports = mongoose.model("Payment", paymentSchema);

@@ -25,9 +25,35 @@ async function subscribe(req, res) {
     if (!sub || !sub.endpoint || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) {
       return res.status(400).json({ error: "Invalid subscription" });
     }
-    // Upsert by endpoint so re-subscribing the same browser never duplicates.
+
+    /**
+     * THE ENDPOINT IS A URL THIS SERVER WILL POST TO. It was stored verbatim,
+     * so a subscription could point at an internal address and /api/push/test
+     * became a yes/no oracle for scanning the network behind this server. Only
+     * https, and only the hosts the three browser push services actually use.
+     */
+    let host;
+    try {
+      const u = new URL(String(sub.endpoint));
+      if (u.protocol !== "https:") throw new Error("not https");
+      host = u.hostname.toLowerCase();
+    } catch {
+      return res.status(400).json({ error: "Invalid subscription endpoint" });
+    }
+    const allowedHost =
+      host === "fcm.googleapis.com" ||
+      host === "updates.push.services.mozilla.com" ||
+      host.endsWith(".notify.windows.com") ||
+      host.endsWith(".push.apple.com");
+    if (!allowedHost) {
+      return res.status(400).json({ error: "That push service is not supported" });
+    }
+
+    // Upsert by endpoint AND owner. Filtering on the endpoint alone let one
+    // account submit another's endpoint and take the row over, cutting the
+    // victim off from every payment alert (LW-009).
     await PushSubscription.findOneAndUpdate(
-      { endpoint: sub.endpoint },
+      { endpoint: sub.endpoint, userId: req.user._id },
       {
         userId: req.user._id,
         endpoint: sub.endpoint,

@@ -3,11 +3,11 @@ const Payment = require("../models/Payment");
 const Debt = require("../models/Debt");
 const User = require("../models/User");
 const { getChain } = require("../config/chains");
-const { GRACE_DAYS, GRACE_SCAN_MINUTES } = require("../config/derivation");
+const { GRACE_DAYS, GRACE_SCAN_MINUTES, blockTimeFor } = require("../config/derivation");
 const { confirmationsFor } = require("./cryptoSettings.service");
 const { recomputeDebtStatus } = require("./receivables.service");
 const { notifyUser } = require("./push.service");
-const { rpcCall } = require("./rpc.service");
+const { rpcCall, rpcCallTyped } = require("./rpc.service");
 const { onInvoiceSettled } = require("./settlement.service");
 const { resyncActivePaymentAddress } = require("./paymentAddress.service");
 
@@ -98,12 +98,34 @@ const MAX_BLOCK_SPAN = Number(process.env.PAYMENT_WATCH_BLOCK_SPAN || 1500);
  * cursor never advancing, and a watcher that looks healthy while detecting
  * nothing.
  */
+/**
+ * The registry's MEASURED span wins. The env var is a ceiling, not a value.
+ *
+ * It used to be the other way round: any PAYMENT_WATCH_BLOCK_SPAN in the
+ * environment replaced every chain's measured figure, and the deployed .env
+ * carried 1500, so the 2000 measured for each mainnet was dead in production
+ * and the verifier certified a number the watcher never used. A global env
+ * value can only ever be right for one chain; it stays as a safety cap for an
+ * operator who needs to pull every chain down at once.
+ */
 function spanFor(chain) {
-  const override = Number(process.env.PAYMENT_WATCH_BLOCK_SPAN);
-  if (Number.isFinite(override) && override > 0) return override;
   const measured = Number(chain && chain.logSpan);
-  return Number.isFinite(measured) && measured > 0 ? measured : MAX_BLOCK_SPAN;
+  const base = Number.isFinite(measured) && measured > 0 ? measured : MAX_BLOCK_SPAN;
+  const cap = Number(process.env.PAYMENT_WATCH_BLOCK_SPAN);
+  return Number.isFinite(cap) && cap > 0 ? Math.min(base, cap) : base;
 }
+
+/**
+ * How many spans one pass may walk for one address. The active pass used to
+ * advance exactly one span per pass, so on Arbitrum (1,200 blocks produced per
+ * five minute pass against a 2,000 block span) an hour's outage took four
+ * hours to catch up, and past 72 hours an address expired with its payment
+ * block never read. Six spans is 12,000 blocks: fifty minutes of Arbitrum per
+ * pass, a ten fold margin, at six log queries per address instead of one.
+ */
+const MAX_WINDOWS_PER_PASS = 6;
+/** Blocks re-read either side of a window boundary so a reorg at the edge is not missed. */
+const GRACE_OVERLAP_BLOCKS = 50;
 
 // ---- shared caches / single-flight -----------------------------------------
 const blockCache = new Map(); // chainId -> { block, ts }
@@ -177,13 +199,19 @@ async function tokenDecimals(chain, contract, fallback) {
       { to: contract, data: "0x313ce567" },
       "latest",
     ]);
-    let decimals = fallback;
     if (result && result !== "0x") {
       const parsed = parseInt(result, 16);
-      if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 36) decimals = parsed;
+      if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 36) {
+        // Only a SUCCESSFUL read is cached (LW-027). This used to cache the
+        // fallback too, so one transient RPC failure latched the config value
+        // for the life of the process: the exact pattern the logo cache was
+        // fixed for. The fallback is still returned for this call, it is just
+        // asked again next time.
+        decimalsCache.set(key, parsed);
+        return parsed;
+      }
     }
-    decimalsCache.set(key, decimals);
-    return decimals;
+    return fallback;
   });
 }
 
@@ -298,6 +326,50 @@ async function settleIfDue(pa, chain) {
    * so this is correct for rows written before this fix as well as after it, and
    * needs no migration.
    */
+  /**
+   * REPAIR BEFORE COUNTING.
+   *
+   * `settledPaymentId` is stamped in memory after Payment.create and persisted
+   * only by the pa.save() further down. If that save failed (a version clash on
+   * the observed array, a Mongo blip, a restart between the two lines), the
+   * Payment existed but the stamps did not. On the next pass the same hash hit
+   * the unique index and returned safely, but the moment a NEW transfer
+   * arrived the key was new, the create succeeded, and every earlier transfer
+   * was credited a second time. Real money invented in the ledger.
+   *
+   * So every pass first asks, for each confirmed transfer with no stamp,
+   * whether a Payment already settled it, and stamps it if so. The stuck state
+   * heals itself and the double credit cannot happen.
+   */
+  const unstamped = confirmed.filter((o) => !o.settledPaymentId && o.txHash);
+  if (unstamped.length) {
+    const hashes = unstamped.map((o) => o.txHash);
+    const prior = await Payment.find({
+      $or: [{ txHashes: { $in: hashes } }, { txHash: { $in: hashes } }],
+    })
+      .select("_id txHash txHashes")
+      .lean();
+    if (prior.length) {
+      let repaired = 0;
+      for (const o of unstamped) {
+        const p = prior.find(
+          (x) => x.txHash === o.txHash || (Array.isArray(x.txHashes) && x.txHashes.includes(o.txHash))
+        );
+        if (p) {
+          o.settledPaymentId = p._id;
+          repaired++;
+        }
+      }
+      if (repaired) {
+        await pa.save();
+        console.warn(
+          `[paymentWatch] repaired ${repaired} settlement stamp(s) on ${pa.address}: ` +
+            `a previous save had not persisted them. No money was credited twice.`
+        );
+      }
+    }
+  }
+
   const settledUsdc = confirmed
     .filter((o) => o.settledPaymentId)
     .reduce((s, o) => s + unitsToAmount(o.value, pa.tokenDecimals), 0);
@@ -433,9 +505,27 @@ async function settleIfDue(pa, chain) {
       method: "crypto",
       note: noteParts.join(", "),
       txHash: keyTx.txHash,
+      // Every hash this payment covers, so a lost stamp can be repaired. See
+      // the repair block at the top of this function.
+      txHashes: unsettled.map((o) => o.txHash),
     });
   } catch (err) {
-    if (err && err.code === 11000) return null; // already settled, nothing to do
+    if (err && err.code === 11000) {
+      // Already settled by an earlier pass whose stamps did not persist. Find
+      // it and stamp now, rather than leaving the address stuck for another
+      // pass. The repair block above will also catch this, but doing it here
+      // keeps this pass's own state consistent.
+      const existing = await Payment.findOne({ txHash: keyTx.txHash }).select("_id").lean();
+      if (existing) {
+        unsettled.forEach((o) => {
+          o.settledPaymentId = existing._id;
+        });
+        await pa.save().catch((e) =>
+          console.error(`[paymentWatch] could not persist repaired stamps on ${pa.address}: ${e.message}`)
+        );
+      }
+      return null;
+    }
     throw err;
   }
 
@@ -453,7 +543,21 @@ async function settleIfDue(pa, chain) {
   if (fullyPaid) {
     pa.status = "paid";
   }
-  await pa.save();
+  try {
+    await pa.save();
+  } catch (err) {
+    /**
+     * The Payment is durable; these stamps are not. Say so LOUDLY with the
+     * hashes, because this is the exact state that used to become a double
+     * credit. The repair block at the top of this function fixes it on the
+     * next pass; this log is so a human can see that it happened.
+     */
+    console.error(
+      `[paymentWatch] SETTLED payment ${payment._id} for ${pa.address} but could not save the ` +
+        `address stamps (${err.message}). Hashes ${unsettled.map((o) => o.txHash).join(",")}. ` +
+        `They will be repaired on the next pass; nothing will be credited twice.`
+    );
+  }
 
   /**
    * Restate what is still needed, at the SAME snapshot rate, through the shared
@@ -515,8 +619,9 @@ async function scanAddress(pa, chain, head, mode = "active") {
 
   pa.lastWatchedAt = new Date();
 
-  let from;
-  let to;
+  const span = spanFor(chain);
+  /** Block ranges to read, oldest first. Each is at most one span wide. */
+  const windows = [];
   let scanning = true;
 
   if (mode === "grace") {
@@ -533,31 +638,75 @@ async function scanAddress(pa, chain, head, mode = "active") {
     if (!hasNewMoney && !awaitingConfirmation) return { found: 0, newlyConfirmed: 0, late: 0 };
 
     if (hasNewMoney) {
-      from = Math.max(0, head - spanFor(chain));
-      to = head;
+      /**
+       * LW-026. The grace scan read exactly ONE span back from the head, once
+       * an hour. One span is five hours of Ethereum but six minutes of Arbitrum
+       * and eleven of BNB, so on six of seven mainnets most of every hour was
+       * never read: the balance check saw the money, the log scan could not
+       * find the transfer, and the invoice sat with unidentifiedBalanceAt set
+       * and never settled. The window now covers the whole interval since the
+       * last grace scan in CHAIN TIME, read in as many spans as that takes.
+       */
+      const blockTime = blockTimeFor(chain.chainId);
+      const needed = Math.ceil((GRACE_SCAN_MINUTES * 60) / blockTime) + GRACE_OVERLAP_BLOCKS;
+      const covered = Math.min(needed, span * MAX_WINDOWS_PER_PASS);
+      const oldest = Math.max(0, head - covered + 1);
+      for (let lo = oldest; lo <= head; lo += span) {
+        windows.push({ from: lo, to: Math.min(head, lo + span - 1) });
+      }
     } else {
       scanning = false; // only advancing confirmations
     }
   } else {
-    const span = spanFor(chain);
-    from = pa.lastScannedBlock > 0 ? pa.lastScannedBlock + 1 : Math.max(0, head - span);
-    to = Math.min(head, from + span);
+    /**
+     * Catch up in several spans when behind, not one. See MAX_WINDOWS_PER_PASS.
+     * Each window is committed as it succeeds, so a failure part way leaves the
+     * cursor at the last block actually read rather than at zero progress.
+     */
+    let from = pa.lastScannedBlock > 0 ? pa.lastScannedBlock + 1 : Math.max(0, head - span);
+    for (let n = 0; n < MAX_WINDOWS_PER_PASS && from <= head; n++) {
+      const to = Math.min(head, from + span);
+      windows.push({ from, to });
+      from = to + 1;
+    }
   }
 
   let found = 0;
   let late = 0;
 
-  if (scanning && to >= from) {
-    const logs = await rpc(chain, "eth_getLogs", [
-      {
-        address: pa.tokenContract, // ONLY the configured stablecoin
-        topics: [TRANSFER_TOPIC, null, addressTopic(pa.address)],
-        fromBlock: "0x" + from.toString(16),
-        toBlock: "0x" + to.toString(16),
-      },
-    ]);
+  if (scanning) {
+    for (const w of windows) {
+      const logs = await rpc(chain, "eth_getLogs", [
+        {
+          address: pa.tokenContract, // ONLY the configured stablecoin
+          topics: [TRANSFER_TOPIC, null, addressTopic(pa.address)],
+          fromBlock: "0x" + w.from.toString(16),
+          toBlock: "0x" + w.to.toString(16),
+        },
+      ]);
 
-    if (Array.isArray(logs)) {
+      if (!Array.isArray(logs)) {
+        /**
+         * The query failed. This is the branch that hid a total detection outage:
+         * `rpc()` never throws, so a rejected query is indistinguishable from a
+         * quiet chain unless it is said out loud. An active address whose
+         * high-water mark is still 0 after being watched has NEVER succeeded, and
+         * that is a broken watcher rather than an absence of payments.
+         *
+         * Stop here. Windows after this one are not read, and the cursor stays
+         * at the last window that succeeded, so nothing is skipped.
+         */
+        if (mode === "active" && pa.lastScannedBlock === 0) {
+          console.error(
+            `[paymentWatch] ${chain.name}: log query FAILED for ${pa.address} over ` +
+              `${w.to - w.from + 1} blocks and has never succeeded. Payments to this address ` +
+              `cannot be detected. If this repeats, the log span for this chain (${span}) ` +
+              `is likely above this RPC's range limit.`
+          );
+        }
+        break;
+      }
+
       for (const log of logs) {
         if (pa.observed.some((o) => o.txHash === log.transactionHash)) continue;
         // Arrived after the address stopped accepting payment. It still settles —
@@ -576,26 +725,11 @@ async function scanAddress(pa, chain, head, mode = "active") {
         found++;
         if (isLate) late++;
       }
-      // Only the forward-walking pass may advance the high-water mark. The grace
-      // scan reads a recent window that says nothing about the blocks in between,
-      // so moving it here would skip everything it never looked at.
-      if (mode === "active") pa.lastScannedBlock = to;
-    } else {
-      /**
-       * The query failed. This is the branch that hid a total detection outage:
-       * `rpc()` never throws, so a rejected query is indistinguishable from a
-       * quiet chain unless it is said out loud. An active address whose
-       * high-water mark is still 0 after being watched has NEVER succeeded, and
-       * that is a broken watcher rather than an absence of payments.
-       */
-      if (mode === "active" && pa.lastScannedBlock === 0) {
-        console.error(
-          `[paymentWatch] ${chain.name}: log query FAILED for ${pa.address} over ` +
-            `${to - from + 1} blocks and has never succeeded. Payments to this address ` +
-            `cannot be detected. If this repeats, the log span for this chain (${spanFor(chain)}) ` +
-            `is likely above this RPC's range limit.`
-        );
-      }
+      // Only the forward-walking pass may advance the high-water mark, and only
+      // to the end of a window it actually read. The grace scan reads a recent
+      // window that says nothing about the blocks in between, so moving it
+      // there would skip everything it never looked at.
+      if (mode === "active") pa.lastScannedBlock = w.to;
     }
   }
 
@@ -625,8 +759,27 @@ async function scanAddress(pa, chain, head, mode = "active") {
       // Before trusting it, check the transaction still exists. If it vanished in
       // a reorg the receipt is gone, and settling on it would credit money that
       // never arrived.
-      const receipt = await rpc(chain, "eth_getTransactionReceipt", [o.txHash]);
-      if (receipt === null) {
+      /**
+       * LW-006. `rpcCall` returned null for four different conditions, and this
+       * line read every one of them as "the transaction vanished in a reorg" and
+       * stamped the transfer `orphaned`, which nothing ever revisits. On BNB
+       * Chain, whose only endpoint refuses eth_getTransactionReceipt outright,
+       * that meant EVERY payment was written off as a reorg that never happened.
+       *
+       * The typed call separates the two. A transport failure leaves the row
+       * `detected` and tries again next pass. Only a successful call that
+       * returns null, which is the chain itself saying "no such transaction",
+       * is a reorg.
+       */
+      const r = await rpcCallTyped(chain, "eth_getTransactionReceipt", [o.txHash]);
+      if (!r.ok) {
+        console.warn(
+          `[paymentWatch] could not check ${o.txHash} on ${chain.name} (${r.reason}); ` +
+            `leaving it detected and retrying next pass`
+        );
+        continue;
+      }
+      if (r.result === null) {
         o.status = "orphaned";
         console.error(`[paymentWatch] reorg: ${o.txHash} vanished before confirming`);
         continue;

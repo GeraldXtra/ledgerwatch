@@ -76,7 +76,9 @@ async function quoteTier({ provider, quoter, tokenIn, tokenOut, amountIn, fee })
  */
 export async function quoteAllTiers({ provider, chain, tokenIn, tokenOut, amountIn }) {
   if (!chain?.dex?.quoter) return [];
-  const tiers = chain.dex.feeTiers || [500, 3000, 10000];
+  // The fallback exists for a registry entry that forgot the key; it must list
+  // every tier the registry does, or that chain quietly quotes worse prices.
+  const tiers = chain.dex.feeTiers || [100, 500, 3000, 10000];
 
   const quotes = await Promise.all(
     tiers.map((fee) =>

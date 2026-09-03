@@ -144,25 +144,28 @@ export default function CoinChart({ coinId, defaultDays = 7 }) {
                   <stop offset="100%" stopColor={stroke} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid stroke="#EEF2F7" vertical={false} />
+              {/* Theme tokens, not hex: SVG presentation attributes accept
+                  var(), and the line colour above already relied on that. A
+                  literal grey grid was invisible on the dark ground. */}
+              <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
               <XAxis
                 dataKey="t"
                 tickFormatter={fmtX}
-                tick={{ fill: "#64748B", fontSize: 11 }}
+                tick={{ fill: "var(--chart-tick)", fontSize: 11 }}
                 tickLine={false}
-                axisLine={{ stroke: "#E5E8ED" }}
+                axisLine={{ stroke: "var(--chart-axis)" }}
                 minTickGap={48}
               />
               <YAxis
                 orientation="right"
-                tick={{ fill: "#64748B", fontSize: 11 }}
+                tick={{ fill: "var(--chart-tick)", fontSize: 11 }}
                 tickLine={false}
                 axisLine={false}
                 width={64}
                 domain={["auto", "auto"]}
                 tickFormatter={(v) => fmtPrice(v)}
               />
-              <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#D6DBE3" }} />
+              <Tooltip content={<ChartTooltip />} cursor={{ stroke: "var(--chart-cursor-line)" }} />
               <Area
                 type="monotone"
                 dataKey="p"
@@ -171,7 +174,7 @@ export default function CoinChart({ coinId, defaultDays = 7 }) {
                 fill={`url(#${gradId})`}
                 dot={false}
                 isAnimationActive={!reduceMotion()}
-                activeDot={{ r: 3, fill: stroke, stroke: "#fff", strokeWidth: 2 }}
+                activeDot={{ r: 3, fill: stroke, stroke: "var(--chart-dot-ring)", strokeWidth: 2 }}
               />
             </AreaChart>
           </ResponsiveContainer>

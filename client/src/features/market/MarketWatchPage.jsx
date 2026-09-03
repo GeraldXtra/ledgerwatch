@@ -37,7 +37,7 @@ import LiveSwapModal from "./LiveSwapModal";
 import LivePortfolioPanel from "./LivePortfolioPanel";
 import { tradeability } from "./tradeability";
 import { toSpendAmount } from "./amount";
-import { fetchChains } from "../wallet/walletApi";
+import { fetchChains, fetchSpend24h } from "../wallet/walletApi";
 import { getStoredAddress } from "../wallet/keystore";
 import { coinIdForSymbol, stableUsdPrice } from "../wallet/usdValue";
 import { recallChain } from "../wallet/NetworkSwitcher";
@@ -45,7 +45,16 @@ import { recallChain } from "../wallet/NetworkSwitcher";
 const STARTING_CASH = 1000000;
 
 // Deterministic tint per coinId for the allocation bar segments.
-const ALLOC_COLORS = ["var(--accent-500)", "var(--accent-400)", "#8FA0B8", "#C7A98F", "#7FB39B", "#B0899E"];
+// Every allocation colour is a theme token; the last four used to be literal
+// hex and did not follow the dark theme.
+const ALLOC_COLORS = [
+  "var(--accent-500)",
+  "var(--accent-400)",
+  "var(--chart-alloc-3)",
+  "var(--chart-alloc-4)",
+  "var(--chart-alloc-5)",
+  "var(--chart-alloc-6)",
+];
 
 function MarketWatch() {
   const { user } = useAuth();
@@ -61,6 +70,10 @@ function MarketWatch() {
   const [liveRows, setLiveRows] = useState(null);
   // Bumped after a swap lands so the live panel rereads the chain.
   const [liveReloadKey, setLiveReloadKey] = useState(0);
+  // Dollars already spent on live swaps in the last 24h, read from the server
+  // each time a swap is opened. `null` means "not known", and the swap modal
+  // waits for a number rather than assuming zero.
+  const [spentToday, setSpentToday] = useState(null);
   // Which dollar funds live trades. Remembered per browser.
   const [cashSymbol, setCashSymbol] = useState(() => {
     try {
@@ -219,6 +232,29 @@ function MarketWatch() {
       })
       .catch(() => setLiveChains([]));
   }, [mode, liveChains.length]);
+
+  /**
+   * THE DAILY CAP IS MEASURED, NOT ASSUMED.
+   *
+   * `spentToday` was hardcoded to 0 here, so `spentToday + spend > perDay`
+   * reduced to `spend > perDay`, which the per trade cap already blocks. The
+   * daily limit therefore never fired: a runaway loop could execute unlimited
+   * trades at the per trade cap. The figure now comes from the server, which
+   * sums every swap this account signed in the last twenty four hours across
+   * every chain, and is refetched every time a swap is opened.
+   */
+  useEffect(() => {
+    if (!liveSwap) return undefined;
+    let alive = true;
+    setSpentToday(null);
+    fetchSpend24h()
+      .then((n) => alive && setSpentToday(n))
+      // Unknown is not zero. Leave it null; the modal refuses to plan without it.
+      .catch(() => alive && setSpentToday(null));
+    return () => {
+      alive = false;
+    };
+  }, [liveSwap]);
 
   /**
    * A foreground push has already been toasted by the shell-level bridge, so this
@@ -837,7 +873,7 @@ function MarketWatch() {
           cash={liveSwap.cash}
           amountDisplay={liveSwap.amountDisplay}
           alertId={liveSwap.alertId}
-          spentToday={0}
+          spentToday={spentToday}
           limitOverrides={user?.tradingLimits}
           onClose={() => setLiveSwap(null)}
           onDone={() => {

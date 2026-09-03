@@ -13,6 +13,7 @@ const {
   recomputeDebtStatus,
 } = require("../services/receivables.service");
 const { resyncActivePaymentAddress } = require("../services/paymentAddress.service");
+const { onInvoiceSettled } = require("../services/settlement.service");
 
 // ---- validation helpers ---------------------------------------------------
 
@@ -158,6 +159,7 @@ async function update(req, res) {
       "note",
       "reminderCadenceDays",
     ];
+    const amountBefore = Number(debt.amount) || 0;
     for (const key of editable) {
       if (req.body[key] === undefined) continue;
       if (key === "amount") debt.amount = Number(req.body.amount);
@@ -166,9 +168,41 @@ async function update(req, res) {
         debt.reminderCadenceDays = Number(req.body.reminderCadenceDays);
       else debt[key] = req.body[key];
     }
+    const amountChanged = Number(debt.amount) !== amountBefore;
+
+    /**
+     * LW-017. Every other path that changes what an invoice owes calls
+     * `resyncActivePaymentAddress`; this one did not. So the crypto address
+     * kept the quote it was issued with: raise a 100,000 naira invoice to
+     * 10,000,000 and the address still asked for 62.50 USDC, and a payer who
+     * sent exactly that settled the whole thing. The reminder and the QR both
+     * read that stale figure. Recompute and resync whenever the amount moves.
+     *
+     * An amount below what has already been paid is refused rather than
+     * silently producing a negative balance and a "paid" status that no
+     * payment justified.
+     */
+    if (amountChanged) {
+      const agg = await Payment.aggregate([
+        { $match: { debtId: debt._id } },
+        { $group: { _id: null, paid: { $sum: "$amount" } } },
+      ]);
+      const paid = agg.length ? agg[0].paid : 0;
+      if (Number(debt.amount) < paid) {
+        return res.status(400).json({
+          error: `The amount cannot be lower than the ${paid.toLocaleString("en-NG")} already recorded as paid on this invoice.`,
+        });
+      }
+    }
 
     debt.history.push({ event: "edited" });
     await debt.save();
+
+    if (amountChanged) {
+      const totalPaid = await recomputeDebtStatus(debt); // status may flip either way
+      await resyncActivePaymentAddress(debt._id); // the crypto quote follows the new balance
+      return res.json({ debt: withDerived(debt, totalPaid) });
+    }
 
     return res.json({ debt });
   } catch (err) {
@@ -211,20 +245,63 @@ async function markPaid(req, res) {
     const paidSoFar = agg.length ? agg[0].paid : 0;
     const balance = (debt.amount || 0) - paidSoFar;
 
+    let payment = null;
     if (balance > 0) {
-      await Payment.create({
-        debtId: debt._id,
-        userId: req.user._id,
-        amount: balance,
-        method: "other",
-        note: "Marked as fully paid",
-      });
+      /**
+       * IDEMPOTENT, AT THE DATABASE.
+       *
+       * Two of these requests at once, a double tap on a phone or a retry
+       * after a timeout, both read the same `paidSoFar`, both computed the same
+       * balance, and both inserted: a 500,000 naira invoice credited a million.
+       * Manual payments carry no transaction hash, so the unique index on
+       * txHash never protected them.
+       *
+       * A deterministic key in that same field does. It is built from the debt
+       * and the balance at the moment of marking, so two concurrent attempts
+       * collide and the second is told the first already did it, while a
+       * legitimate later mark after the balance has changed gets a new key.
+       */
+      const key = `markpaid:${debt._id}:${Math.round(paidSoFar * 100)}`;
+      try {
+        payment = await Payment.create({
+          debtId: debt._id,
+          userId: req.user._id,
+          amount: balance,
+          method: "other",
+          note: "Marked as fully paid",
+          txHash: key,
+        });
+      } catch (err) {
+        if (err && err.code === 11000) {
+          const totalPaidNow = await recomputeDebtStatus(debt);
+          return res.status(200).json({ debt: withDerived(debt, totalPaidNow), alreadyDone: true });
+        }
+        throw err;
+      }
     }
 
     const totalPaid = await recomputeDebtStatus(debt); // sets paid + cancels reminders
     // Force-settling closes any active crypto address, so it stops quoting an
     // amount for an invoice that is already paid.
     await resyncActivePaymentAddress(debt._id);
+
+    /**
+     * THE SAME EVENT THE OTHER TWO WRITERS FIRE. This was the third writer of
+     * Payment and the only one that fired nothing (LW-015), so force settling
+     * an invoice sent no receipt and no push. One event, three consequences,
+     * from every path that closes an invoice.
+     */
+    if (payment) {
+      await onInvoiceSettled({
+        debt,
+        payment,
+        method: "bank",
+        creditNgn: balance,
+        totalPaid,
+        fullyPaid: true,
+      }).catch(() => {});
+    }
+
     return res.json({ debt: withDerived(debt, totalPaid) });
   } catch (err) {
     console.error("markPaid error:", err.message);

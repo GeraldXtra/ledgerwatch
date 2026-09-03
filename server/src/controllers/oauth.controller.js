@@ -97,7 +97,7 @@ async function googleCallback(req, res) {
     }
 
     if (!user) return bounce(res, { error: "Could not sign you in. Please try again." });
-    return bounce(res, { token: signToken(user._id) });
+    return bounce(res, { token: signToken(user._id, user.tokenVersion) });
   } catch (err) {
     console.error("google callback error:", err.message);
     return bounce(res, { error: "Google sign in failed. Please try again." });

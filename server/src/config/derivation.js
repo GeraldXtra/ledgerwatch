@@ -41,22 +41,51 @@ function pathForIndex(index) {
  *
  * The mainnet numbers below are chosen for roughly a minute or more of chain
  * time, which is the window ordinary reorgs live in, and more where a chain's
- * finality is weaker in practice:
+ * finality is weaker in practice. BLOCK TIMES ARE MEASURED (20,000 block
+ * timestamp deltas, 2026-09-02), because three of the original depths were
+ * derived from block times that no longer exist: BNB was written as 3s and is
+ * 0.45s, so "20 blocks = 60s" was in fact nine seconds on a 21 validator chain.
  *
- *   Ethereum    12 x 12s   = 144s   L1 reorgs are shallow but slow to settle
- *   Base        30 x 2s    = 60s    OP stack, follows L1 for hard finality
- *   OP Mainnet  30 x 2s    = 60s    same
- *   Arbitrum   240 x 0.25s = 60s    blocks are very fast, so the count is high
- *   Polygon    100 x 2s    = 200s   deliberately the most conservative: Polygon
- *                                   has had materially deeper reorgs than its
- *                                   block time suggests
- *   BNB         20 x 3s    = 60s
- *   Avalanche   30 x 2s    = 60s    fast finality, but not free
+ *   Ethereum    12 x 12.04s  = 144s   L1 reorgs are shallow but slow to settle
+ *   Base        30 x 2.00s   = 60s    OP stack, follows L1 for hard finality
+ *   OP Mainnet  30 x 2.00s   = 60s    same
+ *   Arbitrum   240 x 0.25s   = 60s    blocks are very fast, so the count is high
+ *   Polygon    135 x 1.50s   = 202s   deliberately the most conservative: Polygon
+ *                                     has had materially deeper reorgs than its
+ *                                     block time suggests
+ *   BNB        135 x 0.45s   = 61s    was 20, which was nine seconds
+ *   Avalanche   60 x 1.05s   = 63s    fast finality, but not free
  *
  * Every one is overridable per chain with CONFIRMATIONS_<chainId>. Raise them
  * rather than lower them: waiting longer costs a customer some patience, and
  * settling too early costs the owner the invoice.
  */
+
+/**
+ * Seconds per block, measured. Used to turn "minutes of chain time" into a
+ * block count for the grace scan, and nowhere else. A chain missing here gets
+ * a conservative two seconds, which over scans rather than under scans.
+ */
+const BLOCK_TIME_SEC = {
+  11155111: 12, // Ethereum Sepolia
+  84532: 2, // Base Sepolia
+  421614: 0.25, // Arbitrum Sepolia
+  11155420: 2, // Optimism Sepolia
+  80002: 2, // Polygon Amoy
+  1: 12.04,
+  8453: 2.0,
+  10: 2.0,
+  42161: 0.25,
+  137: 1.5,
+  56: 0.45,
+  43114: 1.05,
+};
+
+function blockTimeFor(chainId) {
+  const t = BLOCK_TIME_SEC[Number(chainId)];
+  return Number.isFinite(t) && t > 0 ? t : 2;
+}
+
 const DEFAULT_CONFIRMATIONS = {
   // ---- testnets: free money, shallow depths are fine ----
   11155111: 12, // Ethereum Sepolia
@@ -70,9 +99,9 @@ const DEFAULT_CONFIRMATIONS = {
   8453: 30, // Base
   10: 30, // OP Mainnet
   42161: 240, // Arbitrum One
-  137: 100, // Polygon
-  56: 20, // BNB Chain
-  43114: 30, // Avalanche C-Chain
+  137: 135, // Polygon: ~202s at the measured 1.5s block
+  56: 135, // BNB Chain: ~61s at the measured 0.45s block. Was 20, which was 9s.
+  43114: 60, // Avalanche C-Chain: ~63s at the measured 1.05s block
 };
 
 function confirmationsFor(chainId) {
@@ -97,6 +126,7 @@ const MAX_ADDRESSES_PER_HOUR = Number(process.env.MAX_PAYMENT_ADDRESSES_PER_HOUR
 module.exports = {
   RECEIVABLES_BRANCH,
   pathForIndex,
+  blockTimeFor,
   confirmationsFor,
   DEFAULT_CONFIRMATIONS,
   GRACE_DAYS,

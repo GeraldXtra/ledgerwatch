@@ -13,7 +13,9 @@ const { confirmationsFor: baseConfirmationsFor } = require("../config/derivation
 // A confirmation depth below this is not a preference, it is a way to lose money
 // to a reorg. Above 200 the address would effectively never settle.
 const MIN_CONFIRMATIONS = 1;
-const MAX_CONFIRMATIONS = 200;
+// Above Arbitrum's default of 240. At 200 an owner who "confirmed" the default
+// by typing it was silently clamped to a shallower depth than the default.
+const MAX_CONFIRMATIONS = 300;
 const MIN_EXPIRY_HOURS = 1;
 const MAX_EXPIRY_HOURS = 720; // 30 days
 

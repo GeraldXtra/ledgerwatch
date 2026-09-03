@@ -39,16 +39,16 @@ export default function OwedCollectedChart({ data }) {
     <div className="rec-chart-frame">
       <ResponsiveContainer width="100%" height={260}>
         <BarChart data={data} margin={{ top: 10, right: 8, bottom: 0, left: 8 }} barGap={3} barCategoryGap="14%">
-          <CartesianGrid stroke="#F1F4F9" vertical={false} />
-          <XAxis dataKey="month" tick={{ fill: "#64748B", fontSize: 11.5 }} tickLine={false} axisLine={{ stroke: "#E1E7F0" }} />
-          <YAxis tick={{ fill: "#64748B", fontSize: 11.5 }} tickLine={false} axisLine={false} width={66} tickFormatter={(v) => compactNgn(v, "").trim()} />
-          <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(22,41,74,0.05)" }} />
+          <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
+          <XAxis dataKey="month" tick={{ fill: "var(--chart-tick)", fontSize: 11.5 }} tickLine={false} axisLine={{ stroke: "var(--chart-axis)" }} />
+          <YAxis tick={{ fill: "var(--chart-tick)", fontSize: 11.5 }} tickLine={false} axisLine={false} width={66} tickFormatter={(v) => compactNgn(v, "").trim()} />
+          <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--chart-cursor)" }} />
           <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
           {/* Invoiced is navy (money owed, neutral); collected is the semantic
-              green (money actually received). The old gold Invoiced bar was the
-              mustard tone, gone, with the palette itself left untouched. */}
-          <Bar dataKey="owed" name="Invoiced" fill="#47689F" radius={[6, 6, 0, 0]} maxBarSize={44} minPointSize={2} isAnimationActive={!reduceMotion()} />
-          <Bar dataKey="collected" name="Collected" fill="#0A6E4C" radius={[6, 6, 0, 0]} maxBarSize={44} minPointSize={2} isAnimationActive={!reduceMotion()} />
+              green (money actually received). Both are theme tokens so the
+              dark theme gets a navy that shows on a dark card. */}
+          <Bar dataKey="owed" name="Invoiced" fill="var(--chart-navy)" radius={[6, 6, 0, 0]} maxBarSize={44} minPointSize={2} isAnimationActive={!reduceMotion()} />
+          <Bar dataKey="collected" name="Collected" fill="var(--chart-pos)" radius={[6, 6, 0, 0]} maxBarSize={44} minPointSize={2} isAnimationActive={!reduceMotion()} />
         </BarChart>
       </ResponsiveContainer>
     </div>

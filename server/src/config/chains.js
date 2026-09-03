@@ -166,9 +166,16 @@ const UNIV3_CANONICAL = {
   type: "uniswap-v3",
   router: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
   quoter: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
-  // Standard V3 tiers. Every one is quoted and the best is chosen; testnet
-  // pools in particular are priced very differently tier to tier.
-  feeTiers: [500, 3000, 10000],
+  /**
+   * ALL FOUR V3 tiers, including 0.01%. Every one is quoted and the best is
+   * chosen. The 100 tier was missing from every entry, and on mainnet it is
+   * where a great deal of stablecoin and wrapped native liquidity actually
+   * sits: measured at the $100 cap, buying WBNB with USDT on BNB routed 0.92%
+   * worse without it, and 4.96% worse at $1000. A tier with no pool reverts
+   * and is excluded, so listing it costs one extra quote and can never pick a
+   * worse price.
+   */
+  feeTiers: [100, 500, 3000, 10000],
 };
 
 function buildRegistry() {
@@ -263,7 +270,7 @@ function rawRegistry(mainnetEnabled) {
         type: "uniswap-v3",
         router: "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4",
         quoter: "0xC5290058841028F1614F3A6F0F5816cAd0df5E27",
-        feeTiers: [500, 3000, 10000],
+        feeTiers: [100, 500, 3000, 10000],
       },
     },
     {
@@ -432,6 +439,9 @@ function rawRegistry(mainnetEnabled) {
       dex: {
         type: "uniswap-v3",
         router: "0x2626664c2603336E57B271c5C0b26F421741e481",
+        // Base was the one entry with no feeTiers key at all, silently relying
+        // on the client's fallback. Stated here like every other chain.
+        feeTiers: [100, 500, 3000, 10000],
         quoter: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
       },
     },
@@ -545,13 +555,25 @@ function rawRegistry(mainnetEnabled) {
       key: "bnb",
       name: "BNB Chain",
       chainId: 56,
-      // MEASURED, AND THE WEAKEST LINK IN THE REGISTRY. This is the ONLY BNB
-      // endpoint found that will serve a filtered log query at all: every
-      // bsc-dataseed answers "limit exceeded" to any range, blockrazor caps at
-      // 25 blocks, drpc rate-limits and ankr now demands a key. Payment
-      // watching on BNB therefore has no redundancy — if this host goes down,
-      // detection on this chain stops until it returns.
-      rpcs: rpcList("https://bsc-rpc.publicnode.com"),
+      /**
+       * TWO ENDPOINTS, EACH FOR WHAT IT CAN DO.
+       *
+       * publicnode is the only BNB host found that serves a filtered log query
+       * over the span (every bsc-dataseed answers "limit exceeded", blockrazor
+       * caps at 25 blocks, drpc rate limits, ankr wants a key). But it REFUSES
+       * eth_getTransactionReceipt at every depth with a 403 asking for a paid
+       * token, and it was the only endpoint listed. The watcher read that
+       * refusal as "the transaction vanished" and stamped every BNB payment
+       * orphaned: not one could ever settle, while the verifier printed PASS
+       * because it never probed that method.
+       *
+       * Binance's own dataseed serves receipts. Listed second: a 403 is a
+       * pre accept status, so a receipt query falls through to it, while log
+       * queries are answered by publicnode before it is reached. The verifier
+       * now probes eth_getTransactionReceipt per endpoint so this cannot pass
+       * silently again.
+       */
+      rpcs: rpcList("https://bsc-rpc.publicnode.com", "https://bsc-dataseed.binance.org"),
       logSpan: 2000,
       explorer: "https://bscscan.com",
       nativeSymbol: "BNB",
@@ -594,7 +616,7 @@ function rawRegistry(mainnetEnabled) {
         type: "uniswap-v3",
         router: "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2",
         quoter: "0x78D78E420Da98ad378D7799bE8f4AF69033EB077",
-        feeTiers: [500, 3000, 10000],
+        feeTiers: [100, 500, 3000, 10000],
       },
     },
     {
@@ -638,7 +660,7 @@ function rawRegistry(mainnetEnabled) {
         type: "uniswap-v3",
         router: "0xbb00FF08d01D300023C629E8fFfFcb65A5a578cE",
         quoter: "0xbe0F5544EC67e9B3b2D979aaA43f18Fd87E6257F",
-        feeTiers: [500, 3000, 10000],
+        feeTiers: [100, 500, 3000, 10000],
       },
     },
   ];

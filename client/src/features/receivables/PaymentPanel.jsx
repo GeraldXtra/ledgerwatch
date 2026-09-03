@@ -1,5 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2, Receipt as ReceiptIcon } from "lucide-react";
+
+/** A key the server can use to record this payment exactly once. */
+function newIdempotencyKey() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID().replace(/-/g, "");
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+}
 import http from "../../api/http";
 import { Button, EmptyState, SkeletonLines } from "../../components/ui";
 import { ngn, dateTime, METHOD_LABEL } from "./format";
@@ -40,8 +48,22 @@ export default function PaymentPanel({ debt, onChange }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debt._id]);
 
+  /**
+   * ONE KEY PER PENDING PAYMENT. Minted on the first submit and kept until the
+   * server confirms, so a double tap, a retry after a lost response, or a
+   * second click while the first is in flight all carry the same key and the
+   * server records the payment once. Cleared on success so the next payment
+   * gets its own.
+   */
+  const pendingKey = useRef(null);
+
   async function record(payload) {
-    const { data } = await http.post(`/api/debts/${debt._id}/payments`, payload);
+    if (!pendingKey.current) pendingKey.current = newIdempotencyKey();
+    const { data } = await http.post(`/api/debts/${debt._id}/payments`, {
+      ...payload,
+      idempotencyKey: pendingKey.current,
+    });
+    pendingKey.current = null;
     setAdding(false);
     await load();
     await showReceipt();

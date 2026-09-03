@@ -4,25 +4,32 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#16283f" />
-    <!-- Applies the saved or system theme BEFORE the first paint, so a dark
-         page never flashes light on load. First party and inline; nothing is
-         fetched. src/theme.js applies the same rule when the toggle is used. -->
-    <script>
-      (function () {
-        try {
-          var t = localStorage.getItem("ledgerwatch.theme");
-          if (t !== "dark" && t !== "light") {
-            t =
-              window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
-                ? "dark"
-                : "light";
-          }
-          document.documentElement.setAttribute("data-theme", t);
-          var m = document.querySelector('meta[name="theme-color"]');
-          if (m) m.setAttribute("content", t === "dark" ? "#0f1216" : "#16283f");
-        } catch (e) {}
-      })();
-    </script>
+    <!--
+      CONTENT SECURITY POLICY. This page decrypts private keys, so an injected
+      script is a fund loss, not an information leak. The policy names every
+      origin this application legitimately talks to and nothing else:
+
+        script   this origin, and Cloudflare's Turnstile widget. No inline
+                 script at all, which is why the theme bootstrap is a file.
+        connect  this origin and the API. Every chain and Bitcoin call goes
+                 through the API's proxy, so no RPC host is listed and a script
+                 that somehow ran here still could not send a key anywhere.
+        img      this origin, data: for QR codes and avatars, and CoinGecko's
+                 image hosts for coin logos.
+        style    this origin, inline (React sets style attributes), Google Fonts.
+        frame    Turnstile renders its challenge in an iframe.
+
+      %VITE_API_URL% is replaced by Vite at build time from the environment, so
+      each deployment names its own API host. frame-ancestors cannot be set from
+      a meta tag; vercel.json sends it as a header.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://challenges.cloudflare.com; connect-src 'self' %VITE_API_URL% http://localhost:8000 ws://localhost:5173 http://localhost:5173; img-src 'self' data: blob: https://coin-images.coingecko.com https://assets.coingecko.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; frame-src https://challenges.cloudflare.com; worker-src 'self'; manifest-src 'self'"
+    />
+    <!-- Theme before first paint. A file, not inline, so the policy above can
+         forbid inline script entirely. -->
+    <script src="/theme-boot.js"></script>
     <meta
       name="description"
       content="LedgerWatch chases the money you are owed and watches the markets you cannot, so nothing slips while you run your business."

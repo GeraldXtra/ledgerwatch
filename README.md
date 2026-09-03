@@ -33,9 +33,15 @@ learns your public address.
 
 ### Where it stands
 
-This runs on test networks. The money handling works end to end and none of it touches real funds,
-which is deliberate. Putting key handling in front of the public before it has been properly reviewed
-would be irresponsible, so I have not done it.
+This runs on real networks: Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Chain, Avalanche and
+Bitcoin, with their test networks alongside. Invoices can be paid in USDC or USDT to a per-invoice
+address and settle by themselves. Market Watch can trade for real through Uniswap from the user's
+own wallet, in paper mode by default and in live mode only when the user opts in, with a per-trade
+and a daily cap. Keys are created and kept in the browser; the server relays signed transactions
+and never sees a key.
+
+It has not had an outside security review, and that is stated plainly in `docs/SECURITY.md` along
+with everything else that is still open. Anyone using it with real money should read that first.
 
 The rule I kept coming back to while building it: the agent prepares, the person approves. It is
 fully automatic in how it thinks and deliberately manual where it matters. When software touches

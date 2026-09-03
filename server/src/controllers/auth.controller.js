@@ -142,7 +142,7 @@ async function login(req, res) {
       });
     }
 
-    const token = signToken(user._id);
+    const token = signToken(user._id, user.tokenVersion);
     return res.status(200).json({ token, user: publicUser(user) });
   } catch (err) {
     console.error("login error:", err.message);
@@ -259,6 +259,9 @@ async function resetPassword(req, res) {
     }
 
     user.passwordHash = await bcrypt.hash(String(newPassword), SALT_ROUNDS);
+    // Every session issued before this moment stops working. Somebody who reset
+    // because they suspect a leak is, above all, trying to sign the leak out.
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
     clearResetState(user);
     await user.save();
 
@@ -364,20 +367,34 @@ async function verifyEmailCode(req, res) {
     if (!email || !code) return res.status(400).json({ error: "email and code are required" });
 
     const user = await User.findOne({ email: String(email).toLowerCase().trim() });
-    // Same shape whether the account is missing or the code is wrong, so this
-    // endpoint cannot be used to discover which addresses are registered.
-    if (!user) return res.status(400).json({ error: "That code is not correct." });
 
-    if (user.emailVerified) {
-      return res.status(200).json({ token: signToken(user._id), user: publicUser(user), alreadyVerified: true });
-    }
+    /**
+     * THE TAKEOVER THAT LIVED HERE.
+     *
+     * An `if (user.emailVerified)` branch returned a session token BEFORE the
+     * code was checked, meant to make a double submitted form idempotent. The
+     * code was only ever tested for presence, so anyone who knew a registered
+     * email could POST it with "000000" and receive a seven day session for the
+     * account. Every account that had finished signing up was in exactly the
+     * state that branch handed a token to.
+     *
+     * Now an already verified account is answered EXACTLY like an unknown one:
+     * same status, same sentence. Nothing is issued without a correct, live
+     * code, and the response shape cannot be used to tell which addresses are
+     * registered. A person who double submits sees "not correct" and simply
+     * signs in, which the message tells them.
+     */
+    const notCorrect = {
+      error: "That code is not correct. If you have already confirmed this address, sign in instead.",
+    };
+    if (!user || user.emailVerified) return res.status(400).json(notCorrect);
 
     const result = await checkCode(user, code);
     if (!result.ok) {
       return res.status(400).json({ error: result.error, expired: Boolean(result.expired), reason: result.reason });
     }
 
-    return res.status(200).json({ token: signToken(user._id), user: publicUser(user) });
+    return res.status(200).json({ token: signToken(user._id, user.tokenVersion), user: publicUser(user) });
   } catch (err) {
     console.error("verify email error:", err.message);
     return res.status(500).json({ error: "Could not confirm that code" });

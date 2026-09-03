@@ -20,6 +20,36 @@ export async function fetchTxs(chainId) {
   return data.txs;
 }
 
+/** Dollars spent on live swaps in the last 24 hours, across every chain. */
+export async function fetchSpend24h() {
+  const { data } = await http.get("/api/wallet/spend");
+  return Number(data.spent24h) || 0;
+}
+
+/**
+ * Tokens that arrived at this wallet which it had never been told about.
+ * The server scans the chain first, so this is also what NOTICES an arrival.
+ * Returns `{ tokens, sync }`; `sync.failed` means the chain could not be read
+ * just now and the list may be behind, which the wallet says out loud.
+ */
+export async function fetchDiscoveredTokens(chainId) {
+  const { data } = await http.get("/api/wallet/discovered", { params: { chainId } });
+  return { tokens: data.tokens || [], sync: data.sync || {} };
+}
+
+/**
+ * The owner's decision on a discovered token: `add` (to the custom list, with
+ * the decimals its contract reported), `ignore`, or `restore`. Returns the
+ * refreshed discovered list and the custom token list.
+ */
+export async function actOnDiscoveredToken({ chainId, address, action }) {
+  const { data } = await http.post(
+    `/api/wallet/discovered/${chainId}/${String(address).toLowerCase()}`,
+    { action }
+  );
+  return { tokens: data.tokens || [], customTokens: data.customTokens || [] };
+}
+
 export async function recordTx(tx) {
   const { data } = await http.post("/api/wallet/txs", tx);
   return data.tx;

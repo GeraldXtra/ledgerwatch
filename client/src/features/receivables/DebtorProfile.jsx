@@ -34,12 +34,12 @@ function BehaviourChart({ timeline }) {
         <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
           <defs>
             <linearGradient id="behav" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#0A6E4C" stopOpacity={0.16} />
-              <stop offset="100%" stopColor="#0A6E4C" stopOpacity={0} />
+              <stop offset="0%" stopColor="var(--chart-pos)" stopOpacity={0.16} />
+              <stop offset="100%" stopColor="var(--chart-pos)" stopOpacity={0} />
             </linearGradient>
           </defs>
-          <XAxis dataKey="t" tickFormatter={(t) => shortDate(t)} tick={{ fill: "#64748B", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#E5E8ED" }} minTickGap={40} />
-          <YAxis tick={{ fill: "#64748B", fontSize: 11 }} tickLine={false} axisLine={false} width={56} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+          <XAxis dataKey="t" tickFormatter={(t) => shortDate(t)} tick={{ fill: "var(--chart-tick)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--chart-axis)" }} minTickGap={40} />
+          <YAxis tick={{ fill: "var(--chart-tick)", fontSize: 11 }} tickLine={false} axisLine={false} width={56} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
           <Tooltip
             content={({ active, payload }) =>
               active && payload && payload.length ? (
@@ -50,7 +50,7 @@ function BehaviourChart({ timeline }) {
               ) : null
             }
           />
-          <Area type="monotone" dataKey="collected" stroke="#0A6E4C" strokeWidth={1.75} fill="url(#behav)" dot={false} />
+          <Area type="monotone" dataKey="collected" stroke="var(--chart-pos)" strokeWidth={1.75} fill="url(#behav)" dot={false} />
         </AreaChart>
       </ResponsiveContainer>
     </div>

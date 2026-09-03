@@ -22,7 +22,7 @@ async function record(req, res) {
     const debt = await findMyDebt(req);
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
-    const { amount, method, note, paidAt } = req.body || {};
+    const { amount, method, note, paidAt, idempotencyKey } = req.body || {};
     const amt = Number(amount);
     if (!amt || isNaN(amt) || amt <= 0) {
       return res.status(400).json({ error: "amount must be a number greater than 0" });
@@ -30,15 +30,48 @@ async function record(req, res) {
     if (method && !["cash", "transfer", "other"].includes(method)) {
       return res.status(400).json({ error: "method must be cash, transfer or other" });
     }
+    const when = paidAt ? new Date(paidAt) : new Date();
+    if (Number.isNaN(when.getTime())) {
+      return res.status(400).json({ error: "paidAt is not a valid date" });
+    }
 
-    const payment = await Payment.create({
-      debtId: debt._id,
-      userId: req.user._id,
-      amount: amt,
-      method: method || "transfer",
-      note,
-      paidAt: paidAt ? new Date(paidAt) : new Date(),
-    });
+    /**
+     * IDEMPOTENCY FOR A MANUAL PAYMENT.
+     *
+     * The client mints one key per form and sends it with the submit. A
+     * double submit, a retry after a lost response, or a second tab replaying
+     * the request all carry the same key and hit the unique index on txHash,
+     * so the payment is recorded once. Scoped to the user so two accounts
+     * cannot collide, and prefixed so it can never look like a chain hash.
+     */
+    const key =
+      typeof idempotencyKey === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(idempotencyKey)
+        ? `manual:${req.user._id}:${idempotencyKey}`
+        : undefined;
+
+    let payment;
+    try {
+      payment = await Payment.create({
+        debtId: debt._id,
+        userId: req.user._id,
+        amount: amt,
+        method: method || "transfer",
+        note,
+        paidAt: when,
+        ...(key ? { txHash: key } : {}),
+      });
+    } catch (err) {
+      if (key && err && err.code === 11000) {
+        const existing = await Payment.findOne({ txHash: key, userId: req.user._id });
+        const totalPaidNow = await recomputeDebtStatus(debt);
+        return res.status(200).json({
+          payment: existing,
+          debt: withDerived(debt, totalPaidNow),
+          alreadyDone: true,
+        });
+      }
+      throw err;
+    }
 
     debt.history.push({ event: "payment_received" });
     const totalPaid = await recomputeDebtStatus(debt); // saves debt + cancels reminders at zero
