@@ -99,15 +99,38 @@ export function resolveToken(chain, { coinId, symbol }, customTokens = []) {
  * explicitly instead of by a loose /^USD/ test that would also catch USDD, USDe
  * and anything else beginning with those three letters.
  */
-const CASH_SYMBOLS = [/^USDC$/i, /^(USDT|USD₮0)$/i];
+const CASH_SYMBOLS = [/^USDC$/i, /^(USDT|USD₮0|USDT0|USDt)$/i];
 
-export function cashTokenFor(chain) {
+/** The two the owner can choose between, by the name a person would use. */
+export const CASH_CHOICES = ["USDC", "USDT"];
+
+function cashPattern(choice) {
+  return String(choice).toUpperCase() === "USDT" ? CASH_SYMBOLS[1] : CASH_SYMBOLS[0];
+}
+
+/**
+ * @param {object} chain
+ * @param {"USDC"|"USDT"} [preferred]  which dollar to fund trades with. Absent,
+ *        USDC wins where both exist. If the preferred one is not on this chain
+ *        the other is used, so a preference never silently disables trading;
+ *        `tradeability` reports which one was actually chosen.
+ */
+export function cashTokenFor(chain, preferred) {
   const stables = chain?.stables || (chain?.tokens || []).filter((t) => /^USD/i.test(t.symbol));
-  for (const pattern of CASH_SYMBOLS) {
+  const order = preferred
+    ? [cashPattern(preferred), ...CASH_SYMBOLS.filter((p) => p !== cashPattern(preferred))]
+    : CASH_SYMBOLS;
+  for (const pattern of order) {
     const hit = stables.find((t) => pattern.test(t.symbol));
     if (hit) return hit;
   }
   return null;
+}
+
+/** Which of the two choices a given cash token is. */
+export function cashChoiceOf(token) {
+  if (!token) return null;
+  return CASH_SYMBOLS[1].test(token.symbol) ? "USDT" : CASH_SYMBOLS[0].test(token.symbol) ? "USDC" : null;
 }
 
 /** Is this token one of the two the app will spend? Used to refuse self trades. */
@@ -122,7 +145,7 @@ export function isCashToken(token) {
  *
  * @returns {{live:boolean, reason:string, token:object|null, cash:object|null}}
  */
-export function tradeability(chain, coin, customTokens = []) {
+export function tradeability(chain, coin, customTokens = [], preferredCash) {
   if (!chain) {
     return { live: false, reason: "No network selected.", token: null, cash: null };
   }
@@ -134,7 +157,7 @@ export function tradeability(chain, coin, customTokens = []) {
       cash: null,
     };
   }
-  const cash = cashTokenFor(chain);
+  const cash = cashTokenFor(chain, preferredCash);
   if (!cash) {
     return {
       live: false,

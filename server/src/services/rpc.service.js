@@ -191,6 +191,17 @@ async function postOnce(url, body, timeoutMs) {
  *                    attempt:number, total:number, attempts:Array}>}
  *          `ok:false` with every attempt recorded when the whole list is exhausted.
  */
+const DEGRADED_WARN_EVERY_MS = 10 * 60 * 1000;
+const degradedWarnedAt = new Map(); // chainId -> last warning time
+
+function shouldWarnDegraded(chainId) {
+  const now = Date.now();
+  const last = degradedWarnedAt.get(chainId) || 0;
+  if (now - last < DEGRADED_WARN_EVERY_MS) return false;
+  degradedWarnedAt.set(chainId, now);
+  return true;
+}
+
 async function sendToChain(chain, body, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const endpoints = chain.rpcs && chain.rpcs.length ? chain.rpcs : [chain.rpc];
   const methods = methodsOf(body);
@@ -203,13 +214,22 @@ async function sendToChain(chain, body, { timeoutMs = DEFAULT_TIMEOUT_MS } = {})
     const r = await postOnce(url, body, timeoutMs);
 
     if (r.ok) {
-      // Succeeded on something other than the preferred endpoint — worth saying
-      // out loud, since it means the primary is degraded and nobody would
-      // otherwise notice until it failed completely.
-      if (i > 0) {
+      /**
+       * Succeeded on something other than the preferred endpoint. Worth saying
+       * out loud, since it means the primary is degraded and nobody would
+       * otherwise notice until it failed completely.
+       *
+       * Said ONCE per chain per ten minutes, not once per call. On a chain
+       * whose first endpoint refuses a method permanently, every single request
+       * fell through and this line printed on all of them, filling the log
+       * with thousands of identical warnings that buried anything real. The
+       * first occurrence is the information; the rest is noise.
+       */
+      if (i > 0 && shouldWarnDegraded(chain.chainId)) {
         console.warn(
           `[rpc] ${chain.name}: endpoint ${i + 1}/${endpoints.length} (${host}) served ` +
-            `${methods.join(",")} after ${i} failure(s) — primary is degraded`
+            `${methods.join(",")} after ${i} failure(s) — primary is degraded. ` +
+            `Further fallthroughs on this chain are not logged for ten minutes.`
         );
       }
       return { ok: true, status: r.status, text: r.text, host, attempt: i + 1, total: endpoints.length, attempts };

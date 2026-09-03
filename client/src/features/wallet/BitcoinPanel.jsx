@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import http from "../../api/http";
 import { Button, Card, Field, Input, SkeletonLines } from "../../components/ui";
+import TokenLogo from "../../components/TokenLogo";
 import { unlockWallet } from "./keystore";
 import {
   deriveBitcoinAccount,
@@ -822,7 +823,10 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       {tab === "balance" ? (
         <div className="mm-list">
           <div className="mm-row">
-            <span className="mm-mark native">BTC</span>
+            {/* The same disc the EVM wallet draws, from the same logo cache. This
+                was a lettered "BTC" placeholder, the one kind of mark the owner
+                asked never to see. */}
+            <TokenLogo symbol="BTC" native />
             <span className="mm-row-main">
               <span className="mm-row-name">Bitcoin</span>
               <span className="mm-row-note">

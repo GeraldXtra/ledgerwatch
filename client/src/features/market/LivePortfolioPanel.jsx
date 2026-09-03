@@ -9,7 +9,7 @@ import { getProvider, ERC20_ABI, rpcErrorReason } from "../wallet/provider";
 import { coinIdForSymbol, stableUsdPrice } from "../wallet/usdValue";
 import { fetchTxs } from "../wallet/walletApi";
 import { usd, signedUsd } from "./format";
-import { tokensForChain } from "./tradeability";
+import { tokensForChain, CASH_CHOICES, cashTokenFor, cashChoiceOf } from "./tradeability";
 
 /**
  * The LIVE portfolio.
@@ -32,6 +32,13 @@ export default function LivePortfolioPanel({
   markets,
   coinIdBySymbol,
   onPickChain,
+  // Reports every balance read upward, so the page can build the real live
+  // book for the trade panel from the same read this panel displays.
+  onRows,
+  // Bumped by the page after a swap lands, so this rereads the chain.
+  reloadKey = 0,
+  cashSymbol = "USDC",
+  onCashSymbol,
 }) {
   const [rows, setRows] = useState(null);
   const [txs, setTxs] = useState([]);
@@ -69,6 +76,7 @@ export default function LivePortfolioPanel({
         })
       );
       setRows(balances.filter((b) => b.unknown || b.qty > 0));
+      if (onRows) onRows(balances);
       // Held nothing AND read nothing successfully is not the same as held
       // nothing. If every single token failed, this is a read failure, not an
       // empty wallet, and it must not be presented as one.
@@ -77,15 +85,26 @@ export default function LivePortfolioPanel({
       }
     } catch (err) {
       setRows(null);
+      if (onRows) onRows(null);
       setLoadError(rpcErrorReason(err) || "balances could not be read");
     } finally {
       setLoading(false);
     }
-  }, [chain, address]);
+    // `reloadKey` is a deliberate dependency: bumping it is how the page asks
+    // for a reread after a swap.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chain, address, reloadKey]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // A network change invalidates what was reported. Clear it up front so the
+  // trade panel never sees one chain's balances under another chain's name.
+  useEffect(() => {
+    if (onRows) onRows(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chain?.chainId, address]);
 
   // Deposit QR for the zero-balance state. Same generator the wallet's Receive
   // panel uses, so the two screens cannot drift.
@@ -201,14 +220,16 @@ export default function LivePortfolioPanel({
   }
 
   if (!chain) {
+    const none = !(chains || []).length;
     return (
       <Card>
         <h3 className="section-title row">
           <Wallet size={17} /> Live positions
         </h3>
         <p className="muted small crypto-empty">
-          Pick a network to see what this wallet actually holds. Balances are per network. The
-          same address holds a different balance on each.
+          {none
+            ? "No real network is enabled on this server, so there is nothing to trade live. Set ENABLE_MAINNET=true on the server to switch the mainnets on."
+            : "Pick a network to see what this wallet actually holds. Balances are per network. The same address holds a different balance on each."}
         </p>
         {(chains || []).length > 0 && onPickChain && (
           <div className="row wrap">
@@ -235,9 +256,34 @@ export default function LivePortfolioPanel({
             paper portfolio, and never added to it.
           </p>
         </div>
-        <Button variant="ghost" icon title="Refresh" onClick={load}>
-          <RefreshCw size={15} />
-        </Button>
+        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          {/* WHICH DOLLAR FUNDS A TRADE. Only the choices this network actually
+              carries are offered, and the one in use is the one the trade panel
+              will spend on a buy and receive on a sell. */}
+          {onCashSymbol && (
+            <div className="seg" role="group" aria-label="Trade with" style={{ maxWidth: 180 }}>
+              {CASH_CHOICES.map((choice) => {
+                const tok = cashTokenFor(chain, choice);
+                const present = tok && cashChoiceOf(tok) === choice;
+                return (
+                  <button
+                    key={choice}
+                    type="button"
+                    className={cashSymbol === choice ? "seg-btn active" : "seg-btn"}
+                    onClick={() => onCashSymbol(choice)}
+                    disabled={!present}
+                    title={present ? `Fund trades with ${tok.symbol}` : `${choice} is not on ${chain.name}`}
+                  >
+                    {choice}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <Button variant="ghost" icon title="Refresh" onClick={load}>
+            <RefreshCw size={15} />
+          </Button>
+        </div>
       </div>
 
       {loading && !rows ? (

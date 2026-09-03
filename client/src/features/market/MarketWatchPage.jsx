@@ -39,6 +39,7 @@ import { tradeability } from "./tradeability";
 import { toSpendAmount } from "./amount";
 import { fetchChains } from "../wallet/walletApi";
 import { getStoredAddress } from "../wallet/keystore";
+import { coinIdForSymbol, stableUsdPrice } from "../wallet/usdValue";
 import { recallChain } from "../wallet/NetworkSwitcher";
 
 const STARTING_CASH = 1000000;
@@ -55,6 +56,29 @@ function MarketWatch() {
   const [liveChains, setLiveChains] = useState([]);
   const [liveChainId, setLiveChainId] = useState(null);
   const [liveSwap, setLiveSwap] = useState(null);
+  // The on chain balances the live panel read, reported upward so the trade
+  // panel's ceiling is the wallet's real holdings and not an empty document.
+  const [liveRows, setLiveRows] = useState(null);
+  // Bumped after a swap lands so the live panel rereads the chain.
+  const [liveReloadKey, setLiveReloadKey] = useState(0);
+  // Which dollar funds live trades. Remembered per browser.
+  const [cashSymbol, setCashSymbol] = useState(() => {
+    try {
+      const v = localStorage.getItem("ledgerwatch.live.cash");
+      return v === "USDT" ? "USDT" : "USDC";
+    } catch {
+      return "USDC";
+    }
+  });
+  function chooseCash(next) {
+    const v = next === "USDT" ? "USDT" : "USDC";
+    setCashSymbol(v);
+    try {
+      localStorage.setItem("ledgerwatch.live.cash", v);
+    } catch {
+      /* private mode: lasts for this page */
+    }
+  }
   const liveChain = liveChains.find((c) => c.chainId === liveChainId) || null;
   const walletAddress = getStoredAddress();
   const toast = useToast();
@@ -167,14 +191,31 @@ function MarketWatch() {
     loadData();
   }, [loadData]);
 
-  // Chain list only matters in live mode; the same registry the wallet uses.
+  /**
+   * LIVE MEANS MAINNET. NOTHING ELSE.
+   *
+   * This used to admit every enabled chain, testnets included, and then
+   * recalled whichever chain the wallet last used. The wallet had last been on
+   * Base Sepolia, so the "Live wallet" opened on a test network and showed 160
+   * test USDC as if it were money. Real funds only: testnets are filtered out
+   * here, and the recalled chain is used only if it is a mainnet.
+   *
+   * With mainnet disabled on the server the list is empty and the live section
+   * says so, rather than quietly falling back to a testnet.
+   */
   useEffect(() => {
     if (mode !== "live" || liveChains.length) return;
     fetchChains()
       .then((d) => {
-        const usable = (d.chains || []).filter((c) => c.testnet || d.enableMainnet);
-        setLiveChains(usable);
-        if (usable.length) setLiveChainId((p) => p || recallChain(usable));
+        const mainnets = (d.chains || []).filter((c) => !c.testnet && d.enableMainnet);
+        setLiveChains(mainnets);
+        if (mainnets.length) {
+          setLiveChainId((p) => {
+            if (p && mainnets.some((c) => c.chainId === p)) return p;
+            const recalled = recallChain(mainnets);
+            return mainnets.some((c) => c.chainId === recalled) ? recalled : mainnets[0].chainId;
+          });
+        }
       })
       .catch(() => setLiveChains([]));
   }, [mode, liveChains.length]);
@@ -342,7 +383,12 @@ function MarketWatch() {
     const alert = trade.alert;
 
     if (mode === "live") {
-      const t = tradeability(liveChain, { coinId: alert.coinId, symbol: alert.symbol }, user?.customTokens);
+      const t = tradeability(
+        liveChain,
+        { coinId: alert.coinId, symbol: alert.symbol },
+        user?.customTokens,
+        cashSymbol // the dollar the owner chose to fund trades with
+      );
       if (!t.live) {
         toast(t.reason, { type: "info", duration: 9000 });
         return;
@@ -427,8 +473,58 @@ function MarketWatch() {
     }
   }
 
-  const pf = livePortfolio;
-  const up = pf ? pf.totalPnl >= 0 : true;
+  /**
+   * THE LIVE BOOK IS THE CHAIN, NOT A DOCUMENT.
+   *
+   * The server creates a Portfolio document for live mode with cashBalance 0
+   * and no holdings, on purpose, so simulated money never sits beside real
+   * funds. But that document was then handed to the trade panel as the ceiling
+   * for what could be spent, and to the allocation bar as what was held. So in
+   * live mode the Review button could never enable and the allocation was
+   * always empty: the real wallet held USDC and WBTC, and the app was looking
+   * at an empty ledger entry instead.
+   *
+   * Built here from the balances the live panel reads off the chain. Cash is
+   * the chosen dollar's balance on the selected network. Holdings are every
+   * other token with a quantity, valued at the live price where one exists.
+   * There is no P&L: this book records what is held now, not what was paid.
+   */
+  const livePortfolioReal = useMemo(() => {
+    if (mode !== "live") return null;
+    const rows = (liveRows || []).filter((r) => !r.unknown && Number(r.qty) > 0);
+    const isCash = (sym) =>
+      cashSymbol === "USDT"
+        ? /^(USDT|USD₮0|USDT0|USDt)$/i.test(sym)
+        : /^USDC$/i.test(sym);
+    const cashRow = rows.find((r) => isCash(r.symbol));
+    let holdingsValue = 0;
+    const holdings = rows
+      .filter((r) => !isCash(r.symbol))
+      .map((r) => {
+        const coinId =
+          coinIdForSymbol(r.symbol) || coinIdBySymbol?.[String(r.symbol).toUpperCase()] || null;
+        const m = coinId ? markets[coinId] : null;
+        const price =
+          m && typeof m.current_price === "number" ? m.current_price : stableUsdPrice(r.symbol);
+        const qty = Number(r.qty);
+        const value = Number.isFinite(price) ? qty * price : null;
+        if (value != null) holdingsValue += value;
+        return { coinId, symbol: r.symbol, qty, price, value, avgBuyPrice: null };
+      });
+    const cashBalance = cashRow ? Number(cashRow.qty) : 0;
+    return {
+      real: true,
+      cashSymbol,
+      cashBalance,
+      holdings,
+      holdingsValue,
+      totalValue: cashBalance + holdingsValue,
+      totalPnl: null,
+    };
+  }, [mode, liveRows, cashSymbol, coinIdBySymbol, markets]);
+
+  const pf = mode === "live" ? livePortfolioReal : livePortfolio;
+  const up = pf && pf.totalPnl != null ? pf.totalPnl >= 0 : true;
   const activeWatchCount = watches.filter((w) => w.active !== false).length;
 
   // Allocation segments. EVERY segment (holdings AND cash) is a share of the SAME
@@ -640,6 +736,10 @@ function MarketWatch() {
               markets={markets}
               coinIdBySymbol={coinIdBySymbol}
               onPickChain={setLiveChainId}
+              onRows={setLiveRows}
+              reloadKey={liveReloadKey}
+              cashSymbol={cashSymbol}
+              onCashSymbol={chooseCash}
             />
           )}
 
@@ -713,12 +813,13 @@ function MarketWatch() {
           in paper mode, so the two can never appear together and live mode can
           never fall through to a simulated figure. */}
 
+      {/* In live mode `pf` is the real on chain book, so the ceiling here is
+          what the wallet actually holds on the selected mainnet. */}
       {trade && (
         <TradePanel
           side={trade.side}
           alert={trade.alert}
           portfolio={pf}
-          mode={mode}
           onClose={() => setTrade(null)}
           onSubmit={submitTrade}
         />
@@ -739,7 +840,12 @@ function MarketWatch() {
           spentToday={0}
           limitOverrides={user?.tradingLimits}
           onClose={() => setLiveSwap(null)}
-          onDone={() => loadData()}
+          onDone={() => {
+            loadData();
+            // The swap moved real tokens in this wallet. Reread the chain so the
+            // live book, the ceiling and the allocation all show the new state.
+            setLiveReloadKey((k) => k + 1);
+          }}
         />
       )}
     </>

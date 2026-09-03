@@ -189,9 +189,19 @@ function rawRegistry(mainnetEnabled) {
       key: "sepolia",
       name: "Ethereum Sepolia",
       chainId: 11155111,
-      // publicnode answers, but timed out past 15s on a filtered getLogs over
-      // 1500 blocks, so it is a genuine last resort here rather than a peer.
-      rpcs: rpcList(alchemy("eth-sepolia"), "https://ethereum-sepolia-rpc.publicnode.com"),
+      /**
+       * PUBLIC NODE FIRST, ALCHEMY SECOND, and the reason is measured.
+       *
+       * The comment that stood here said publicnode timed out past 15s on a
+       * filtered getLogs, making it "a genuine last resort". Re-measured during
+       * the mainnet audit: it served the full span in 217ms. Meanwhile the FREE
+       * Alchemy tier caps eth_getLogs at 10 blocks and answers HTTP 400 to
+       * every log query the watcher makes, so with Alchemy first, every single
+       * scan paid a wasted round trip and printed "primary is degraded" before
+       * the public node did the actual work. Alchemy stays listed because it
+       * serves balances and calls well; it just should not be asked first.
+       */
+      rpcs: rpcList("https://ethereum-sepolia-rpc.publicnode.com", alchemy("eth-sepolia")),
       explorer: "https://sepolia.etherscan.io",
       nativeSymbol: "ETH",
       decimals: 18,
@@ -216,11 +226,14 @@ function rawRegistry(mainnetEnabled) {
       name: "Base Sepolia",
       chainId: 84532,
       // Both public nodes verified: correct chainId, and an identical 5,137 logs
-      // for the same filtered 1500-block query. Alchemy 403s for this key today.
+      // for the same filtered 1500-block query. Alchemy 403s for this key on
+      // EVERY method ("BASE_SEPOLIA is not enabled for this app"), so it is last:
+      // listed first it cost a wasted round trip on every request and flooded the
+      // log. Enable the network in the Alchemy dashboard and it starts serving.
       rpcs: rpcList(
-        alchemy("base-sepolia"),
         "https://sepolia.base.org",
-        "https://base-sepolia-rpc.publicnode.com"
+        "https://base-sepolia-rpc.publicnode.com",
+        alchemy("base-sepolia")
       ),
       explorer: "https://sepolia.basescan.org",
       nativeSymbol: "ETH",
@@ -257,11 +270,12 @@ function rawRegistry(mainnetEnabled) {
       key: "arbitrum-sepolia",
       name: "Arbitrum Sepolia",
       chainId: 421614,
-      // Both verified, 42 logs each on the same filtered query.
+      // Both verified, 42 logs each on the same filtered query. Alchemy last for
+      // the same reason as Base Sepolia: 403 on every method for this key.
       rpcs: rpcList(
-        alchemy("arb-sepolia"),
         "https://sepolia-rollup.arbitrum.io/rpc",
-        "https://arbitrum-sepolia-rpc.publicnode.com"
+        "https://arbitrum-sepolia-rpc.publicnode.com",
+        alchemy("arb-sepolia")
       ),
       explorer: "https://sepolia.arbiscan.io",
       nativeSymbol: "ETH",
@@ -279,11 +293,12 @@ function rawRegistry(mainnetEnabled) {
       key: "optimism-sepolia",
       name: "Optimism Sepolia",
       chainId: 11155420,
-      // Both verified, 152 logs each on the same filtered query.
+      // Both verified, 152 logs each on the same filtered query. Alchemy last for
+      // the same reason as Base Sepolia: 403 on every method for this key.
       rpcs: rpcList(
-        alchemy("opt-sepolia"),
         "https://sepolia.optimism.io",
-        "https://optimism-sepolia-rpc.publicnode.com"
+        "https://optimism-sepolia-rpc.publicnode.com",
+        alchemy("opt-sepolia")
       ),
       explorer: "https://sepolia-optimism.etherscan.io",
       nativeSymbol: "ETH",
@@ -308,7 +323,9 @@ function rawRegistry(mainnetEnabled) {
       // (rpc-amoy.polygon.technology) is dead — it is the source of the bare
       // "fetch failed" this work started from. Not listed rather than listed and
       // broken.
-      rpcs: rpcList(alchemy("polygon-amoy"), "https://polygon-amoy-bor-rpc.publicnode.com"),
+      // publicnode first: it is the only endpoint that actually answers here.
+      // Alchemy 403s on every method for this key and sat in front of it.
+      rpcs: rpcList("https://polygon-amoy-bor-rpc.publicnode.com", alchemy("polygon-amoy")),
       explorer: "https://amoy.polygonscan.com",
       nativeSymbol: "POL",
       decimals: 18,
@@ -348,10 +365,25 @@ function rawRegistry(mainnetEnabled) {
        * The verifier now probes eth_call per endpoint so this class cannot pass
        * again. publicnode is also absent: it caps getLogs at 100, under our span.
        */
+      /**
+       * ORDER IS MEASURED, AND IT WAS BACKWARDS.
+       *
+       * Sixty production shaped trials during the mainnet audit: Alchemy (free
+       * tier, 10 block cap) answered HTTP 400 to EVERY eth_getLogs; drpc served
+       * 87% and returned "block range extends beyond current head block" inside
+       * a 200 for the rest, which stops the walk; mevblocker served 100% and was
+       * reached ZERO times in sixty, because it was third. So the one endpoint
+       * that reliably serves the watcher's log queries was unreachable by
+       * construction, and one pass in eight silently made no progress.
+       *
+       * mevblocker first. drpc second, where its occasional head race only
+       * matters if mevblocker is down. Alchemy last: excellent for calls and
+       * balances, never for logs at this tier.
+       */
       rpcs: rpcList(
-        alchemy("eth-mainnet"),
+        "https://rpc.mevblocker.io",
         "https://eth.drpc.org",
-        "https://rpc.mevblocker.io"
+        alchemy("eth-mainnet")
       ),
       logSpan: 2000,
       explorer: "https://etherscan.io",
