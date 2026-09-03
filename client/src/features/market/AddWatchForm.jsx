@@ -107,7 +107,21 @@ export default function AddWatchForm({ onAdded }) {
       setCoin(null);
       if (onAdded) onAdded();
     } catch (err) {
-      setError(err?.response?.data?.error || "Could not create the watch.");
+      // Say WHICH failure. A bare "could not create" gave the owner nothing to
+      // act on when the real cause was a signed-out session, a rate limit, or
+      // no network at all.
+      const status = err?.response?.status;
+      const server = err?.response?.data?.error;
+      setError(
+        server ||
+          (status === 401
+            ? "Your session has ended. Sign in again and retry."
+            : status === 429
+              ? "Too many requests just now. Wait a moment and retry."
+              : status
+                ? `The server answered ${status}. Try again in a moment.`
+                : "No answer from the server. Check your connection and try again.")
+      );
     } finally {
       setBusy(false);
     }

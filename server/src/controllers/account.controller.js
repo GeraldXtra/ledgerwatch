@@ -86,10 +86,11 @@ async function changePassword(req, res) {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(401).json({ error: "User no longer exists" });
 
-    const match = await bcrypt.compare(currentPassword, user.passwordHash);
+    // Coerced: bcrypt throws on a non-string, which answered 500 instead of 400.
+    const match = await bcrypt.compare(String(currentPassword), user.passwordHash);
     if (!match) return res.status(400).json({ error: "Current password is incorrect" });
 
-    user.passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    user.passwordHash = await bcrypt.hash(String(newPassword), SALT_ROUNDS);
     // Sign every other session out. The one making this request is reissued
     // below so the person is not logged out of the device they are using.
     user.tokenVersion = (user.tokenVersion || 0) + 1;

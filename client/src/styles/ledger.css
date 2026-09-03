@@ -179,8 +179,24 @@ body {
   position: sticky;
   top: 0;
   z-index: 40;
+  /* The solid line first, on purpose. color-mix() is not understood by iOS
+     Safari before 16.2, and a browser that cannot parse a declaration drops
+     it, so this bar had NO background there: it was sticky, transparent, and
+     every line of the page scrolled straight through the masthead text. The
+     solid value is what those browsers keep; the ones that know color-mix
+     override it on the next line. backdrop-filter needs the -webkit- prefix
+     on iOS until Safari 18; without it the 8% translucency showed the page
+     beneath with no blur, which read as the same overlap. */
+  background: var(--canvas);
   background: color-mix(in srgb, var(--canvas) 92%, transparent);
+  -webkit-backdrop-filter: saturate(1.4) blur(10px);
   backdrop-filter: saturate(1.4) blur(10px);
+  /* The installed iPhone app draws the page under the status bar (the head
+     asks for a translucent one). This bar owns that strip: it pads itself by
+     the inset so its own content starts below the clock, and its background
+     fills the strip so the status bar reads as part of the masthead. Zero
+     everywhere else. */
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 .lw-mast {
@@ -1761,8 +1777,13 @@ body {
   position: sticky;
   top: 0;
   z-index: 40;
+  /* Same story as .lw-chrome: solid first for browsers without color-mix,
+     the WebKit prefix for the blur. */
+  background: var(--canvas);
   background: color-mix(in srgb, var(--canvas) 90%, transparent);
+  -webkit-backdrop-filter: saturate(1.4) blur(10px);
   backdrop-filter: saturate(1.4) blur(10px);
+  padding-top: env(safe-area-inset-top, 0px);
 }
 .ed-nav-inner {
   display: flex;
@@ -2232,6 +2253,9 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
   background: var(--canvas);
+  /* The sign in page has no sticky chrome to own the status bar strip in the
+     installed iPhone app, so the page itself steps down by the inset. */
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 .gate-aside {
@@ -2467,6 +2491,7 @@ body {
 }
 .lw-shell .modal-overlay,
 .modal-overlay {
+  -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
   background: rgba(16, 18, 22, 0.44);
   animation: lw-fade var(--t-fast) ease both;
@@ -2632,6 +2657,30 @@ body {
 }
 
 @media (max-width: 820px) {
+  /* On a phone the chrome is OPAQUE and unfiltered. A translucent, blurred
+     sticky bar is the single most expensive thing a mobile GPU is asked to do
+     on every scroll frame, and iOS Safari has a long-standing habit of
+     rendering a sticky element with backdrop-filter as if it had none while
+     the page is moving, so the content showed through the bar. Solid paper
+     is cheaper and cannot show anything through. */
+  .lw-chrome,
+  .ed-nav {
+    background: var(--canvas);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border-bottom: 1px solid var(--border);
+  }
+  /* iOS Safari zooms the whole page when a focused input's font is under
+     16px, and does not zoom back out when it loses focus. Every text control
+     is 16px on a phone so focusing one changes nothing about the layout. */
+  .lw-shell .input,
+  .lw-shell .select,
+  .lw-shell textarea,
+  .input,
+  .select,
+  textarea {
+    font-size: 16px;
+  }
   .lw-body {
     padding: 22px 18px 60px;
   }
@@ -3377,9 +3426,18 @@ body {
    can either without it being noticed as a clipped element rather than as a
    sideways page. */
 @media (max-width: 640px) {
-  html,
-  body {
-    overflow-x: hidden;
+  /* `clip`, not `hidden`, and on the page wrappers, not on html/body.
+     `overflow-x: hidden` on body made body a scroll container, and a sticky
+     element measures against the nearest scroll container: body never
+     scrolls (the viewport does), so the chrome stopped sticking on phones.
+     WebKit handled the same rule differently, which is why the two platforms
+     disagreed. `clip` clips without creating a scroll container, so the
+     sticky chrome keeps working; browsers that do not know `clip` ignore the
+     line, which is the pre-rule state and is fine now that the causes of
+     sideways overflow have been fixed at their source. */
+  .lw-shell,
+  .ed {
+    overflow-x: clip;
   }
 }
 

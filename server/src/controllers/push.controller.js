@@ -25,6 +25,18 @@ async function subscribe(req, res) {
     if (!sub || !sub.endpoint || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) {
       return res.status(400).json({ error: "Invalid subscription" });
     }
+    // Real values are a URL of a few hundred characters and two short base64
+    // keys. Anything past these bounds is not a browser subscription.
+    if (
+      typeof sub.endpoint !== "string" ||
+      sub.endpoint.length > 2048 ||
+      typeof sub.keys.p256dh !== "string" ||
+      sub.keys.p256dh.length > 256 ||
+      typeof sub.keys.auth !== "string" ||
+      sub.keys.auth.length > 128
+    ) {
+      return res.status(400).json({ error: "Invalid subscription" });
+    }
 
     /**
      * THE ENDPOINT IS A URL THIS SERVER WILL POST TO. It was stored verbatim,
@@ -158,6 +170,9 @@ async function action(req, res) {
 
     return res.status(400).json({ error: "Unknown action" });
   } catch (err) {
+    // A reminder action on an invoice that has since been settled is refused
+    // by the reminder engine with a 409 (LW-018); pass the reason through.
+    if (err && err.status) return res.status(err.status).json({ error: err.message });
     console.error("push action error:", err.message);
     return res.status(500).json({ error: "Action failed" });
   }

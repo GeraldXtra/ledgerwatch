@@ -74,34 +74,57 @@ function sign(payload) {
     .digest("hex");
 }
 
-function makeState() {
-  const payload = `${Date.now()}.${crypto.randomBytes(12).toString("hex")}`;
+/**
+ * THE BROWSER NONCE, and the attack it closes.
+ *
+ * The callback lands the session token in the URL fragment of the sign in
+ * page. Anyone could therefore build `/login#token=<their own token>` and send
+ * it to somebody: the recipient's browser would store the attacker's session
+ * and every invoice, debtor and wallet address they then entered would land
+ * in the attacker's account. That is a login CSRF, and the HMAC on `state`
+ * alone does not stop it, because the forged link never passes through Google
+ * at all.
+ *
+ * So the browser that STARTS the flow mints a random nonce, keeps it in its own
+ * session storage, and sends it here. It is folded into the signed state,
+ * returned to the browser beside the token, and the sign in page refuses a
+ * token whose nonce is not the one it minted. A forged link cannot carry a
+ * nonce the victim's browser holds.
+ */
+const NONCE_RE = /^[A-Za-z0-9_-]{8,64}$/;
+
+function makeState(clientNonce) {
+  const n = NONCE_RE.test(String(clientNonce || "")) ? String(clientNonce) : "";
+  const payload = `${Date.now()}.${crypto.randomBytes(12).toString("hex")}.${n}`;
   return `${payload}.${sign(payload)}`;
 }
 
+/** @returns {{ok:boolean, nonce:string}} */
 function verifyState(state) {
   const raw = String(state || "");
   const at = raw.lastIndexOf(".");
-  if (at <= 0) return false;
+  if (at <= 0) return { ok: false, nonce: "" };
   const payload = raw.slice(0, at);
   const given = raw.slice(at + 1);
   const expected = sign(payload);
-  if (given.length !== expected.length) return false;
+  if (given.length !== expected.length) return { ok: false, nonce: "" };
   // Constant time, so the comparison itself cannot be used to recover the MAC.
   if (!crypto.timingSafeEqual(Buffer.from(given, "utf8"), Buffer.from(expected, "utf8"))) {
-    return false;
+    return { ok: false, nonce: "" };
   }
-  const ts = Number(payload.split(".")[0]);
-  return Number.isFinite(ts) && Date.now() - ts <= STATE_TTL_MS;
+  const parts = payload.split(".");
+  const ts = Number(parts[0]);
+  const nonce = NONCE_RE.test(parts[2] || "") ? parts[2] : "";
+  return { ok: Number.isFinite(ts) && Date.now() - ts <= STATE_TTL_MS, nonce };
 }
 
-function authorizationUrl() {
+function authorizationUrl(clientNonce) {
   const params = new URLSearchParams({
     client_id: String(process.env.GOOGLE_CLIENT_ID).trim(),
     redirect_uri: redirectUri(),
     response_type: "code",
     scope: "openid email profile",
-    state: makeState(),
+    state: makeState(clientNonce),
     // Always show the account chooser. Silently reusing whichever Google account
     // is signed into the browser is how a shared computer signs into the wrong
     // ledger.
@@ -144,4 +167,5 @@ module.exports = {
   verifyState,
   exchangeCode,
   fetchProfile,
+  NONCE_RE,
 };

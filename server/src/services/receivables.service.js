@@ -160,7 +160,15 @@ function debtorKey(debt) {
  */
 function settledDate(debt, payments) {
   const paid = payments.reduce((s, p) => s + p.amount, 0);
-  if (paid < debt.amount) return null;
+  /**
+   * LW-032. This compared exactly while `recomputeDebtStatus` forgives the
+   * tolerated dust, so an invoice marked paid over a few kobo of rounding had
+   * no settled date: the debtor got no on-time credit in the reliability
+   * score and the invoice was left out of the average days to payment. Two
+   * functions in one file disagreed about whether the same invoice was paid.
+   * Same rule, one definition.
+   */
+  if (paid < (debt.amount || 0) - toleratedShortfallNgn(debt.amount)) return null;
   const dates = payments.map((p) => new Date(p.paidAt).getTime());
   return dates.length ? new Date(Math.max(...dates)) : null;
 }

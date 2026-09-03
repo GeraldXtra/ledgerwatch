@@ -19,8 +19,9 @@ async function list(req, res) {
 // GET /api/debtors/lookup?phone=  (for the Add-Debt inline reliability warning)
 async function lookup(req, res) {
   try {
-    const phone = (req.query.phone || "").trim();
-    const name = (req.query.name || "").trim();
+    // Coerced: `?phone[]=x` arrives as an array and `.trim` is not a function.
+    const phone = String(req.query.phone || "").trim().slice(0, 40);
+    const name = String(req.query.name || "").trim().slice(0, 120);
     if (!phone && !name) return res.json({ debtor: null });
 
     const groups = await debtorGroups(req.user._id);

@@ -14,6 +14,13 @@ const {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SALT_ROUNDS = 10;
+// A display name is a display name. Anything longer than this is a payload,
+// and it ends up in emails, statements and push notifications.
+const MAX_NAME_LENGTH = 80;
+// Compared against when a sign in names an address that has no account, so
+// that branch takes as long as a wrong password does. Any valid bcrypt hash
+// will do; this is bcrypt("not-a-password") at cost 10.
+const DUMMY_HASH = bcrypt.hashSync("not-a-password", SALT_ROUNDS);
 
 /**
  * POST /api/auth/register
@@ -39,6 +46,9 @@ async function register(req, res) {
     }
     if (String(password).length < 6) {
       return res.status(400).json({ error: "Password must be at least 6 characters" });
+    }
+    if (String(name).trim().length > MAX_NAME_LENGTH) {
+      return res.status(400).json({ error: `Name must be ${MAX_NAME_LENGTH} characters or fewer` });
     }
 
     const normalizedEmail = String(email).toLowerCase().trim();
@@ -116,13 +126,16 @@ async function login(req, res) {
     const normalizedEmail = String(email).toLowerCase().trim();
     const user = await User.findOne({ email: normalizedEmail });
 
-    // Same generic message whether the user is missing or the password is wrong.
-    if (!user) {
-      return res.status(401).json({ error: "Invalid email or password" });
-    }
-
-    const match = await bcrypt.compare(password, user.passwordHash);
-    if (!match) {
+    /**
+     * Same message AND the same cost whether the address exists or not. The
+     * unknown-address branch used to return before bcrypt ran, so it answered
+     * in a millisecond where a wrong password took a tenth of a second, and
+     * that difference is enough to list which addresses have accounts. The
+     * comparison below runs against a throwaway hash when there is no user.
+     */
+    const hash = user ? user.passwordHash : DUMMY_HASH;
+    const match = await bcrypt.compare(String(password), hash);
+    if (!user || !match) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
@@ -293,18 +306,29 @@ async function updateMe(req, res) {
     const updates = {};
 
     if (typeof name === "string" && name.trim()) {
+      if (name.trim().length > MAX_NAME_LENGTH) {
+        return res.status(400).json({ error: `Name must be ${MAX_NAME_LENGTH} characters or fewer` });
+      }
       updates.name = name.trim();
     }
     // Company name may be intentionally cleared, so an empty string is valid.
     if (typeof companyName === "string") {
-      updates.companyName = companyName.trim();
+      updates.companyName = companyName.trim().slice(0, 120);
     }
+    /**
+     * MERGE, never replace (LW-033). The whole sub document used to be
+     * rewritten from the three keys in the request, so fixing a typo in the
+     * account name with `{bankDetails: {accountName}}` wiped the account
+     * number and bank, every later reminder fell to the "reach out for my
+     * details" branch, and nothing said so. Only the keys that were sent are
+     * written, as dotted paths, and an explicit empty string still clears one.
+     */
     if (bankDetails && typeof bankDetails === "object") {
-      updates.bankDetails = {
-        accountName: bankDetails.accountName,
-        accountNumber: bankDetails.accountNumber,
-        bankName: bankDetails.bankName,
-      };
+      for (const key of ["accountName", "accountNumber", "bankName"]) {
+        if (typeof bankDetails[key] === "string") {
+          updates[`bankDetails.${key}`] = bankDetails[key].trim().slice(0, 120);
+        }
+      }
     }
     if (notifyPrefs && typeof notifyPrefs === "object") {
       updates.notifyPrefs = {

@@ -197,7 +197,26 @@ export async function approveRouter({ plan, password, onStep = () => {} }) {
  * Sign and broadcast the swap. Requires the password again — approval and swap
  * are two distinct authorisations.
  */
+/**
+ * How close to its deadline a plan may be and still be signed. The deadline was
+ * stamped when the plan was built; a review screen left open past it produces
+ * a transaction the router reverts with "Transaction too old", and a revert
+ * still costs the gas. Refusing here costs nothing and asks for a fresh quote.
+ */
+const DEADLINE_MARGIN_SECONDS = 45;
+
+export function planExpired(plan) {
+  const deadline = plan && plan.swapTx && plan.swapTx.deadline;
+  if (deadline == null) return false;
+  return Number(deadline) - Math.floor(Date.now() / 1000) < DEADLINE_MARGIN_SECONDS;
+}
+
 export async function executeSwap({ plan, password, side, alertId, onStep = () => {} }) {
+  if (planExpired(plan)) {
+    throw new Error(
+      "This quote has expired, so it was not signed. Get a fresh quote and review it again."
+    );
+  }
   const provider = getProvider(plan.chain.chainId);
   onStep("Unlocking your wallet");
   const master = await unlockWallet(password);

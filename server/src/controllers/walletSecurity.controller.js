@@ -22,6 +22,7 @@ const User = require("../models/User");
 
 const MAX_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;
+const MAX_QUESTIONS = 6;
 
 /** A curated list plus a custom slot, so answers are not all guessable trivia. */
 const PRESET_QUESTIONS = [
@@ -71,9 +72,21 @@ async function set(req, res) {
     if (!Array.isArray(answers) || answers.length < 3) {
       return res.status(400).json({ error: "Choose at least three questions and answer each." });
     }
+    /**
+     * BOUNDED. Each answer costs a bcrypt hash, deliberately slow, and the
+     * list length came straight from the request: ten thousand entries was
+     * ten thousand hashes on one call, a CPU denial of service from any
+     * signed in account. Nobody needs more than a handful of questions.
+     */
+    if (answers.length > MAX_QUESTIONS) {
+      return res.status(400).json({ error: `Choose at most ${MAX_QUESTIONS} questions.` });
+    }
     for (const a of answers) {
       if (!a || !a.id || !a.prompt || normalizeAnswer(a.answer).length < 2) {
         return res.status(400).json({ error: "Every question needs an answer of at least two characters." });
+      }
+      if (String(a.id).length > 64 || normalizeAnswer(a.answer).length > 200) {
+        return res.status(400).json({ error: "An answer must be 200 characters or fewer." });
       }
     }
 
@@ -125,7 +138,9 @@ async function verify(req, res) {
       });
     }
 
-    const supplied = Array.isArray(req.body && req.body.answers) ? req.body.answers : [];
+    const supplied = Array.isArray(req.body && req.body.answers)
+      ? req.body.answers.slice(0, MAX_QUESTIONS)
+      : [];
 
     // EVERY question must match. Compared with bcrypt, and all of them are
     // checked even after a mismatch so the response time does not reveal which
@@ -151,7 +166,14 @@ async function verify(req, res) {
           },
         }
       );
-      return res.status(locked ? 429 : 401).json({
+      /**
+       * 403, NOT 401. The browser's HTTP client treats every 401 as "this
+       * session is over": it clears the token and shows the sign in screen.
+       * A wrong security answer answered 401 here, so one mistyped childhood
+       * street signed the owner out of the whole application. The session is
+       * fine; the answer was wrong. That is a 403.
+       */
+      return res.status(locked ? 429 : 403).json({
         verified: false,
         error: locked
           ? `Too many incorrect attempts. Locked for ${LOCK_MINUTES} minutes.`

@@ -30,10 +30,18 @@ const buckets = new Map(); // key -> number[] of hit timestamps
 const MAX_KEYS = 50000;
 
 function clientIp(req) {
-  // Render, Vercel and most proxies set this; Express only honours it with
-  // trust proxy on, which index.js sets. Falls back to the socket address.
-  const xf = req.headers["x-forwarded-for"];
-  if (typeof xf === "string" && xf.length) return xf.split(",")[0].trim();
+  /**
+   * `req.ip` ONLY. This used to read the first entry of X-Forwarded-For
+   * itself, which is the entry the CLIENT writes: a proxy appends its own
+   * observation to whatever header the request already carried, so
+   * `X-Forwarded-For: 1.2.3.4` from a script arrived as `1.2.3.4, <real>` and
+   * the bucket keyed on the made up address. Every per address limit on sign
+   * in, code guessing and mail sending could be reset by changing one header.
+   *
+   * Express, with `trust proxy` set to the number of proxies in front of it
+   * (index.js sets 1), takes the address from the END of the list, the one
+   * the trusted proxy wrote, which is the only entry a client cannot choose.
+   */
   return req.ip || (req.socket && req.socket.remoteAddress) || "unknown";
 }
 

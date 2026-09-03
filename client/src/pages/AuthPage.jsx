@@ -7,6 +7,43 @@ import { Button, Field, Input } from "../components/ui";
 import LogoMark from "../components/LogoMark";
 import Turnstile, { turnstileEnabled, unloadTurnstile } from "../components/Turnstile";
 
+/**
+ * The nonce that ties a Google sign in to the browser that started it. Session
+ * storage, so it dies with the tab and never follows a link anywhere. Random
+ * bytes from the platform generator, never Math.random; a nonce that can be
+ * guessed is not a nonce.
+ */
+const OAUTH_NONCE_KEY = "ledgerwatch.oauth.nonce";
+
+function mintOauthNonce() {
+  const bytes = new Uint8Array(24);
+  window.crypto.getRandomValues(bytes);
+  const n = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  try {
+    sessionStorage.setItem(OAUTH_NONCE_KEY, n);
+  } catch {
+    /* private mode with storage disabled: the callback is then refused, which is
+       the safe direction, and the password form still works */
+  }
+  return n;
+}
+
+function readOauthNonce() {
+  try {
+    return sessionStorage.getItem(OAUTH_NONCE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function clearOauthNonce() {
+  try {
+    sessionStorage.removeItem(OAUTH_NONCE_KEY);
+  } catch {
+    /* nothing to clear */
+  }
+}
+
 /** Google's four colour mark, inline so nothing is fetched from anywhere. */
 function GoogleMark() {
   return (
@@ -103,6 +140,26 @@ export default function AuthPage() {
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
     if (oauthError) {
       setError(oauthError);
+      return;
+    }
+    /**
+     * ONLY A FLOW THIS BROWSER STARTED MAY SIGN IT IN.
+     *
+     * A token in a fragment can be put there by anyone: a link reading
+     * `/login#token=...` sent to somebody would have stored the sender's
+     * session in the recipient's browser, and everything they then entered
+     * would have landed in the sender's account. So the click that starts
+     * Google sign in mints a nonce and keeps it here; the server folds it into
+     * its signed state and hands it back beside the token; and a token that
+     * arrives without the nonce this browser is holding is thrown away.
+     */
+    const expected = readOauthNonce();
+    const given = params.get("n") || "";
+    clearOauthNonce();
+    if (!expected || given !== expected) {
+      setError(
+        "That sign in did not start in this browser, so it was not used. Press Continue with Google here to sign in."
+      );
       return;
     }
     setBusy(true);
@@ -666,17 +723,24 @@ export default function AuthPage() {
                 <span>or</span>
               </div>
 
-              {/* A plain link to the server, which redirects to Google and back.
-                  No Google script runs in this page, on purpose: this page's
-                  origin is the one that decrypts private keys. */}
-              <a
+              {/* A plain navigation to the server, which redirects to Google
+                  and back. No Google script runs in this page, on purpose:
+                  this page's origin is the one that decrypts private keys. The
+                  click mints the browser nonce the callback must return. */}
+              <button
+                type="button"
                 className="btn"
-                href={`${http.defaults.baseURL}/api/auth/google`}
                 style={{ display: "flex", width: "100%", justifyContent: "center", gap: 10 }}
+                onClick={() => {
+                  const n = mintOauthNonce();
+                  window.location.assign(
+                    `${http.defaults.baseURL}/api/auth/google?n=${encodeURIComponent(n)}`
+                  );
+                }}
               >
                 <GoogleMark />
                 {isRegister ? "Sign up with Google" : "Continue with Google"}
-              </a>
+              </button>
 
               <div className="gate-rule">
                 <span>{isRegister ? "Already have an account" : "New to LedgerWatch"}</span>

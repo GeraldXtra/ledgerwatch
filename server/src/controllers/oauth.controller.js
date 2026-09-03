@@ -16,8 +16,15 @@ function bounce(res, params) {
   return res.redirect(`${google.clientBase()}/login#${hash}`);
 }
 
-/** GET /api/auth/google  Start the redirect flow. */
-async function googleStart(_req, res) {
+/**
+ * GET /api/auth/google?n=<browser nonce>  Start the redirect flow.
+ *
+ * The nonce is minted by the sign in page and comes back to it beside the
+ * token, so a token from a link somebody else built is refused there. See
+ * googleAuth.service.js. A start without a nonce still works for an older
+ * page, and the page then refuses the token, which is the safe direction.
+ */
+async function googleStart(req, res) {
   if (!google.googleConfigured()) {
     return bounce(res, { error: "Sign in with Google is not switched on for this server." });
   }
@@ -26,7 +33,8 @@ async function googleStart(_req, res) {
       error: "SERVER_URL is not set on the server, so Google has nowhere to send you back to.",
     });
   }
-  return res.redirect(google.authorizationUrl());
+  const n = String((req.query && req.query.n) || "");
+  return res.redirect(google.authorizationUrl(google.NONCE_RE.test(n) ? n : ""));
 }
 
 /**
@@ -46,7 +54,8 @@ async function googleCallback(req, res) {
   try {
     const { code, state, error } = req.query || {};
     if (error) return bounce(res, { error: "Google sign in was cancelled." });
-    if (!google.verifyState(state)) {
+    const verified = google.verifyState(state);
+    if (!verified.ok) {
       return bounce(res, { error: "That sign in link has expired. Please start again." });
     }
     if (!code) return bounce(res, { error: "Google did not return a sign in code." });
@@ -97,7 +106,9 @@ async function googleCallback(req, res) {
     }
 
     if (!user) return bounce(res, { error: "Could not sign you in. Please try again." });
-    return bounce(res, { token: signToken(user._id, user.tokenVersion) });
+    // The nonce goes back beside the token so the page can prove this flow
+    // began in this browser before it stores anything.
+    return bounce(res, { token: signToken(user._id, user.tokenVersion), n: verified.nonce });
   } catch (err) {
     console.error("google callback error:", err.message);
     return bounce(res, { error: "Google sign in failed. Please try again." });

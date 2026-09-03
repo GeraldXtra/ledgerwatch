@@ -44,6 +44,24 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
     to && address && ethers.isAddress(to) && to.toLowerCase() === address.toLowerCase()
   );
 
+  /**
+   * A recipient that is a CONTRACT THIS APP KNOWS is never a person. Sending
+   * tokens to a token's own contract, or to the exchange router, is one of the
+   * commonest ways money is destroyed: the transfer succeeds, the balance
+   * leaves, and no key on earth can move it again. The registry lists exactly
+   * these addresses, so the mistake can be refused before it costs a fee.
+   */
+  const knownContract = (() => {
+    if (!to || !ethers.isAddress(to)) return null;
+    const lower = to.toLowerCase();
+    const token = tokens.find((t) => String(t.address).toLowerCase() === lower);
+    if (token) return `the ${token.symbol} token contract`;
+    const dex = chain.dex || {};
+    if (dex.router && String(dex.router).toLowerCase() === lower) return "the exchange router";
+    if (dex.quoter && String(dex.quoter).toLowerCase() === lower) return "the exchange quoter";
+    return null;
+  })();
+
   async function review(e) {
     e.preventDefault();
     setError("");
@@ -52,6 +70,11 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
     // reason to pay a fee to send funds to yourself on the same chain, so a
     // "proceed anyway" option would only ever help someone make the mistake.
     if (isSelfSend) return setStep("self");
+    if (knownContract) {
+      return setError(
+        `That address is ${knownContract} on ${chain.name}, not a wallet. Anything sent there cannot be recovered by anyone.`
+      );
+    }
     let value;
     try {
       value = ethers.parseUnits(String(amount), decimals);

@@ -204,7 +204,24 @@ async function generateReminderForDebt(debt, owner) {
 
   // Ask for the outstanding balance, and note prior part-payments.
   const { balance, amountPaid } = await outstandingBalance(debt);
-  const owed = balance > 0 ? balance : debt.amount;
+
+  /**
+   * LW-018. `owed` used to fall back to the ORIGINAL amount when the balance
+   * was zero, so a manual reminder on a settled invoice, from the button, the
+   * send route or a notification action, emailed a debtor who had paid in full
+   * a demand for the whole figure again. The automation pass never did this
+   * because its query filters on status; the three manual paths did not check
+   * at all. A settled invoice has nothing to remind anyone about, and saying
+   * so is a 409 the caller can show, not a letter the debtor can receive.
+   */
+  if (balance <= 0 || debt.status === "paid") {
+    const err = new Error(
+      "This invoice is settled. There is nothing outstanding to remind the debtor about."
+    );
+    err.status = 409;
+    throw err;
+  }
+  const owed = balance;
 
   const params = {
     debtorName: debt.debtorName,

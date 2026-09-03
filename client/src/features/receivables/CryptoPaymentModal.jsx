@@ -148,6 +148,24 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
         derivationIndex: alloc.derivationIndex,
       });
 
+      /**
+       * 5. THE ADDRESS THE SERVER RECORDED MUST BE THE ONE THIS WALLET DERIVED
+       *    (LW-013). It is about to be shown to a payer and printed in every
+       *    reminder. If any layer between here and the database changed a
+       *    character, money sent to it would be unreachable by anyone, so it
+       *    is compared before it is ever displayed, and the mismatch is said.
+       */
+      const stored = saved && saved.paymentAddress;
+      if (
+        !stored ||
+        String(stored.address).toLowerCase() !== address.toLowerCase() ||
+        Number(stored.derivationIndex) !== alloc.derivationIndex
+      ) {
+        throw new Error(
+          "The address that was saved does not match the one this wallet derived. Nothing has been shown to the payer. Revoke it and try again."
+        );
+      }
+
       setPassword("");
       onCreated(saved);
     } catch (err) {

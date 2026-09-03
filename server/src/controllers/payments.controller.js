@@ -30,10 +30,13 @@ async function record(req, res) {
     if (method && !["cash", "transfer", "other"].includes(method)) {
       return res.status(400).json({ error: "method must be cash, transfer or other" });
     }
-    const when = paidAt ? new Date(paidAt) : new Date();
+    const when = paidAt ? new Date(String(paidAt)) : new Date();
     if (Number.isNaN(when.getTime())) {
       return res.status(400).json({ error: "paidAt is not a valid date" });
     }
+    // A payment note is a line, not a document; it is shown on receipts and
+    // statements. An object where a string was expected used to answer 500.
+    const cleanNote = note == null ? undefined : String(note).trim().slice(0, 500);
 
     /**
      * IDEMPOTENCY FOR A MANUAL PAYMENT.
@@ -56,7 +59,7 @@ async function record(req, res) {
         userId: req.user._id,
         amount: amt,
         method: method || "transfer",
-        note,
+        note: cleanNote,
         paidAt: when,
         ...(key ? { txHash: key } : {}),
       });

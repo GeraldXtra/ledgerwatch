@@ -41,8 +41,14 @@ async function createWatch(userId, { symbol, type, value, coinId }, mode = "pape
 
   if (coinId) {
     // From the search picker: trust the CoinGecko id, derive a display symbol.
+    // Both are bounded and shaped: the id becomes an upstream URL and both
+    // are rendered on every screen and in every push notification.
     resolvedCoinId = String(coinId).trim().toLowerCase();
-    resolvedSymbol = (symbol || resolvedCoinId).toString().trim().toUpperCase();
+    if (!/^[a-z0-9-]{1,64}$/.test(resolvedCoinId)) {
+      throw httpError(400, "That is not a valid coin id.");
+    }
+    resolvedSymbol = String(symbol || resolvedCoinId).trim().toUpperCase().slice(0, 16);
+    if (!resolvedSymbol) throw httpError(400, "A symbol is required.");
   } else {
     const resolved = resolveSymbol(symbol);
     if (!resolved) {
@@ -474,7 +480,9 @@ async function actOnAlert(userId, alert, intent) {
   alert.actedAt = new Date();
   await alert.save();
 
-  const enrichedPortfolio = await getPortfolio(userId);
+  // The SAME book the trade was written to. Without the mode this returned
+  // the paper portfolio for a live alert, so the screen redrew the wrong one.
+  const enrichedPortfolio = await getPortfolio(userId, alert.mode || "paper");
   return { alert, trade, portfolio: enrichedPortfolio };
 }
 
@@ -562,7 +570,7 @@ async function approveAlert(userId, alert) {
   alert.status = "approved";
   await alert.save();
 
-  const enrichedPortfolio = await getPortfolio(userId);
+  const enrichedPortfolio = await getPortfolio(userId, alert.mode || "paper");
   return { alert, trade, portfolio: enrichedPortfolio };
 }
 

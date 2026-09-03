@@ -189,6 +189,22 @@ async function recordTx(req, res) {
     if (tokenOut && !ADDRESS_RE.test(tokenOut)) {
       return res.status(400).json({ error: "Invalid output token address" });
     }
+    if (tokenAddress && !ADDRESS_RE.test(tokenAddress)) {
+      return res.status(400).json({ error: "Invalid token address" });
+    }
+    // Amounts are decimal strings and symbols are tickers. These are stored
+    // and rendered in History and summed by the daily cap, so they are shaped
+    // here rather than trusted: a symbol is at most 24 characters and an
+    // amount is digits with one optional point.
+    const AMOUNT_RE = /^\d{1,60}(\.\d{1,36})?$/;
+    for (const [label, v] of [["value", value], ["amountOut", amountOut], ["minAmountOut", minAmountOut]]) {
+      if (v != null && !AMOUNT_RE.test(String(v))) {
+        return res.status(400).json({ error: `Invalid ${label}` });
+      }
+    }
+    if ((symbol && String(symbol).length > 24) || (tokenOutSymbol && String(tokenOutSymbol).length > 24)) {
+      return res.status(400).json({ error: "Invalid token symbol" });
+    }
 
     const tx = await WalletTx.create({
       userId: req.user._id,

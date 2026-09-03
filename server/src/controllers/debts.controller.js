@@ -17,8 +17,25 @@ const { onInvoiceSettled } = require("../services/settlement.service");
 
 // ---- validation helpers ---------------------------------------------------
 
+/**
+ * The text fields, with the longest value each may hold. A name is a name and
+ * a note is a paragraph; anything longer is a payload, and every one of these
+ * ends up in an email, a WhatsApp message, a statement and a push notification.
+ * An object where a string was expected used to reach Mongoose and answer 500.
+ */
+const TEXT_LIMITS = { debtorName: 120, debtorPhone: 40, debtorEmail: 254, note: 2000 };
+
+function cleanText(body) {
+  for (const [key, max] of Object.entries(TEXT_LIMITS)) {
+    if (body[key] === undefined || body[key] === null) continue;
+    body[key] = String(body[key]).trim().slice(0, max);
+  }
+  return body;
+}
+
 function validateDebtFields(body, { partial = false } = {}) {
   const errors = [];
+  cleanText(body);
 
   const has = (k) => body[k] !== undefined && body[k] !== null && body[k] !== "";
 
@@ -97,14 +114,22 @@ async function list(req, res) {
     if (["pending", "partially_paid", "paid"].includes(status)) {
       filter.status = status;
     }
-    if (search && search.trim()) {
-      const rx = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    const term = String(search || "").trim().slice(0, 100);
+    if (term) {
+      const rx = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
       filter.$or = [{ debtorName: rx }, { debtorPhone: rx }];
     }
     if (from || to) {
+      // An unparseable date used to become `Invalid Date` inside the query and
+      // answer 500; it is a 400 with the reason now.
+      const fromDate = from ? new Date(String(from)) : null;
+      const toDate = to ? new Date(String(to)) : null;
+      if ((fromDate && Number.isNaN(fromDate.getTime())) || (toDate && Number.isNaN(toDate.getTime()))) {
+        return res.status(400).json({ error: "from and to must be valid dates" });
+      }
       filter.dueDate = {};
-      if (from) filter.dueDate.$gte = new Date(from);
-      if (to) filter.dueDate.$lte = new Date(to);
+      if (fromDate) filter.dueDate.$gte = fromDate;
+      if (toDate) filter.dueDate.$lte = toDate;
     }
 
     const raw = await Debt.find(filter).sort({ createdAt: -1 });
@@ -337,6 +362,8 @@ async function remind(req, res) {
     const result = await generateReminderForDebt(debt, req.user);
     return res.status(201).json(result);
   } catch (err) {
+    // A settled invoice answers 409 with the reason (LW-018), not a 500.
+    if (err && err.status) return res.status(err.status).json({ error: err.message });
     console.error("remind error:", err.message);
     return res.status(500).json({ error: "Failed to generate reminder" });
   }
@@ -376,6 +403,7 @@ async function send(req, res) {
 
     return res.status(201).json({ ...result, deliveries });
   } catch (err) {
+    if (err && err.status) return res.status(err.status).json({ error: err.message });
     console.error("send reminder error:", err.message);
     return res.status(500).json({ error: "Failed to send reminder" });
   }

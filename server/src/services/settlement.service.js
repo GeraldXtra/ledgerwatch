@@ -23,11 +23,20 @@ const { notifyUser } = require("./push.service");
 const EMAIL_DEBOUNCE_MS = Number(process.env.SETTLEMENT_EMAIL_DEBOUNCE_MS || 20000);
 const lastEmailAt = new Map();
 
+// Entries are only useful for one debounce window, so the map is swept when it
+// grows, rather than holding one stamp per invoice for the life of the process.
+const MAX_DEBOUNCE_KEYS = 5000;
+
 function recentlyEmailed(debtId) {
   const key = String(debtId);
   const prev = lastEmailAt.get(key);
   const now = Date.now();
   if (prev && now - prev < EMAIL_DEBOUNCE_MS) return true;
+  if (lastEmailAt.size >= MAX_DEBOUNCE_KEYS) {
+    for (const [k, at] of lastEmailAt) {
+      if (now - at >= EMAIL_DEBOUNCE_MS) lastEmailAt.delete(k);
+    }
+  }
   lastEmailAt.set(key, now);
   return false;
 }

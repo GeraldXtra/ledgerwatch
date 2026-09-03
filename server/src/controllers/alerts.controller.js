@@ -56,6 +56,13 @@ async function dismiss(req, res) {
     const alert = await Alert.findOne({ _id: req.params.id, userId: req.user._id });
     if (!alert) return res.status(404).json({ error: "Alert not found" });
 
+    // The same guard `act` has (LW-024). This legacy route still overwrote an
+    // approved alert's `userAction` with "dismiss" while `executedQty` stayed
+    // filled in: a trade that happened, recorded as declined.
+    if (alert.status !== "pending") {
+      return res.status(409).json({ error: `Alert is already ${alert.status}` });
+    }
+
     alert.status = "dismissed";
     alert.userAction = "dismiss";
     alert.actedAt = new Date();

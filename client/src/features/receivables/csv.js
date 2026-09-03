@@ -1,8 +1,18 @@
 // Tiny client-side CSV export (no dependency). Triggers a file download.
 
+/**
+ * A cell that starts with =, +, -, @ or a tab or carriage return is read by
+ * Excel and LibreOffice as a FORMULA, not text. A debtor named "=HYPERLINK(...)"
+ * or "=cmd|' /C calc'!A0" would execute when the owner opened their own export.
+ * Such cells are prefixed with an apostrophe, which spreadsheets show as
+ * literal text, and quoted so the comma rule still holds.
+ */
+const FORMULA_LEAD = /^[=+\-@\t\r]/;
+
 function esc(value) {
-  const s = value == null ? "" : String(value);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  let s = value == null ? "" : String(value);
+  if (FORMULA_LEAD.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) || s.startsWith("'") ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 /**

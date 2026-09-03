@@ -15,6 +15,10 @@ const { supportedSymbols } = require("../services/coinMap");
 const { getPrices } = require("../services/coingecko.service");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+// A question for the agent is a sentence or two. Everything past this is paid
+// for per token at the provider and buys nothing; it was unbounded, and a
+// non-string body value reached `.trim()` and answered 500.
+const MAX_PROMPT_CHARS = 2000;
 
 /**
  * Deterministic, no-AI answer over the user's debts. Never crashes.
@@ -68,7 +72,7 @@ function computeFallback(debts) {
 // POST /api/ai/receivables-query
 async function receivablesQuery(req, res) {
   try {
-    const question = (req.body && req.body.question) || "";
+    const question = String((req.body && req.body.question) || "").slice(0, MAX_PROMPT_CHARS);
     if (!question.trim()) {
       return res.status(400).json({ error: "question is required" });
     }
@@ -122,7 +126,7 @@ async function executeWatchIntents(userId, intents, mode = "paper") {
 // summary with NO AI. Never crashes.
 async function chat(req, res) {
   try {
-    const message = (req.body && req.body.message) || "";
+    const message = String((req.body && req.body.message) || "").slice(0, MAX_PROMPT_CHARS);
     if (!message.trim()) {
       return res.status(400).json({ error: "message is required" });
     }

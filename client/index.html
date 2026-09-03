@@ -2,7 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover is what makes env(safe-area-inset-*) report real
+         values on an iPhone. The status bar below is translucent, so in the
+         installed app the page is drawn UNDER the clock and status icons; the
+         sticky bars pad themselves by the top inset (see .lw-chrome), and the
+         fixed toasts and action bar clear the home indicator by the bottom one.
+         Without this line every inset is zero and the masthead sat behind the
+         status bar on every iPhone that had added the app to the home screen. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#16283f" />
     <!--
       CONTENT SECURITY POLICY. This page decrypts private keys, so an injected
