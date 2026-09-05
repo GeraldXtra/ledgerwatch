@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
-import { lazy } from "react";
+import { Suspense, lazy } from "react";
 import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
 import Dashboard from "./pages/Dashboard";
@@ -11,6 +11,11 @@ import LogoMark from "./components/LogoMark";
 
 // Wallet pulls in ethers + qrcode — code-split so those load only on demand.
 const WalletPage = lazy(() => import("./features/wallet/WalletPage"));
+// The guide, the policy pages and the contact form carry a lot of text that
+// the app itself never needs. Split, so signing in does not download it.
+const DocsPage = lazy(() => import("./pages/DocsPage"));
+const LegalPage = lazy(() => import("./pages/LegalPage"));
+const ContactPage = lazy(() => import("./pages/ContactPage"));
 
 function Booting() {
   return (
@@ -33,6 +38,11 @@ function PublicOnly({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <Booting />;
   return user ? <Navigate to="/app" replace /> : children;
+}
+
+/** A code-split public page, with the boot screen while its chunk loads. */
+function Public({ children }) {
+  return <Suspense fallback={<Booting />}>{children}</Suspense>;
 }
 
 /** The dashboard requires a session. */
@@ -62,6 +72,16 @@ export default function App() {
             </PublicOnly>
           }
         />
+        {/* The user guide. Public, so someone deciding whether to sign up can
+            read how the product works, and reachable signed in, from the Help
+            icon and the footer. */}
+        <Route path="/docs" element={<Public><DocsPage /></Public>} />
+        <Route path="/docs/:slug" element={<Public><DocsPage /></Public>} />
+        {/* The policy, the terms and the contact form. Public for the same
+            reason as the guide, and reachable from every footer. */}
+        <Route path="/privacy" element={<Public><LegalPage which="privacy" /></Public>} />
+        <Route path="/terms" element={<Public><LegalPage which="terms" /></Public>} />
+        <Route path="/contact" element={<Public><ContactPage /></Public>} />
         {/* The shell renders sidebar + topbar and an <Outlet> for the section, so
             each tab gets a real shareable URL and /app/settings can exist. Each
             page's own data flow is unchanged. */}

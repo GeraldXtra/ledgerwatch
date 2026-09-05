@@ -29,5 +29,5 @@ keystore*.json
 *.md
 !README.md
 .claude/
-docs/
-claude-project/
+/docs/
+/claude-project/

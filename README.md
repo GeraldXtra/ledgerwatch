@@ -43,6 +43,14 @@ and never sees a key.
 It has not had an outside security review, and that is stated plainly in `docs/SECURITY.md` along
 with everything else that is still open. Anyone using it with real money should read that first.
 
+### For the people using it
+
+There is a user guide at [useledgerwatch.co/docs](https://useledgerwatch.co/docs) that walks
+through every page and every feature with pictures of the real interface, a
+[privacy policy](https://useledgerwatch.co/privacy) and [terms](https://useledgerwatch.co/terms)
+written in plain words, and a [contact page](https://useledgerwatch.co/contact) that reaches me
+directly. The guide is also one tap away inside the app, from the book icon in the top bar.
+
 The rule I kept coming back to while building it: the agent prepares, the person approves. It is
 fully automatic in how it thinks and deliberately manual where it matters. When software touches
 money, the last decision should belong to a human being.

@@ -615,8 +615,8 @@ function WalletInner() {
               </Button>
             </div>
             <p className="muted small" style={{ marginTop: 18 }}>
-              Real networks are available alongside the test ones, and switching to a real one asks
-              you to confirm it in writing. Nothing is signed without the password you set here.
+              Real networks are available alongside the test ones, and the network name turns red on a
+              real one. Nothing is signed without the password you set here.
             </p>
           </Card>
         </div>

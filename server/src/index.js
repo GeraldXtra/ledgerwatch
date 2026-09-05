@@ -112,6 +112,8 @@ app.use("/api/wallet", require("./routes/wallet.routes"));
 app.use("/api/trading", require("./routes/trading.routes"));
 app.use("/api/payment-addresses", require("./routes/paymentAddresses.routes"));
 app.use("/api/bitcoin", require("./routes/bitcoin.routes"));
+// Public. The Contact page. Rate limited and Turnstile checked inside.
+app.use("/api/contact", require("./routes/contact.routes"));
 
 /**
  * JSON, ALWAYS. There was no 404 handler and no error handler, so an unknown
