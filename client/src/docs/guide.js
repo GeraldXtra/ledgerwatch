@@ -50,7 +50,7 @@ export const GUIDE = [
         [
           ["**Receivables**", "Records what you are owed, takes payments, writes and sends reminders, and shows you which customers pay on time. See [Receivables](/docs/receivables)."],
           ["**Market Watch**", "Watches coin prices against conditions you set and raises an alert when one is met. You decide whether to buy, sell or ignore it, on paper or with real funds. See [Market Watch](/docs/market-watch)."],
-          ["**Wallet**", "A wallet for Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Chain, Avalanche and Bitcoin, created and kept in your browser. See [The wallet](/docs/wallet)."],
+          ["**Wallet**", "A wallet for Ethereum, Base, Arbitrum One, OP Mainnet, Polygon, BNB Chain, Avalanche C-Chain and Bitcoin, created and kept in your browser. See [The wallet](/docs/wallet)."],
           ["**Settings**", "Your profile, the bank details that go into reminders, crypto payment options, security, wallet backup, notifications, and the danger zone. See [Settings](/docs/settings)."],
         ]
       ),
@@ -86,7 +86,7 @@ export const GUIDE = [
         "Check your email for a six digit code. It is valid for thirty minutes. Type it in and press **Confirm and continue**. If it has not arrived, press **Send a new code**; if you typed the wrong address, press **Use a different email**.",
       ]),
       p(
-        "You can also press **Sign up with Google**. Google confirms who you are and sends you back signed in, with no password to remember. An account made that way can still set a password later from Settings if you want one."
+        "You can also press **Sign up with Google**. Google confirms who you are and sends you back signed in, with no password to remember. An account made that way has no password of its own; if you ever want one, press **Forgot your password?** on the sign in page and a code is emailed to you."
       ),
       note(
         "The code screen says clearly when a code has expired rather than when it was mistyped, because the two need different fixes: one needs a new code, the other needs a closer look at what you typed.",
@@ -133,7 +133,7 @@ export const GUIDE = [
       img("phone-home.webp", "Receivables on a phone. The four sections are along the bottom.", true),
       h2("Navigation"),
       p(
-        "The four sections sit in a bar along the bottom of the screen. Tables become stacked cards, figures sit two to a row, and every text box is sized so the phone does not zoom in when you tap it."
+        "The four sections sit in a bar along the bottom of the screen. Tables become short cards, one invoice, customer or coin each, figures sit two to a row, and every text box is sized so the phone does not zoom in when you tap it."
       ),
       h2("Add it to your home screen"),
       p("Installed, LedgerWatch opens full screen like an app, and on iPhone that is also what allows notifications."),
@@ -145,6 +145,8 @@ export const GUIDE = [
       p(
         "Open the installed app, go to Settings, Notifications, and press **Enable notifications**. Your phone asks for permission once. After that, a due reminder, a detected payment or a price alert arrives as a notification, and a price alert carries Buy and Sell buttons that open the trade for you to confirm."
       ),
+      img("phone-debts.webp", "The ledger on a phone: each invoice is a card of three lines.", true),
+      img("phone-market.webp", "Market Watch on a phone.", true),
       img("phone-wallet.webp", "The wallet on a phone.", true),
       h2("The wallet on a phone"),
       p(
@@ -210,12 +212,12 @@ export const GUIDE = [
         ["Field", "Notes"],
         [
           ["**Debtor name**", "Required. The customer's name as it should appear in reminders."],
-          ["**Phone**", "A Nigerian number such as 08031234567. Needed for WhatsApp reminders. Also how LedgerWatch recognises a returning customer."],
-          ["**Email**", "Optional. Adding one switches on email reminders for this debt."],
-          ["**Amount**", "In naira. Thousands are grouped as you type, and a large figure is repeated in words under the box so nine digits cannot be misread."],
-          ["**Due date**", "Required. Overdue is counted from the day after this."],
+          ["**Phone (for example 08031234567)**", "A Nigerian number. Needed for WhatsApp reminders. Also how LedgerWatch recognises a returning customer."],
+          ["**Email (optional, turns on email reminders)**", "Adding one switches on email reminders for this debt."],
+          ["**Amount (₦)**", "In naira. Thousands are grouped as you type, and a figure of a million or more is repeated in short form, such as ₦1.5M, under the box so nine digits cannot be misread."],
+          ["**Due date**", "Required. The invoice counts as overdue from this date."],
           ["**Re-remind every (days)**", "How often a reminder may be generated for this debt while it stays unpaid. Blank uses the default of three days."],
-          ["**Note**", "Optional. What the invoice was for. It appears on statements."],
+          ["**Note (optional)**", "What the invoice was for. It appears on statements."],
         ]
       ),
       p("Press **Add debt** to save it. Press **Cancel** or Escape to discard it."),
@@ -327,7 +329,7 @@ export const GUIDE = [
         "**Send WhatsApp** sends through the WhatsApp provider set up on the server. It needs a valid phone number on the invoice.",
         "**Send Email** sends through the server's email. It needs an email address on the invoice.",
         "**Send Both** does both.",
-        "**Open in WhatsApp** opens WhatsApp on your own phone or computer with the message ready to send from your own number. This always works, with nothing set up on the server, and is how most people send.",
+        "**Open in WhatsApp** opens WhatsApp on your own phone or computer with the message ready to send from your own number. It works whenever the invoice has a valid phone number, needs nothing set up on the server, and is how most people send.",
       ]),
       p(
         "The line under the buttons tells you what is missing: payout details not set, phone missing or invalid, no email on file. If a provider is not configured on the server, the send is reported as **skipped** rather than silently lost, and the WhatsApp link remains."
@@ -342,7 +344,7 @@ export const GUIDE = [
       ),
       h2("How often reminders go out"),
       p(
-        "Each debt has its own **Re-remind every (days)** setting, three days by default. LedgerWatch checks the ledger regularly and, for any unpaid invoice whose last reminder is older than its interval, generates the next one. Generating counts, whether or not it was sent, so a reminder you chose not to send still holds the interval."
+        "Each debt has its own **Re-remind every (days)** setting, three days by default. LedgerWatch checks the ledger regularly and, for any unpaid invoice that is past its due date and whose last reminder is older than its interval, generates the next one. Generating counts, whether or not it was sent, so a reminder you chose not to send still holds the interval."
       ),
       h2("Automatic sending"),
       p(
@@ -350,7 +352,7 @@ export const GUIDE = [
       ),
       h2("Reminding many at once"),
       p(
-        "**Remind all overdue** above the ledger generates a reminder for every overdue invoice. Select rows and press **Remind selected** to do it for a chosen set. Each reminder is generated, not sent, unless automatic sending is on."
+        "**Remind all overdue** above the ledger generates a reminder for every overdue invoice. Select rows and press **Remind selected** to do it for a chosen set. Each reminder is generated, not sent. Automatic sending applies only to the reminders the scheduler generates by itself."
       ),
       h2("Reminders and crypto payments"),
       p(
@@ -367,7 +369,7 @@ export const GUIDE = [
       img("debtors.webp", "The Debtors tab."),
       h2("The table"),
       p(
-        "One row per customer, matched by phone number: the name, the total they currently owe, their reliability, and the date of the last thing that happened on their account. Click a column heading to sort, and click a row to open the customer's profile."
+        "One row per customer, matched by phone number, or by name when there is no valid number: the name, the total they currently owe, their reliability, and the date of the last thing that happened on their account. Click a column heading to sort, and click a row to open the customer's profile."
       ),
       h2("The reliability score"),
       p(
@@ -393,7 +395,7 @@ export const GUIDE = [
       h2("Statements"),
       img("debtor-statement.webp", "A customer statement."),
       p(
-        "Press **Statement** on the profile for a printable account of every invoice and every payment for that customer, with the balance under each. **Print** prints it or saves it as a PDF to send. **CSV** downloads the same rows as a spreadsheet. Your company name from Settings appears at the top."
+        "Press **Statement** on the profile for a printable account of every invoice and every payment for that customer, with the balance under each. **Print** prints it or saves it as a PDF to send. **CSV** downloads the same rows as a spreadsheet. Your business name appears at the top: the company name from Settings if you have set one, otherwise your display name."
       ),
     ],
   },
@@ -445,13 +447,13 @@ export const GUIDE = [
           ["**Still needed**", "What remains after the confirmed amount."],
         ]
       ),
-      p("Each transfer is listed as **Detected**, with its confirmations counted against the number needed, then **Confirmed**. A transfer that vanished in a network reorganisation is marked **Orphaned** and not counted."),
+      p("Each transfer is listed as **Detected**, with a running count of its confirmations, then **Confirmed** once it is as deep as the network's setting requires (Settings, Crypto payments). A transfer that vanished in a network reorganisation is marked **Orphaned** and not counted."),
       h3("The unusual cases"),
       ul([
         "**Part payment.** Several transfers add up. The invoice becomes Partial until the full amount has confirmed.",
         "**Overpaid.** The invoice is settled in full and the excess is recorded on the panel, so you can return it or leave it.",
-        "**Wrong token.** A transfer of something other than the expected stablecoin is listed as such and does not settle the invoice.",
-        "**Money with nothing owed.** If a customer pays an address after the invoice was already settled some other way, the money is recorded as unattributed and shown, never dropped.",
+        "**Wrong token.** A transfer of some other token does not settle the invoice and is not listed on the panel. If a customer says they paid and nothing shows, open the address on the explorer.",
+        "**Money with nothing owed.** If a customer pays an address after the invoice was already settled some other way, the money is still recorded against the address, you are notified, and the panel notes that the address holds more than the invoice accounts for. It can be swept like any other balance.",
         "**An older balance.** If the address holds more than the listed transfers account for, a notice says so and points you at the explorer.",
       ]),
       note(
@@ -544,6 +546,7 @@ export const GUIDE = [
         "Type what you want in plain words: **watch BTC drop 5%**, **watch ETH, SOL**, **how is my portfolio?** The agent creates the watches or answers the question. Three suggestions above the box are one tap away."
       ),
       h2("Active watches"),
+      img("market-watches.webp", "The active watches."),
       p("Every watch is listed as **when** and its condition, with the baseline where there is one. The pencil edits the condition in place; the cross stops watching."),
       h2("Alerts"),
       img("market-alerts.webp", "An alert waiting for a decision."),
@@ -573,7 +576,7 @@ export const GUIDE = [
     blocks: [
       h2("The simulated portfolio"),
       p(
-        "Every account starts with one million dollars of simulated cash. Approving a buy alert opens a position at the alert's price; selling closes some or all of it. The portfolio card at the top shows the total value, the profit or loss against the start, and an allocation bar of holdings and cash."
+        "Every account starts with one million dollars of simulated cash. Approving a buy alert opens a position at the live price at the moment you confirm, or at the alert's price if the feed is unavailable; selling closes some or all of it. The portfolio card at the top shows the total value, the profit or loss against the start, and an allocation bar of holdings and cash."
       ),
       h2("The trade panel"),
       img("market-trade.webp", "The trade panel for a buy."),
@@ -581,7 +584,7 @@ export const GUIDE = [
         "Press **Buy** or **Sell** on an alert. The panel shows the agent's recommendation and its reasoning. If you are going against it, a note says so.",
         "Choose to enter the amount in the coin or in dollars, then type it or use the **25%**, **50%**, **75%** and **MAX** buttons, which are worked out from what you have available.",
         "Read the quote: what you spend, what you receive, the price, your cash afterwards and your position afterwards.",
-        "Press **Review**, check the summary, and press **Confirm**. Nothing happens until that last press.",
+        "Press **Review buy** or **Review sell**, check the summary, and press **Confirm buy** or **Confirm sell**. Nothing happens until that last press.",
       ]),
       img("market-trade-confirm.webp", "The confirmation step."),
       h2("Holdings"),
@@ -613,7 +616,7 @@ export const GUIDE = [
       h2("Live positions"),
       img("market-live.webp", "Live positions, read from the chain."),
       p(
-        "This card replaces the simulated portfolio. It reads your wallet's balances directly from the network, prices them with the same market data, and lists them with cost basis where the coin was bought here. **Trade with** chooses which dollar funds your buys, USDC or USDT, among those the network carries. A wallet with nothing on the network shows its address and a QR code to deposit to, and says plainly that the zero was read successfully rather than assumed."
+        "This card replaces the simulated portfolio. It reads your wallet's balances directly from the network, prices them with the same market data, and lists them with cost basis where the coin was bought here. The **USDC / USDT** switch at the top right chooses which dollar funds your buys, among those the network carries. A wallet with nothing on the network shows its address and a QR code to deposit to, and says plainly that the zero was read successfully rather than assumed."
       ),
       p("If the network cannot be read, the card says so. It never falls back to a simulated figure."),
       h2("A live trade, step by step"),
@@ -622,7 +625,7 @@ export const GUIDE = [
         "Press **Review**, then **Confirm**. The live trade dialog opens and fetches a quote from Uniswap on the chosen network.",
         "Read the quote: **You pay**, **You receive, about** with the fee tier it was routed through, the **Price impact**, the **Minimum received** after your slippage tolerance, and the **Network fee**.",
         "Choose a **Slippage tolerance** of 0.5%, 1% or 3%. If the price moves further than that before the trade lands, it fails and costs only the fee.",
-        "If this is the first time you have sold this token here, press **Approve** and enter your wallet password. This is a separate transaction that lets the exchange move exactly this amount of the token, and no more.",
+        "If the exchange is not yet allowed to move this amount of the token you are paying with, press **Approve** followed by the token's name and enter your wallet password. This is a separate transaction that allows exactly this amount and no more, which is why it is asked for again on most trades.",
         "Enter your wallet password and press **Sign and buy** or **Sign and sell**. A link to the transaction on the block explorer appears, and the trade shows in your wallet history and in **Live trades** under the positions card.",
       ]),
       p("A signed trade carries a deadline. If the network does not include it quickly it simply expires rather than executing later at a different price."),
@@ -646,7 +649,7 @@ export const GUIDE = [
       ),
       h2("What is not traded live"),
       p(
-        "A coin can be watched even when it has no pool on the chosen network. Choosing Buy on such an alert in live mode explains that it can only be traded on paper. Only the tokens verified in LedgerWatch's registry for that network are traded live."
+        "A coin can be watched even when it has no pool on the chosen network. Choosing Buy on such an alert in live mode explains that it can only be traded on paper. Only the tokens verified in LedgerWatch's registry for that network, and tokens you have added by contract address, are traded live."
       ),
     ],
   },
@@ -668,6 +671,7 @@ export const GUIDE = [
         "Tick **I have written down my recovery phrase** and press **Continue**.",
         "Choose a wallet password of at least eight characters and confirm it. It encrypts the keys on this device and you enter it every time you send. Press **Create wallet**.",
       ]),
+      img("wallet-create-password.webp", "The password step."),
       note(
         "Anyone with the twelve words can take everything in the wallet. LedgerWatch will never ask for them. Never type them into another website, a chat, or a message to support.",
         "danger",
@@ -691,12 +695,13 @@ export const GUIDE = [
         "**The figure**, the dollar value of everything held on this network. If any balance could not be read or has no price, a note under the figure says which, and the total is marked incomplete rather than quietly wrong.",
         "**Receive**, **Send** and **Collected** open a panel under the wallet. See [Send and receive](/docs/send-and-receive).",
         "**Tokens**, one row per token with its logo, value and quantity. The network's own coin is marked as the one that pays the fees. A row that could not be read says so instead of showing zero.",
-        "**Activity**, the transactions sent from this wallet, with their status and a link to the explorer.",
+        "**Activity**, the transactions sent from this wallet and the transfers that arrived at it, with their status and a link to the explorer.",
         "**Hide empty balances** tidies the list. **Import a token** adds one by contract address. See [Tokens](/docs/tokens).",
       ]),
+      img("wallet-activity.webp", "The Activity tab before anything has been sent."),
       h2("The backup notice"),
       p(
-        "Until you have seen your recovery phrase, a notice at the top of the wallet asks you to back it up. Press **Do it now** to go to Settings, Wallet backup. The notice can be dismissed for the session but returns until the phrase has been revealed once."
+        "Until you have seen your recovery phrase, a notice at the top of the wallet asks you to back it up. Press **Do it now** to go to Settings, Wallet backup. The notice can be dismissed, but it returns the next time the Wallet page opens, until the phrase has been revealed once."
       ),
       h2("Remove the wallet from this device"),
       p(
@@ -719,7 +724,7 @@ export const GUIDE = [
       table(
         ["Real networks", "Test networks"],
         [
-          ["Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Chain, Avalanche", "Sepolia, Base Sepolia, Arbitrum Sepolia, Optimism Sepolia, Polygon Amoy"],
+          ["Ethereum, Base, Arbitrum One, OP Mainnet, Polygon, BNB Chain, Avalanche C-Chain", "Ethereum Sepolia, Base Sepolia, Arbitrum Sepolia, Optimism Sepolia, Polygon Amoy"],
           ["Bitcoin", "Bitcoin Testnet"],
         ]
       ),
@@ -731,7 +736,7 @@ export const GUIDE = [
         "Your wallet address is the same on every network in the first row, so you never need a separate wallet per chain. Bitcoin is different: it has its own address, beginning bc1, derived from the same recovery phrase."
       ),
       note(
-        "Balances are per network and do not move between them. Funds on Base stay on Base. Sending to your own address does not carry them to another network; it returns them to you on the same one and costs a fee. Moving assets between networks needs a bridge, and LedgerWatch links to the official one for each network from the Send and Receive panels.",
+        "Balances are per network and do not move between them. Funds on Base stay on Base. Sending to your own address does not carry them to another network; it returns them to you on the same one and costs a fee. Moving assets between networks needs a bridge. On the test networks that have one, LedgerWatch links to it from the Send and Receive panels; on a real network, use that network's official bridge.",
         "warn",
         "The mistake to avoid"
       ),
@@ -741,7 +746,7 @@ export const GUIDE = [
       ),
       h2("Getting test coins"),
       p(
-        "Choose a test network, press **Receive**, copy the address, and paste it into that network's faucet. The Receive panel links to the faucet where one is known. Test USDC for practising invoice payments is available from the Circle faucet for each test network."
+        "Choose a test network, press **Receive**, copy the address, and paste it into that network's faucet. The Receive panel links to a faucet where one is known. Test USDC for practising invoice payments comes from a USDC test faucet for that network."
       ),
       h2("Fees"),
       p(
@@ -778,13 +783,13 @@ export const GUIDE = [
       h2("Collected payments"),
       img("wallet-collected.webp", "The Collected panel."),
       p(
-        "Press **Collected**. Every invoice payment address on this network that holds money is listed, with the customer, the balance read live from the network, and its naira value at the rate the invoice was quoted. Tick the ones to move, or **Select all**, and press **Sweep**."
+        "Press **Collected**. Every invoice payment address on this network that holds money is listed, with the customer, the balance read live from the network, and its naira value at the rate the invoice was quoted. Tick the ones to move, or **Select all** when there are several, and press **Sweep**, which names how many addresses it will move."
       ),
       h3("The sweep dialog"),
       ol([
         "Each address is listed with its amount. The totals show what will move, its naira value, and the destination: this wallet, or the sweep destination set in Settings, in which case a warning asks you to check it.",
         "An invoice address holds only stablecoin and cannot pay its own fee, so your main wallet first sends it a little of the network's coin. The dialog says how much and that it is a separate transaction you are approving.",
-        "Enter your **wallet password** once for the whole batch and press **Sign and sweep**. Each transfer is signed and sent in turn, with its progress shown on its row.",
+        "Enter your **wallet password** once for the whole batch and press **Sign and sweep**, which counts the addresses when there are several. Each transfer is signed and sent in turn, with its progress shown on its row.",
       ]),
       p("Swept money lands in your main wallet on the same network, and the balances update."),
     ],
@@ -803,8 +808,8 @@ export const GUIDE = [
       img("wallet-import-token.webp", "Adding a token by contract address."),
       ol([
         "Press **Import a token** at the foot of the token list.",
-        "Paste the token's **contract address** on this network and press **Look up**. LedgerWatch reads the symbol, the decimals and your balance from the contract itself. Nothing is assumed from the name.",
-        "Read the warning, then press **Add**. The token appears in your list with an **added** label, on every device you sign into.",
+        "Paste the **Token contract address** on this network and press **Look up**. LedgerWatch reads the symbol, the decimals and your balance from the contract itself. Nothing is assumed from the name.",
+        "Read the warning, then press **Add** followed by the token's symbol. The token appears in your list with an **added** label, on every device you sign into.",
       ]),
       note(
         "Anyone can deploy a contract and call it USDC. LedgerWatch only reports what a contract says about itself. Add a token only if you know where the address came from, and check it on the explorer first.",
@@ -823,6 +828,7 @@ export const GUIDE = [
         "Nothing is added by itself. On a real network most unsolicited tokens are spam or bait. A token whose symbol copies a verified token on that network, but is not that contract, is flagged as an impersonation and should be treated as bait unless you know who sent it."
       ),
       h2("Token details"),
+      img("wallet-token-detail.webp", "A token's details, opened from its row."),
       p(
         "Click any row. A token the price feed knows opens the same detail dialog as the Market Watch page, with a chart and your position. A token it does not know shows the network, the balance read from the chain, its value if a price exists, and the contract address."
       ),
@@ -873,10 +879,11 @@ export const GUIDE = [
     title: "Settings",
     intro: "Seven sections, in the list on the left. On a phone they run along the top.",
     blocks: [
+      img("phone-settings.webp", "Settings on a phone: the sections run along the top and scroll sideways.", true),
       h2("Profile"),
       img("settings-profile.webp", "Profile."),
       p(
-        "Your picture, which is cropped to a square and shown beside your name; your display name; and your company name, which appears on reminders and statements. Your email is shown but cannot be changed here."
+        "Your picture, which is cropped to a square and shown beside your name; your display name, which signs your reminders; and your company name, which appears at the top of statements and receipts when it is set. Your email is shown but cannot be changed here."
       ),
       h2("Payout details"),
       img("settings-payout.webp", "Payout details."),
@@ -906,7 +913,7 @@ export const GUIDE = [
       p("If Chrome has blocked notifications for the site, it will not ask again; the page explains how to allow them from the address bar and try again."),
       h3("Automatic reminders"),
       p(
-        "**Send reminders automatically** lets LedgerWatch send due reminders itself, over **WhatsApp**, **Email** or both. Off by default. A note explains why reminders sent from a personal Gmail address often land in spam, and what a properly set up domain needs."
+        "**Send reminders automatically** lets LedgerWatch send due reminders itself, over **WhatsApp**, **Email** or both. Off by default. With email ticked, a note explains why reminders sent from a personal Gmail address often land in spam, and what a properly set up domain needs."
       ),
       h2("Danger zone"),
       img("settings-danger.webp", "The danger zone."),
@@ -970,7 +977,7 @@ export const GUIDE = [
         "Every transaction is signed in your browser with a password typed for that transaction. The server has nothing to sign with, so no bug, breach or employee could move your funds through it.",
         "Your sign in password is stored as a hash, never in plain text. Changing it signs every other device out.",
         "Sign in, sign up and password reset are protected by a human check and by rate limits, and the reset code expires in fifteen minutes.",
-        "The page forbids scripts from any origin but its own, so the sign in page cannot be tampered with by a stray script.",
+        "The page forbids scripts from any origin but its own and the human check's, so the sign in page cannot be tampered with by a stray script.",
       ]),
       h2("What that means LedgerWatch cannot do"),
       ul([
@@ -1038,7 +1045,7 @@ export const GUIDE = [
       h3("The customer paid but nothing shows"),
       ul([
         "Ask them for the transaction hash and open it on the explorer. Check the token, the network and the address match what they were given.",
-        "A payment is listed as **Detected** within a few minutes of landing and becomes **Confirmed** after the number of confirmations shown. A busy network can take longer.",
+        "A payment is listed as **Detected** within a few minutes of landing and becomes **Confirmed** once it is deep enough for that network's setting. A busy network can take longer.",
         "A payment after expiry is still found for thirty days and marked **Late**.",
         "The wrong token, or the right token on the wrong network, is not recoverable. The panel lists a wrong token so you can see it happened.",
       ]),
@@ -1090,7 +1097,7 @@ export const GUIDE = [
           ["**Paper trading**", "Trading with simulated money that follows real prices."],
           ["**Price impact**", "How much your own trade moves the price against you, because of the size of the pool."],
           ["**Private key**", "The secret that controls one account. Anyone who has it controls the funds."],
-          ["**Recovery phrase**", "Twelve words from which every key in the wallet is derived. The complete backup."],
+          ["**Recovery phrase**", "Twelve words (or twenty four, for a wallet made elsewhere) from which every key in the wallet is derived. The complete backup."],
           ["**Reorganisation**", "When a network discards recent blocks in favour of others. A shallow transaction can vanish; confirmations protect against it."],
           ["**Slippage**", "How far the price may move between the quote and the trade before the trade is abandoned."],
           ["**Stablecoin**", "A token that tracks the dollar, such as USDC or USDT."],

@@ -33,7 +33,7 @@ export default function ContactPage() {
     email: user?.email || "",
     topic: "other",
     message: "",
-    website: "",
+    extra: "",
   });
   const [tsToken, setTsToken] = useState("");
   const [tsKey, setTsKey] = useState(0);
@@ -68,11 +68,7 @@ export default function ContactPage() {
     }
     setBusy(true);
     try {
-      await http.post("/api/contact", {
-        ...form,
-        page: sessionStorage.getItem("ledgerwatch.contact.from") || "",
-        turnstileToken: tsToken,
-      });
+      await http.post("/api/contact", { ...form, turnstileToken: tsToken });
       setSent(true);
     } catch (err) {
       const status = err?.response?.status;
@@ -123,7 +119,13 @@ export default function ContactPage() {
             <form className="contact-form stack" onSubmit={submit} noValidate>
               <div className="grid2">
                 <Field label="Your name">
-                  <Input value={form.name} onChange={update("name")} autoComplete="name" required />
+                  <Input
+                    value={form.name}
+                    onChange={update("name")}
+                    autoComplete="name"
+                    maxLength={80}
+                    required
+                  />
                 </Field>
                 <Field label="Your email">
                   <Input
@@ -132,6 +134,7 @@ export default function ContactPage() {
                     onChange={update("email")}
                     autoComplete="email"
                     placeholder="you@company.com"
+                    maxLength={160}
                     required
                   />
                 </Field>
@@ -153,22 +156,26 @@ export default function ContactPage() {
                   rows={7}
                   value={form.message}
                   onChange={update("message")}
+                  maxLength={4000}
                   placeholder="What happened, what you expected, and when. For a payment or a transaction, include the network and the transaction hash."
                   required
                 />
               </Field>
 
-              {/* The honeypot. Hidden from people, visible to scripts. */}
+              {/* The honeypot. Hidden from people, visible to scripts. Named so
+                  that no browser autofill rule matches it: a field called
+                  "website" can be filled by an address autofill, which would
+                  make a real person's message vanish behind a success screen. */}
               <div className="contact-hp" aria-hidden="true">
-                <label htmlFor="contact-website">Website</label>
+                <label htmlFor="contact-extra">Leave this empty</label>
                 <input
-                  id="contact-website"
+                  id="contact-extra"
                   type="text"
-                  name="website"
+                  name="extra"
                   tabIndex={-1}
                   autoComplete="off"
-                  value={form.website}
-                  onChange={update("website")}
+                  value={form.extra}
+                  onChange={update("extra")}
                 />
               </div>
 
@@ -203,7 +210,7 @@ export default function ContactPage() {
 
         <aside className="contact-aside">
           <div className="contact-aside-block">
-            <h3>Before you write</h3>
+            <h2>Before you write</h2>
             <p>
               The <Link to="/docs/troubleshooting">troubleshooting page</Link> covers the problems people
               run into most: a balance that reads as unavailable, a sign in code that has not arrived,
@@ -211,14 +218,14 @@ export default function ContactPage() {
             </p>
           </div>
           <div className="contact-aside-block">
-            <h3>Reporting a security problem</h3>
+            <h2>Reporting a security problem</h2>
             <p>
               Choose <strong>A security concern</strong> above and describe what you found. Please do
               not post it publicly until I have had a chance to fix it.
             </p>
           </div>
           <div className="contact-aside-block">
-            <h3>What I cannot do</h3>
+            <h2>What I cannot do</h2>
             <p>
               Your wallet keys never reach me, so I cannot reverse a transaction, recover a lost
               recovery phrase, or reset a wallet password. The{" "}

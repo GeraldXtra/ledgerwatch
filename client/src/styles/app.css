@@ -80,7 +80,10 @@ h4 {
 .answer,
 .subtab-panel,
 .settings-panel,
-.kpi-row > .stat-card {
+.kpi-row > .stat-card,
+.alert-card,
+.chat-msg,
+.disclosure-body {
   animation: none !important;
 }
 .stat-card:hover {
@@ -378,6 +381,8 @@ h4 {
   font-weight: 500;
   color: var(--muted);
 }
+/* A figure is never clipped. An ellipsis on money turns ₦999,999 into
+   "₦999,9…", which is a wrong number; a wrap onto a second line is not. */
 .stat-cell-value {
   font-size: 22px;
   font-weight: 600;
@@ -385,9 +390,11 @@ h4 {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
   line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+.figure-xl {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .stat-cell-value.pos {
   color: var(--pos-text);
@@ -439,6 +446,17 @@ h4 {
   margin-top: 0;
 }
 
+/* A dialog takes focus on open so keyboard users are inside it; the panel
+   itself shows no ring for that. It scrolls up and down only: a few pixels
+   of sideways overflow during the opening animation must not leave a
+   sideways scrollbar behind. */
+.modal-panel {
+  overflow-x: hidden;
+}
+.modal-panel:focus {
+  outline: none;
+}
+
 .stat-card {
   border-radius: var(--radius);
   box-shadow: none;
@@ -480,18 +498,6 @@ h4 {
   padding: 0 18px;
   font-size: 14.5px;
 }
-/* The landing page's gold button, kept as a name and made the primary. */
-.btn-brass {
-  background: var(--accent-600);
-  border-color: var(--accent-600);
-  color: #fff;
-  font-weight: 600;
-}
-.btn-brass:hover {
-  background: var(--accent-700);
-  border-color: var(--accent-700);
-}
-
 /* Section tabs become a plain underline row rather than a boxed segmented
    control. */
 .subtabs {
@@ -577,7 +583,11 @@ textarea:focus {
   font-weight: 500;
 }
 
-/* Settings navigation on the left of that page. */
+/* Settings navigation on the left of that page. It sticks under the bar,
+   which is 56px now rather than the 96px the component library assumed. */
+.settings-nav {
+  top: 68px;
+}
 .nav-item {
   border-radius: var(--radius-sm);
 }
@@ -592,6 +602,21 @@ textarea:focus {
 /* ---------------------------------------------------------------------------
    6. TABLES
    --------------------------------------------------------------------------- */
+
+/* The day's change in the watchlist is coloured by its sign. The colour
+   class sits on the cell, where the library's own cell colour outranked it. */
+.market-table td.value-pos {
+  color: var(--pos-text);
+}
+.market-table td.value-neg {
+  color: var(--neg-text);
+}
+/* A watchlist row with no seven day series keeps the line's footprint. */
+.sparkline-empty {
+  display: inline-block;
+  width: 96px;
+  height: 28px;
+}
 
 .table thead th {
   background: transparent;
@@ -675,7 +700,10 @@ textarea:focus {
 }
 
 .mm-acct {
-  flex: 1;
+  /* min-width 0 lets the pill shrink on a narrow phone; without it the
+     flex item keeps its content width and pushes the icons off the screen. */
+  flex: 1 1 auto;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -699,6 +727,16 @@ textarea:focus {
   color: var(--muted);
   font-weight: 500;
   font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mm-acct > svg {
+  flex: none;
+}
+.mm-icons {
+  flex: none;
 }
 .mm-acct svg {
   color: var(--faint);
@@ -905,9 +943,9 @@ textarea:focus {
   border: 1px solid var(--navy-100);
 }
 .mm-mark.native {
-  background: var(--gold-100);
-  color: var(--gold-700);
-  border-color: var(--gold-200);
+  background: var(--navy-100);
+  color: var(--navy-800);
+  border-color: var(--navy-100);
 }
 .mm-mark.unknown {
   background: var(--warn-bg);
@@ -1516,6 +1554,21 @@ textarea:focus {
   padding: 0 24px;
   width: 100%;
 }
+/* The guide has a sidebar beside its column, so it gets the app's width. */
+.site-wrap.wide {
+  max-width: var(--shell-max);
+}
+
+/* The "trade submitted" notice in the live swap dialog. */
+.crypto-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--well);
+}
 
 .site-hero {
   padding: 72px 0 56px;
@@ -1836,11 +1889,14 @@ textarea:focus {
   margin: 36px 0 10px;
   padding-top: 8px;
   letter-spacing: -0.01em;
+  /* A link to a heading lands with the heading below the sticky bar. */
+  scroll-margin-top: 76px;
 }
 .docs-body h3 {
   font-size: 16px;
   font-weight: 600;
   margin: 22px 0 8px;
+  scroll-margin-top: 76px;
 }
 .docs-body p {
   margin: 0 0 14px;
@@ -2169,8 +2225,15 @@ textarea:focus {
     font-size: 15px;
   }
   .page {
-    padding: 18px 16px calc(84px + env(safe-area-inset-bottom, 0px));
+    padding: 18px 16px 28px;
     gap: 16px;
+  }
+  /* The footer is the LAST thing on the page, so it is the footer, not the
+     page, that has to clear the fixed bar along the bottom. With the
+     clearance on .page the footer sat exactly under the bar and its links
+     could not be reached on a phone. */
+  .app .site-footer-inner {
+    padding-bottom: calc(14px + 60px + env(safe-area-inset-bottom, 0px));
   }
 
   /* The four sections along the bottom, where a thumb is. */
@@ -2206,7 +2269,7 @@ textarea:focus {
     display: block;
   }
   .site-footer-inner {
-    padding: 14px 16px calc(14px + 0px);
+    padding: 14px 16px;
   }
   /* Toasts and the bulk action bar sit above the bottom bar. */
   .toast-stack {
@@ -2268,6 +2331,9 @@ textarea:focus {
   .page-head h1 {
     font-size: 20px;
   }
+  .stat-cell-value {
+    font-size: 20px;
+  }
   .site-grid,
   .site-steps {
     grid-template-columns: minmax(0, 1fr);
@@ -2296,6 +2362,341 @@ textarea:focus {
   .app,
   .site {
     overflow-x: clip;
+  }
+
+  /* Stacked tables, tightened. The component library turns each row into a
+     card of label and value lines; the labels are a size smaller and the
+     lines closer, so a ledger row no longer fills half a screen. */
+  .table-stack tbody tr {
+    padding: 4px 12px;
+    margin-bottom: 8px;
+    box-shadow: none;
+  }
+  .table-stack td {
+    padding: 7px 0;
+    gap: 10px;
+  }
+  .table-stack td::before {
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+  }
+
+  /* THE WATCHLIST ON A PHONE. A coin is one compact row, the way every price
+     app lays it out: logo and name on the left, the seven day line in the
+     middle, price over the day's change on the right. It was a card of four
+     labelled lines with the logo pushed to the right of the word "COIN". */
+  .market-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 72px auto;
+    grid-template-areas:
+      "coin spark price"
+      "coin spark change";
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 2px;
+    padding: 10px 12px;
+  }
+  .market-table td {
+    display: block;
+    width: auto;
+    border: 0;
+    padding: 0;
+  }
+  .market-table td::before {
+    content: none;
+  }
+  .market-table td[data-label="Coin"] {
+    grid-area: coin;
+    text-align: left;
+    min-width: 0;
+  }
+  .market-table td[data-label="Price"] {
+    grid-area: price;
+    text-align: right;
+    font-weight: 600;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .market-table td[data-label="24h"] {
+    grid-area: change;
+    text-align: right;
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+  .market-table td[data-label="7d"] {
+    grid-area: spark;
+    text-align: center;
+    line-height: 0;
+  }
+  .market-table td[data-label="7d"] svg,
+  .market-table td[data-label="7d"] .sparkline-empty {
+    width: 72px;
+    height: 26px;
+  }
+  /* A long coin name shortens with an ellipsis rather than running into the
+     line beside it. The flex child needs min-width 0 before overflow can
+     apply at all. */
+  .market-table .cell-lead > div {
+    min-width: 0;
+  }
+  .market-table .lead-name,
+  .market-table .lead-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .market-table td[data-label="Price"] .muted {
+    font-weight: 400;
+  }
+  /* The ledger's customer name wraps instead; a name is worth two lines. */
+  .debts-table .cell-lead > div,
+  .debtors-table .cell-lead > div {
+    min-width: 0;
+  }
+  .debts-table .lead-name,
+  .debtors-table .lead-name {
+    overflow-wrap: anywhere;
+  }
+
+  /* HOLDINGS ON A PHONE. Coin and value on the first line, quantity and live
+     price on the second, average buy on the third, in small type. */
+  .holdings-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "coin value"
+      "qty price"
+      "avg avg";
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 2px;
+    padding: 10px 12px;
+  }
+  .holdings-table td {
+    display: block;
+    width: auto;
+    border: 0;
+    padding: 0;
+  }
+  .holdings-table td::before {
+    content: attr(data-label) " ";
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    margin-right: 4px;
+  }
+  .holdings-table td[data-label="Coin"] {
+    grid-area: coin;
+    text-align: left;
+  }
+  .holdings-table td[data-label="Coin"]::before,
+  .holdings-table td[data-label="Value"]::before {
+    content: none;
+  }
+  .holdings-table td[data-label="Value"] {
+    grid-area: value;
+    text-align: right;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .holdings-table td[data-label="Qty"],
+  .holdings-table td[data-label="Live price"],
+  .holdings-table td[data-label="Avg buy"] {
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .holdings-table td[data-label="Qty"] {
+    grid-area: qty;
+    text-align: left;
+    margin-top: 4px;
+  }
+  .holdings-table td[data-label="Live price"] {
+    grid-area: price;
+    text-align: right;
+    margin-top: 4px;
+  }
+  .holdings-table td[data-label="Avg buy"] {
+    grid-area: avg;
+    text-align: left;
+  }
+
+  /* THE LEDGER ON A PHONE. One invoice is three lines: the tick box, the
+     customer and the menu; the invoiced amount and the balance with its bar;
+     the due date and the status. It was seven labelled lines, two of them
+     holding nothing but a tick box or a menu. */
+  .debts-table tbody tr {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "check debtor menu"
+      "amount amount balance"
+      "due due status";
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 8px;
+    padding: 12px 12px;
+  }
+  .debts-table td {
+    display: block;
+    width: auto;
+    border: 0;
+    padding: 0;
+  }
+  .debts-table td::before {
+    content: none;
+  }
+  .debts-table td.check-col {
+    grid-area: check;
+  }
+  .debts-table td[data-label="Debtor"] {
+    grid-area: debtor;
+    text-align: left;
+    min-width: 0;
+  }
+  .debts-table td:last-child {
+    grid-area: menu;
+  }
+  .debts-table td[data-label="Amount"] {
+    grid-area: amount;
+    text-align: left;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .debts-table td[data-label="Amount"]::before {
+    content: "Invoiced ";
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-right: 4px;
+  }
+  .debts-table td[data-label="Balance"] {
+    grid-area: balance;
+    text-align: right;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .debts-table td[data-label="Due date"] {
+    grid-area: due;
+    text-align: left;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .debts-table td[data-label="Due date"]::before {
+    content: "Due ";
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-right: 4px;
+  }
+  .debts-table td[data-label="Status"] {
+    grid-area: status;
+    text-align: right;
+  }
+
+  /* CUSTOMERS ON A PHONE. Two lines: the customer and their reliability;
+     what they owe and when they were last active. */
+  .debtors-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "debtor rel"
+      "owed act";
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 8px;
+    padding: 12px 12px;
+  }
+  .debtors-table td {
+    display: block;
+    width: auto;
+    border: 0;
+    padding: 0;
+  }
+  .debtors-table td::before {
+    content: none;
+  }
+  .debtors-table td[data-label="Debtor"] {
+    grid-area: debtor;
+    text-align: left;
+    min-width: 0;
+  }
+  .debtors-table td[data-label="Reliability"] {
+    grid-area: rel;
+    text-align: right;
+  }
+  .debtors-table td[data-label="Outstanding"] {
+    grid-area: owed;
+    text-align: left;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .debtors-table td[data-label="Outstanding"]::before {
+    content: "Owes ";
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-right: 4px;
+  }
+  .debtors-table td[data-label="Last activity"] {
+    grid-area: act;
+    text-align: right;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  /* An alert's header (coin, "Agent suggests", the suggestion, the price)
+     wraps onto a second line on a narrow phone rather than squeezing each
+     chip down to one letter per line, which is what the library's
+     "break anywhere" rule for alert cards did at 320px. */
+  .alert-card .row,
+  .alert-history-row .row {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .alert-card .coin-chip,
+  .alert-card .pill,
+  .alert-card .num,
+  .alert-history-row .coin-chip,
+  .alert-history-row .pill,
+  .alert-history-row .num,
+  .alert-history-row .override-chip {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* The live positions card: its title and description take the full width
+     on a phone, and the USDC / USDT switch sits on its own line under them. */
+  .live-head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+  .live-head > div:first-child {
+    flex: 1 1 100%;
+  }
+
+  /* The wallet's top row on a phone: network, account, two icons. The
+     network pill gives up width first; the account pill keeps its pattern
+     and its copy icon and lets the address shorten. */
+  .mm-top {
+    gap: 6px;
+    padding: 10px 10px;
+  }
+  .mm-top .net-trigger {
+    max-width: 38%;
+    padding: 6px 8px;
+  }
+  .mm-acct {
+    padding: 4px 6px;
+    gap: 6px;
+  }
+  .mm-icon {
+    width: 28px;
+    height: 28px;
   }
 
   /* Anything marked hide-sm goes on a phone. The class was used in several
@@ -2335,6 +2736,22 @@ textarea:focus {
   font-size: 12.5px;
   letter-spacing: -0.01em;
   overflow-wrap: anywhere;
+}
+
+/* The smallest phones: the shortened address comes off the account pill,
+   which keeps the pattern and the copy icon, and the wallet fits in 320px.
+   The watchlist's seven day line narrows so the coin's name keeps room. */
+@media (max-width: 375px) {
+  .mm-acct .addr {
+    display: none;
+  }
+  .market-table tbody tr {
+    grid-template-columns: minmax(0, 1fr) 56px auto;
+  }
+  .market-table td[data-label="7d"] svg,
+  .market-table td[data-label="7d"] .sparkline-empty {
+    width: 56px;
+  }
 }
 
 /* iOS Safari zooms the whole page when a focused control is under 16px, and

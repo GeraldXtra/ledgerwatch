@@ -190,7 +190,7 @@ async function receipt(req, res) {
 
     return res.json({
       receipt: {
-        businessName: req.user.name,
+        businessName: req.user.companyName || req.user.name,
         debtorName: debt.debtorName,
         amount: payment.amount,
         method: payment.method,

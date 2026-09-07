@@ -165,7 +165,7 @@ async function onInvoiceSettled({
     const logo = getLogoAttachment();
 
     const { html, text } = buildPaymentReceiptEmail({
-      businessName: owner && owner.name,
+      businessName: owner && (owner.companyName || owner.name),
       debtorName: debt.debtorName,
       method,
       amountUsdc: totalUsdc,

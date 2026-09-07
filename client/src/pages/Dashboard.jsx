@@ -101,7 +101,7 @@ export default function Dashboard() {
             </nav>
 
             <div className="topbar-right">
-              <NavLink to="/app/settings" className="topbar-user" title="Your account">
+              <NavLink to="/app/settings" className="topbar-user" title="Your account" aria-label="Your account">
                 <Avatar name={user.name} src={user.avatarUrl} />
                 <span className="hide-sm">{user.name}</span>
               </NavLink>

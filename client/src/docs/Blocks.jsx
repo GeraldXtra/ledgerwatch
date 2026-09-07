@@ -106,7 +106,9 @@ export function Block({ block }) {
     case "img":
       return (
         <figure className={block.phone ? "docs-figure phone" : "docs-figure"}>
-          <img src={`/docs/${block.src}`} alt={block.alt || block.caption || ""} loading="lazy" />
+          {/* A captioned picture gets an empty alt: the caption already says
+              what it is, and repeating it reads twice on a screen reader. */}
+          <img src={`/docs/${block.src}`} alt={block.alt || ""} loading="lazy" />
           {block.caption && <figcaption>{rich(block.caption)}</figcaption>}
         </figure>
       );

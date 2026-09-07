@@ -177,9 +177,7 @@ async function section(name, fn) {
     await sleep(2500);
     await shot(page, "signup");
     await goto(page, "/contact", 3500);
-    await shot(page, "contact");
     await goto(page, "/docs/wallet", 2500);
-    await shot(page, "docs");
     await page.close();
   });
 
@@ -584,12 +582,15 @@ async function section(name, fn) {
     await clickText(page, ".subtab", "Debts");
     await page.waitForSelector(".debts-table tbody tr", { timeout: 20000 });
     await sleep(1500);
+    // The rows, not the tiles above them: that is what the guide is showing.
+    await page.evaluate(() => document.querySelector(".debts-table").scrollIntoView({ block: "start" }));
+    await sleep(500);
     await shot(page, "phone-debts");
     const rows = await page.$$(".debts-table tbody tr");
-    await (await rows[0].$("td:nth-child(2)")).click();
+    // A DOM click: after the scroll above the row sits under the sticky bar.
+    await rows[0].evaluate((r) => r.querySelector("td:nth-child(2)").click());
     await page.waitForSelector(".modal-panel", { timeout: 10000 });
     await sleep(2000);
-    await shot(page, "phone-debt-detail");
     await page.keyboard.press("Escape");
     await sleep(400);
 
@@ -600,22 +601,19 @@ async function section(name, fn) {
     try {
       await page.click(".net-trigger");
       await sleep(2000);
-      await shot(page, "phone-networks");
       await page.keyboard.press("Escape");
     } catch {}
-    await goto(page, "/app/settings", 2500);
+    await goto(page, "/app/settings", 1500);
+    await page.waitForSelector(".settings-layout", { timeout: 30000 });
+    await sleep(1200);
     await shot(page, "phone-settings");
     await page.close();
 
     const pub = await newPage(browser, { phone: true });
     await goto(pub, "/", 2500);
-    await shot(pub, "phone-landing");
     await goto(pub, "/login", 3500);
-    await shot(pub, "phone-signin");
     await goto(pub, "/docs/receivables", 2500);
-    await shot(pub, "phone-docs");
     await goto(pub, "/contact", 3000);
-    await shot(pub, "phone-contact");
     await pub.close();
   });
 

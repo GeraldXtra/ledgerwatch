@@ -13,7 +13,7 @@ const { verifyTurnstile } = require("../services/turnstile.service");
  *
  * Two things are refused on purpose:
  *
- *   1. A HONEYPOT. The form carries a hidden `website` field that a person
+ *   1. A HONEYPOT. The form carries a hidden `extra` field that a person
  *      never sees and a bot fills in. A submission with it set is answered
  *      with success and stored nowhere, so the bot learns nothing.
  *
@@ -141,8 +141,9 @@ function buildNotice(doc) {
 async function submit(req, res) {
   const body = req.body || {};
 
-  // The honeypot. Answered as success on purpose.
-  if (typeof body.website === "string" && body.website.trim()) {
+  // The honeypot. Answered as success on purpose. The field is called
+  // `extra` rather than anything a browser's autofill might recognise.
+  if (typeof body.extra === "string" && body.extra.trim()) {
     return res.json({ ok: true });
   }
 

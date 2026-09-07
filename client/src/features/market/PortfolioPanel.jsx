@@ -30,7 +30,7 @@ export default function PortfolioPanel({ portfolio, onSelect }) {
           hint="Approve a buy alert to open your first simulated position. Your cash stays untouched until then."
         />
       ) : (
-        <Table columns={COLUMNS}>
+        <Table columns={COLUMNS} className="holdings-table">
           {portfolio.holdings.map((h) => (
             <tr
               key={h.coinId}

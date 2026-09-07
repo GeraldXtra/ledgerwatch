@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { Check, Copy, Network } from "lucide-react";
+import { Check, Copy, Droplets, ExternalLink, Network } from "lucide-react";
 import { Button } from "../../components/ui";
 import NetworkScopeNotice from "./NetworkScopeNotice";
 
@@ -59,6 +59,16 @@ export default function ReceivePanel({ address, chain }) {
           {copied ? "Copied" : "Copy address"}
         </Button>
       </div>
+
+      {/* Test networks carry a faucet in the registry. The address is what
+          the faucet asks for, so the link belongs next to it. Real networks
+          have none and show nothing. */}
+      {chain?.faucet && (
+        <a className="faucet-link" href={chain.faucet} target="_blank" rel="noopener noreferrer">
+          <Droplets size={14} /> Get free test {chain.nativeSymbol} from a faucet{" "}
+          <ExternalLink size={12} />
+        </a>
+      )}
 
       <NetworkScopeNotice chain={chain} />
     </div>

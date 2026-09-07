@@ -246,7 +246,7 @@ export default function LivePortfolioPanel({
 
   return (
     <Card>
-      <div className="row space-between">
+      <div className="row space-between live-head">
         <div>
           <h3 className="section-title row">
             <Wallet size={17} /> Live positions
@@ -341,6 +341,7 @@ export default function LivePortfolioPanel({
             )}
           </div>
 
+          <div className="table-wrap">
           <table className="table compact">
             <thead>
               <tr>
@@ -403,6 +404,7 @@ export default function LivePortfolioPanel({
               })}
             </tbody>
           </table>
+          </div>
         </>
       )}
 

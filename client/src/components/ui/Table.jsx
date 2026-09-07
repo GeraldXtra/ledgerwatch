@@ -3,10 +3,10 @@
  * `stack` (default true) collapses rows into labeled cards on mobile — cells
  * must carry data-label, which renderRow provides via the `cell` helper.
  */
-export function Table({ columns, stack = true, children }) {
+export function Table({ columns, stack = true, className = "", children }) {
   return (
     <div className="table-wrap">
-      <table className={stack ? "table table-stack" : "table"}>
+      <table className={[stack ? "table table-stack" : "table", className].filter(Boolean).join(" ")}>
         <thead>
           <tr>
             {columns.map((c) => (

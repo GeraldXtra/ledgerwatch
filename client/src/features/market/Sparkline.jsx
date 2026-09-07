@@ -5,7 +5,9 @@
  */
 export default function Sparkline({ data, width = 96, height = 28 }) {
   if (!data || data.length < 2) {
-    return <span className="sparkline-empty" style={{ width, height }} aria-hidden="true" />;
+    // Sized by the stylesheet, not inline, so the phone layout can shrink it
+    // the way it shrinks the drawn line.
+    return <span className="sparkline-empty" aria-hidden="true" />;
   }
 
   const min = Math.min(...data);

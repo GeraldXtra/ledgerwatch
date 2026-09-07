@@ -72,7 +72,7 @@ export default function LandingPage() {
             <Link className="site-nav-link hide-sm" to="/contact">
               Contact
             </Link>
-            <Link className="site-nav-link" to="/login">
+            <Link className="site-nav-link hide-sm" to="/login">
               Sign in
             </Link>
             <Link className="btn btn-primary" to="/login">

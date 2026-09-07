@@ -54,7 +54,7 @@ export default function PublicShell({ children, wide = false }) {
         </div>
       </header>
 
-      <main className={wide ? "site-wrap pub-main wide" : "site-wrap pub-main"}>{children}</main>
+      <main className={wide ? "site-wrap wide pub-main" : "site-wrap pub-main"}>{children}</main>
 
       <footer className="site-wrap site-foot">
         <span>LedgerWatch, by Eberechukwu Uchechukwu Gerald. All rights reserved.</span>

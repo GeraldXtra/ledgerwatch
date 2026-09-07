@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { Link, Navigate, NavLink, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import PublicShell from "../components/PublicShell";
 import { Blocks } from "../docs/Blocks";
@@ -15,6 +15,7 @@ import { GUIDE, GROUPS } from "../docs/guide";
  */
 export default function DocsPage() {
   const { slug } = useParams();
+  const { hash } = useLocation();
   const navigate = useNavigate();
   const wanted = slug || GUIDE[0].slug;
   const index = GUIDE.findIndex((p) => p.slug === wanted);
@@ -28,11 +29,41 @@ export default function DocsPage() {
   useEffect(() => {
     if (!page) return;
     document.title = `${page.title} · LedgerWatch guide`;
-    window.scrollTo(0, 0);
+    // A link such as /docs/settings#payout-details lands on that heading.
+    // The router does not scroll to a hash by itself, and headings carry ids
+    // made from their text, so this does it. Anything else starts at the top.
+    //
+    // Pictures above the heading load lazily and have no reserved height, so
+    // a single scroll lands correctly and is then pushed down as they arrive.
+    // The scroll is repeated for a moment, and stops the instant the reader
+    // scrolls for themselves.
+    const target = hash ? document.getElementById(hash.slice(1)) : null;
+    if (!target) {
+      window.scrollTo(0, 0);
+      return () => {
+        document.title = "LedgerWatch: Automated receivables and market monitoring";
+      };
+    }
+    let cancelled = false;
+    const stop = () => {
+      cancelled = true;
+    };
+    const jump = () => {
+      if (!cancelled) target.scrollIntoView({ block: "start" });
+    };
+    jump();
+    const timers = [250, 700, 1400, 2400].map((ms) => setTimeout(jump, ms));
+    window.addEventListener("wheel", stop, { passive: true });
+    window.addEventListener("touchstart", stop, { passive: true });
+    window.addEventListener("keydown", stop);
     return () => {
+      timers.forEach(clearTimeout);
+      window.removeEventListener("wheel", stop);
+      window.removeEventListener("touchstart", stop);
+      window.removeEventListener("keydown", stop);
       document.title = "LedgerWatch: Automated receivables and market monitoring";
     };
-  }, [page]);
+  }, [page, hash]);
 
   if (!page) return <Navigate to="/docs" replace />;
 
@@ -46,7 +77,7 @@ export default function DocsPage() {
         <aside className="docs-side" aria-label="Guide sections">
           {grouped.map((g) => (
             <div className="docs-side-group" key={g.id}>
-              <p className="docs-side-title">{g.label}</p>
+              <h2 className="docs-side-title">{g.label}</h2>
               {g.pages.map((p) => (
                 <NavLink
                   key={p.slug}

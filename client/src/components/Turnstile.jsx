@@ -98,7 +98,7 @@ export default function Turnstile({ onToken, action }) {
         widgetId.current = ts.render(holder.current, {
           sitekey: SITE_KEY,
           action,
-          theme: "light",
+          theme: document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light",
           callback: (token) => alive && onToken(token),
           // A token that expires while the form is still open must not be
           // submitted; the server would reject it as a duplicate or stale.

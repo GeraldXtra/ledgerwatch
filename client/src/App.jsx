@@ -40,9 +40,20 @@ function PublicOnly({ children }) {
   return user ? <Navigate to="/app" replace /> : children;
 }
 
-/** A code-split public page, with the boot screen while its chunk loads. */
+/** A code-split public page. The wait is a moment, so the fallback is quiet:
+    a reader of the guide has no "workspace" to load. */
 function Public({ children }) {
-  return <Suspense fallback={<Booting />}>{children}</Suspense>;
+  return (
+    <Suspense
+      fallback={
+        <div className="center-screen">
+          <p className="muted small">Loading...</p>
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
 }
 
 /** The dashboard requires a session. */

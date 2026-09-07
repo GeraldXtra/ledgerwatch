@@ -75,7 +75,7 @@ async function statement(req, res) {
 
     return res.json({
       statement: {
-        businessName: req.user.name,
+        businessName: req.user.companyName || req.user.name,
         debtor: data.debtor,
         debts,
         totals,

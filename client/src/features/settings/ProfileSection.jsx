@@ -47,7 +47,7 @@ export default function ProfileSection() {
             <Input
               value={companyName}
               onChange={(e) => setCompanyName(e.target.value)}
-              placeholder="Appears on reminders and statements"
+              placeholder="Appears at the top of statements and receipts"
             />
           </Field>
           <Field label="Email">

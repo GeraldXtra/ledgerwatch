@@ -81,7 +81,7 @@ describe("contact form", () => {
 
   it("answers a honeypot submission with success and stores nothing", async () => {
     const res = mockRes();
-    await submit(mockReq({ ...GOOD, website: "http://spam.example" }), res);
+    await submit(mockReq({ ...GOOD, extra: "http://spam.example" }), res);
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({ ok: true });
     expect(await ContactMessage.countDocuments({})).toBe(0);

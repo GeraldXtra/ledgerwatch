@@ -22,16 +22,28 @@ const openModals = [];
  */
 export default function Modal({ onClose, label = "Dialog", size = "md", children }) {
   const panelRef = useRef(null);
+  // The opener is captured during the FIRST RENDER, before anything in the
+  // dialog has taken focus. Captured in the effect it would have recorded an
+  // autofocused input inside the dialog, and "restored" focus to a detached
+  // node on close.
   const previousFocusRef = useRef(null);
+  if (previousFocusRef.current === null) {
+    previousFocusRef.current = typeof document !== "undefined" ? document.activeElement : null;
+  }
 
   // Move focus in on open; restore it on unmount.
+  //
+  // The PANEL takes focus, not the first control. Focusing the first control
+  // drew a focus ring on whatever happened to come first (a close button, a
+  // CSV button, a segment) every time a dialog opened on a phone, which read
+  // as a highlighted choice nobody had made. The Tab trap below still keeps
+  // keyboard users inside the dialog, and their first Tab lands on the first
+  // control as before.
   useEffect(() => {
-    previousFocusRef.current = document.activeElement;
     const panel = panelRef.current;
-    if (panel) {
-      const first = panel.querySelector(FOCUSABLE);
-      (first || panel).focus();
-    }
+    // A form that autofocuses its first field has already taken focus by the
+    // time this runs, and keeps it.
+    if (panel && !panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
     return () => {
       const prev = previousFocusRef.current;
       if (prev && typeof prev.focus === "function") prev.focus();
@@ -70,7 +82,12 @@ export default function Modal({ onClose, label = "Dialog", size = "md", children
         const first = focusables[0];
         const last = focusables[focusables.length - 1];
         const active = document.activeElement;
-        if (e.shiftKey && (active === first || !panelRef.current.contains(active))) {
+        // The panel itself holds focus right after opening; Shift+Tab from it
+        // must wrap to the last control, not escape to the page underneath.
+        if (
+          e.shiftKey &&
+          (active === first || active === panelRef.current || !panelRef.current.contains(active))
+        ) {
           e.preventDefault();
           last.focus();
         } else if (!e.shiftKey && active === last) {
