@@ -35,7 +35,6 @@ export default function AlertsList({ alerts, onTrade, onDismiss, busyId }) {
               <p className="alert-msg">{a.message}</p>
               <div className="row">
                 <Button
-                  variant="primary"
                   size="sm"
                   disabled={busyId === a._id}
                   onClick={() => onTrade(a, "buy")}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Bell,
   Eye,
@@ -21,6 +22,7 @@ import {
   ToastProvider,
   useToast,
 } from "../../components/ui";
+import { DetailPane } from "../../components/ui/Modal";
 import { usd, signedUsd, pct } from "./format";
 import useMarkets from "./useMarkets";
 import MarketTable from "./MarketTable";
@@ -44,6 +46,8 @@ import { recallChain } from "../wallet/NetworkSwitcher";
 
 const STARTING_CASH = 1000000;
 
+const MARKET_VIEWS = ["alerts", "watchlist", "portfolio"];
+
 // Deterministic tint per coinId for the allocation bar segments.
 // Every allocation colour is a theme token; the last four used to be literal
 // hex and did not follow the dark theme.
@@ -58,6 +62,9 @@ const ALLOC_COLORS = [
 
 function MarketWatch() {
   const { user } = useAuth();
+  const [params] = useSearchParams();
+  const wantedView = params.get("view");
+  const view = MARKET_VIEWS.includes(wantedView) ? wantedView : "alerts";
   // Paper unless the account has deliberately switched. Server is the authority;
   // this mirrors it so the UI does not have to round-trip on every render.
   const [mode, setMode] = useState(user?.tradingMode === "live" ? "live" : "paper");
@@ -772,210 +779,236 @@ function MarketWatch() {
   const detailHolding = pf?.holdings.find((h) => h.coinId === detail);
   const detailWatches = watches.filter((w) => w.coinId === detail);
 
+  const actions = (
+    <>
+      <Button variant="primary" onClick={runPass} loading={running}>
+        <Zap size={14} /> {running ? "Checking" : "Check now"}
+      </Button>
+      <Button variant="ghost" icon title="Refresh" onClick={loadData}>
+        <RefreshCw size={14} />
+      </Button>
+    </>
+  );
+
+  const waiting = mode === "paper" && pf === null;
+
   return (
     <>
-      <PageHeader
-        title="Market Watch"
-        support={
-          mode === "live"
-            ? "Live prices, alerts that wait for your answer, and swaps you sign yourself."
-            : "Live prices, alerts that wait for your answer, and a portfolio that is entirely simulated."
-        }
-        action={
-          <>
-            <Button variant="primary" onClick={runPass} loading={running}>
-              <Zap size={14} /> {running ? "Checking" : "Check now"}
+      <div className="subtab-panel ws-view market-view" hidden={view !== "alerts"}>
+        <PageHeader title="Alerts" action={actions} />
+
+        {error && <p className="error-text">{error}</p>}
+
+        {/* A notification pointed at an alert that has since been resolved. This is
+            an ordinary outcome, not an error, so it reads as information and can be
+            dismissed. */}
+        {deepLinkNote && (
+          <div className="row space-between deeplink-note">
+            <span className="row">
+              <Info size={15} />
+              {deepLinkNote}
+            </span>
+            <Button variant="ghost" icon title="Dismiss" onClick={() => setDeepLinkNote("")}>
+              <X size={15} />
             </Button>
-            <Button variant="ghost" icon title="Refresh" onClick={loadData}>
-              <RefreshCw size={14} />
-            </Button>
-          </>
-        }
-      />
-
-      <TradingModeToggle mode={mode} onChange={setMode} />
-
-      {error && <p className="error-text">{error}</p>}
-
-      {/* A notification pointed at an alert that has since been resolved. This is
-          an ordinary outcome, not an error, so it reads as information and can be
-          dismissed. */}
-      {deepLinkNote && (
-        <div className="row space-between deeplink-note">
-          <span className="row">
-            <Info size={15} />
-            {deepLinkNote}
-          </span>
-          <Button variant="ghost" icon title="Dismiss" onClick={() => setDeepLinkNote("")}>
-            <X size={15} />
-          </Button>
-        </div>
-      )}
-
-      {/* Only PAPER mode waits on the paper portfolio. It used to gate the entire
-          page, so a slow or failed /api/portfolio call left live mode showing
-          skeletons forever, because live holdings come from the chain and have nothing
-          to do with the simulated portfolio loading. */}
-      {mode === "paper" && pf === null ? (
-        <>
-          <SkeletonBlock height={150} />
-          <div className="kpi-row">
-            <SkeletonBlock height={110} />
-            <SkeletonBlock height={110} />
-            <SkeletonBlock height={110} />
-            <SkeletonBlock height={110} />
           </div>
+        )}
+
+        {waiting ? (
           <SkeletonBlock height={280} />
-        </>
-      ) : (
-        <>
-          {/*
-            PAPER ONLY. This hero had NO mode guard at all: it rendered in live
-            mode too, so switching to Live wallet still showed "Simulated
-            portfolio" and the $1,000,000 paper start sitting above real funds.
-            A simulated figure presented while the user believes they are looking
-            at real holdings is the most dangerous thing this screen can do,
-            every decision made from it would be based on money that does not
-            exist. In live mode the live panel below is the ONLY portfolio shown,
-            and it states its own failures rather than falling back to anything.
-          */}
-          {mode === "paper" && (
-          <Card hero eyebrow="Portfolio" title="Simulated portfolio" subtitle="Paper trading only. Values update live as prices move.">
-            <div className="hero-grid">
-              <div className="hero-figure">
-                <span className="overline">Total value</span>
-                {/* Keyed on whole thousands, not cents: the 10s price poll nudges
-                    this value constantly, and re-keying on every tick restarted
-                    the flash animation forever so it never settled. */}
-                <span className="hero-value num pulse" key={Math.floor(pf.totalValue / 1000)}>
-                  {usd(pf.totalValue)}
-                </span>
-                <span className={`hero-pl ${up ? "pos" : "neg"}`}>
-                  {up ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                  {signedUsd(pf.totalPnl)}
-                  <span className="muted small" style={{ marginLeft: 4 }}>
-                    ({pct((pf.totalPnl / STARTING_CASH) * 100)})
-                  </span>
-                </span>
-                <span className="stat-hint">Cash plus live holdings, vs the 1,000,000 start</span>
-              </div>
+        ) : (
+          <>
+            <AlertsList alerts={alerts} onTrade={openTrade} onDismiss={dismiss} busyId={busyId} />
+            <AlertHistory alerts={alertHistory} />
+          </>
+        )}
+      </div>
 
-              <div className="alloc-block">
-                <span className="overline">Allocation</span>
-                {allocation.length === 0 ? (
-                  <p className="muted small" style={{ margin: "8px 0 0" }}>
-                    No holdings yet. Approve a buy alert to open your first position.
-                  </p>
-                ) : (
-                  <>
-                    <div className="alloc-bar" role="img" aria-label="Holdings allocation">
-                      {allocation.map((seg) => (
-                        <span
-                          key={seg.symbol}
-                          className="alloc-seg"
-                          style={{ width: `${seg.share}%`, background: seg.color }}
-                          title={`${seg.symbol} ${seg.share.toFixed(1)}%`}
-                        />
-                      ))}
-                      <span
-                        className="alloc-seg cash"
-                        style={{ width: `${cashShare}%` }}
-                        title={`Cash ${cashShare.toFixed(1)}%`}
-                      />
-                    </div>
-                    <div className="alloc-legend">
-                      {allocation.map((seg) => (
-                        <span key={seg.symbol} className="alloc-legend-item">
-                          <span className="alloc-dot" style={{ background: seg.color }} />
-                          {seg.symbol} <span className="muted num">{allocLabels[seg.symbol]}%</span>
-                        </span>
-                      ))}
-                      <span className="alloc-legend-item">
-                        <span className="alloc-dot cash" />
-                        Cash <span className="muted num">{allocLabels.__cash}%</span>
-                      </span>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </Card>
-          )}
+      <div className="subtab-panel ws-view market-view" hidden={view !== "watchlist"}>
+        {error && <p className="error-text">{error}</p>}
 
-          {/* LIVE ONLY, and rendered UNCONDITIONALLY in live mode. It previously
-              required `liveChain && walletAddress`, so a user with neither saw
-              nothing live and only the paper hero above, which is exactly how a
-              paper figure ended up representing a live wallet. The panel now owns
-              its own "no wallet" / "no chain" / "unreadable" states. */}
-          {mode === "live" && (
-            <LivePortfolioPanel
-              chain={liveChain}
-              chains={liveChains}
-              address={walletAddress}
-              markets={markets}
-              coinIdBySymbol={coinIdBySymbol}
-              onPickChain={setLiveChainId}
-              onRows={setLiveRows}
-              reloadKey={liveReloadKey}
-              cashSymbol={cashSymbol}
-              onCashSymbol={chooseCash}
-              customTokens={user?.customTokens}
+        {waiting ? (
+          <SkeletonBlock height={280} />
+        ) : (
+          <>
+            <MarketTable
+              rows={marketRows}
+              onSelect={(m) => setDetail(m.id)}
+              live={{ lastFetchedAt, stale }}
             />
-          )}
+            <WatchList watches={watches} onEdit={editWatch} onRemove={removeWatch} />
+          </>
+        )}
+      </div>
 
-          <div className="kpi-row">
-            {/* Cash / watches / alerts only change on a trade or a fired alert, so they
-                count up. Total P/L is recomputed on every 10s price poll, so animating it
-                would restart the count from zero each tick, so it stays a plain value. */}
-            {/* The two money tiles are PAPER figures — simulated cash and P/L
-                against the 1,000,000 start. They are meaningless in live mode and
-                actively misleading next to real holdings, so they are withheld
-                rather than relabelled. Watches and alerts apply to both modes. */}
+      <div className="stack subtab-panel" hidden={view !== "portfolio"}>
+        <PageHeader
+          title="Market Watch"
+          support={
+            mode === "live"
+              ? "Live prices, alerts that wait for your answer, and swaps you sign yourself."
+              : "Live prices, alerts that wait for your answer, and a portfolio that is entirely simulated."
+          }
+          action={actions}
+        />
+
+        <TradingModeToggle mode={mode} onChange={setMode} />
+
+        {error && <p className="error-text">{error}</p>}
+
+        {waiting ? (
+          <>
+            <SkeletonBlock height={150} />
+            <div className="kpi-row">
+              <SkeletonBlock height={110} />
+              <SkeletonBlock height={110} />
+              <SkeletonBlock height={110} />
+              <SkeletonBlock height={110} />
+            </div>
+            <SkeletonBlock height={280} />
+          </>
+        ) : (
+          <>
+            {/*
+              PAPER ONLY. This hero had NO mode guard at all: it rendered in live
+              mode too, so switching to Live wallet still showed "Simulated
+              portfolio" and the $1,000,000 paper start sitting above real funds.
+              A simulated figure presented while the user believes they are looking
+              at real holdings is the most dangerous thing this screen can do,
+              every decision made from it would be based on money that does not
+              exist. In live mode the live panel below is the ONLY portfolio shown,
+              and it states its own failures rather than falling back to anything.
+            */}
             {mode === "paper" && (
-              <>
-                <StatCard label="Cash balance" countTo={pf.cashBalance} format={usd} icon={<Wallet size={17} />} hint="Uninvested simulated cash" />
-                <StatCard
-                  label="Total P/L"
-                  value={signedUsd(pf.totalPnl)}
-                  tone={up ? "pos" : "neg"}
-                  icon={up ? <TrendingUp size={17} /> : <TrendingDown size={17} />}
-                  iconTone={up ? "pos" : "neg"}
-                  hint="Against the 1,000,000 start"
-                />
-              </>
-            )}
-            <StatCard label="Active watches" countTo={activeWatchCount} icon={<Eye size={17} />} hint="Checked on every pass" />
-            <StatCard
-              label="Pending alerts"
-              countTo={alerts.length}
-              iconTone={alerts.length > 0 ? "neg" : "neutral"}
-              icon={<Bell size={17} />}
-              hint="Awaiting your approval"
-            />
-          </div>
+            <Card hero eyebrow="Portfolio" title="Simulated portfolio" subtitle="Paper trading only. Values update live as prices move.">
+              <div className="hero-grid">
+                <div className="hero-figure">
+                  <span className="overline">Total value</span>
+                  {/* Keyed on whole thousands, not cents: the 10s price poll nudges
+                      this value constantly, and re-keying on every tick restarted
+                      the flash animation forever so it never settled. */}
+                  <span className="hero-value num pulse" key={Math.floor(pf.totalValue / 1000)}>
+                    {usd(pf.totalValue)}
+                  </span>
+                  <span className={`hero-pl ${up ? "pos" : "neg"}`}>
+                    {up ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                    {signedUsd(pf.totalPnl)}
+                    <span className="muted small" style={{ marginLeft: 4 }}>
+                      ({pct((pf.totalPnl / STARTING_CASH) * 100)})
+                    </span>
+                  </span>
+                  <span className="stat-hint">Cash plus live holdings, vs the 1,000,000 start</span>
+                </div>
 
-          <div className="split-7-5">
-            <div className="stack">
-              <MarketTable
-                rows={marketRows}
-                onSelect={(m) => setDetail(m.id)}
-                live={{ lastFetchedAt, stale }}
+                <div className="alloc-block">
+                  <span className="overline">Allocation</span>
+                  {allocation.length === 0 ? (
+                    <p className="muted small" style={{ margin: "8px 0 0" }}>
+                      No holdings yet. Approve a buy alert to open your first position.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="alloc-bar" role="img" aria-label="Holdings allocation">
+                        {allocation.map((seg) => (
+                          <span
+                            key={seg.symbol}
+                            className="alloc-seg"
+                            style={{ width: `${seg.share}%`, background: seg.color }}
+                            title={`${seg.symbol} ${seg.share.toFixed(1)}%`}
+                          />
+                        ))}
+                        <span
+                          className="alloc-seg cash"
+                          style={{ width: `${cashShare}%` }}
+                          title={`Cash ${cashShare.toFixed(1)}%`}
+                        />
+                      </div>
+                      <div className="alloc-legend">
+                        {allocation.map((seg) => (
+                          <span key={seg.symbol} className="alloc-legend-item">
+                            <span className="alloc-dot" style={{ background: seg.color }} />
+                            {seg.symbol} <span className="muted num">{allocLabels[seg.symbol]}%</span>
+                          </span>
+                        ))}
+                        <span className="alloc-legend-item">
+                          <span className="alloc-dot cash" />
+                          Cash <span className="muted num">{allocLabels.__cash}%</span>
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </Card>
+            )}
+
+            {/* LIVE ONLY, and rendered UNCONDITIONALLY in live mode. It previously
+                required `liveChain && walletAddress`, so a user with neither saw
+                nothing live and only the paper hero above, which is exactly how a
+                paper figure ended up representing a live wallet. The panel now owns
+                its own "no wallet" / "no chain" / "unreadable" states. */}
+            {mode === "live" && (
+              <LivePortfolioPanel
+                chain={liveChain}
+                chains={liveChains}
+                address={walletAddress}
+                markets={markets}
+                coinIdBySymbol={coinIdBySymbol}
+                onPickChain={setLiveChainId}
+                onRows={setLiveRows}
+                reloadKey={liveReloadKey}
+                cashSymbol={cashSymbol}
+                onCashSymbol={chooseCash}
+                customTokens={user?.customTokens}
               />
-              {/* "Simulated positions" — paper only, for the same reason as the
-                  hero. Live holdings are shown by LivePortfolioPanel above. */}
+            )}
+
+            <div className="kpi-row">
+              {/* Cash / watches / alerts only change on a trade or a fired alert, so they
+                  count up. Total P/L is recomputed on every 10s price poll, so animating it
+                  would restart the count from zero each tick, so it stays a plain value. */}
+              {/* The two money tiles are PAPER figures — simulated cash and P/L
+                  against the 1,000,000 start. They are meaningless in live mode and
+                  actively misleading next to real holdings, so they are withheld
+                  rather than relabelled. Watches and alerts apply to both modes. */}
               {mode === "paper" && (
-                <PortfolioPanel portfolio={pf} onSelect={(coinId) => setDetail(coinId)} />
+                <>
+                  <StatCard label="Cash balance" countTo={pf.cashBalance} format={usd} icon={<Wallet size={17} />} hint="Uninvested simulated cash" />
+                  <StatCard
+                    label="Total P/L"
+                    value={signedUsd(pf.totalPnl)}
+                    tone={up ? "pos" : "neg"}
+                    icon={up ? <TrendingUp size={17} /> : <TrendingDown size={17} />}
+                    iconTone={up ? "pos" : "neg"}
+                    hint="Against the 1,000,000 start"
+                  />
+                </>
               )}
-              <AlertsList alerts={alerts} onTrade={openTrade} onDismiss={dismiss} busyId={busyId} />
-              <AlertHistory alerts={alertHistory} />
+              <StatCard label="Active watches" countTo={activeWatchCount} icon={<Eye size={17} />} hint="Checked on every pass" />
+              <StatCard
+                label="Pending alerts"
+                countTo={alerts.length}
+                iconTone={alerts.length > 0 ? "neg" : "neutral"}
+                icon={<Bell size={17} />}
+                hint="Awaiting your approval"
+              />
             </div>
-            <div className="stack">
-              <AddWatchForm onAdded={loadData} />
-              <ChatBox onAction={loadData} />
-              <WatchList watches={watches} onEdit={editWatch} onRemove={removeWatch} />
-            </div>
-          </div>
-        </>
+
+            {/* "Simulated positions" — paper only, for the same reason as the
+                hero. Live holdings are shown by LivePortfolioPanel above. */}
+            {mode === "paper" && (
+              <PortfolioPanel portfolio={pf} onSelect={(coinId) => setDetail(coinId)} />
+            )}
+
+            <ChatBox onAction={loadData} />
+          </>
+        )}
+      </div>
+
+      {!waiting && (
+        <DetailPane screen="inline" active={view === "watchlist"}>
+          <AddWatchForm onAdded={loadData} />
+        </DetailPane>
       )}
 
       {selectedMarket && (

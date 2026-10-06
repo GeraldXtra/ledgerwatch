@@ -46,7 +46,7 @@ export function useWorkspace() {
   return useContext(WorkspaceContext);
 }
 
-function useDetailEntry(kind, screen, back) {
+function useDetailEntry(kind, screen, back, active = true) {
   const ws = useContext(WorkspaceContext);
   const idRef = useRef(null);
   if (idRef.current === null) idRef.current = {};
@@ -57,11 +57,11 @@ function useDetailEntry(kind, screen, back) {
   const remove = ws ? ws.remove : null;
 
   useLayoutEffect(() => {
-    if (!add) return undefined;
+    if (!add || !active) return undefined;
     const id = idRef.current;
     add({ id, kind, screen, back: () => backRef.current && backRef.current() });
     return () => remove(id);
-  }, [add, remove, kind, screen]);
+  }, [add, remove, kind, screen, active]);
 
   const entries = ws ? ws.entries : [];
   const top = entries[entries.length - 1];
@@ -71,12 +71,12 @@ function useDetailEntry(kind, screen, back) {
   return { ws, hidden };
 }
 
-export function DetailPane({ label, screen = "screen", onBack, children }) {
-  const { ws, hidden } = useDetailEntry("pane", screen, onBack);
+export function DetailPane({ screen = "screen", onBack, active = true, children }) {
+  const { ws, hidden } = useDetailEntry("pane", screen, onBack, active);
 
   if (!ws || !ws.pane) return null;
   return createPortal(
-    <section className="ws-sheet ws-sheet-base" aria-label={label} hidden={hidden}>
+    <section className="ws-sheet ws-sheet-base" hidden={hidden || !active}>
       {children}
     </section>,
     ws.pane

@@ -83,7 +83,7 @@ export default function ChatBox({ onAction }) {
             onChange={(e) => setInput(e.target.value)}
             aria-label="Message the agent"
           />
-          <Button variant="primary" type="submit" disabled={busy}>
+          <Button type="submit" disabled={busy}>
             <SendHorizontal size={14} />
             {busy ? "Sending" : "Send"}
           </Button>
