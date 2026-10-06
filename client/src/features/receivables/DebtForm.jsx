@@ -5,8 +5,6 @@ import { Button, Field, Input } from "../../components/ui";
 import ReliabilityBadge from "./ReliabilityBadge";
 import { compactNgn } from "./format";
 
-/** Group the integer part with thousand separators while preserving what the
- *  user is mid-way through typing (including a trailing decimal point). */
 function groupDigits(raw) {
   const s = String(raw ?? "");
   if (!s) return "";
@@ -15,20 +13,6 @@ function groupDigits(raw) {
   return rest.length ? `${grouped}.${rest.join("")}` : grouped;
 }
 
-/**
- * What the amount box is allowed to hold.
- *
- * THE FIELD USED TO SHOW ONE NUMBER AND SUBMIT ANOTHER. The sanitiser was
- * `replace(/[^\d.]/g, "")`, which permits several decimal points — easy to
- * produce on a phone keypad. `groupDigits` then joined everything after the
- * first point back together, so the state "1.2.3" rendered as a tidy, plausible
- * "1.23" while `Number("1.2.3")` is NaN. The form submitted the NaN, the server
- * refused it correctly, and the owner was shown a validation error about an
- * amount that looked perfectly valid on their own screen.
- *
- * Only the first point survives now, so what is displayed and what is submitted
- * are always the same number.
- */
 function sanitizeAmount(value) {
   const digitsAndDots = String(value ?? "").replace(/[^\d.]/g, "");
   const firstDot = digitsAndDots.indexOf(".");
@@ -58,11 +42,6 @@ function toDateInput(value) {
   return d.toISOString().slice(0, 10);
 }
 
-/**
- * Add/edit debt form (rendered inside a Modal by the parent). When `initial`
- * is provided the form is in edit mode. onSubmit(payload) returns a promise;
- * onCancel closes the modal.
- */
 export default function DebtForm({ initial, onSubmit, onCancel }) {
   const editing = Boolean(initial);
   const [form, setForm] = useState(
@@ -80,13 +59,11 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [known, setKnown] = useState(null); // matched existing debtor (reliability warning)
+  const [known, setKnown] = useState(null);
   const lookupRef = useRef(null);
 
   const update = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  // Debounced lookup: when the phone matches an existing debtor, surface their
-  // reliability so the owner sees the risk before recording a new debt.
   useEffect(() => {
     if (editing) return;
     clearTimeout(lookupRef.current);
@@ -166,10 +143,6 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
             />
           </Field>
           <Field label="Amount (₦)">
-            {/* Text rather than number so thousand separators can be shown while
-                typing, because enterprise invoices run to nine figures and an unbroken
-                run of digits is unreadable. The raw numeric string is kept in
-                state; only the display is grouped. */}
             <Input
               type="text"
               inputMode="numeric"

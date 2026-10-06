@@ -11,18 +11,13 @@ const {
 
 const router = express.Router();
 
-// Every route is authenticated and scoped to req.user. The server only ever
-// handles PUBLIC addresses and derivation indices — never a key or a seed.
 router.use(requireAuth);
 
-router.get("/quote", quote); // preview figures — reserves nothing
-// Throttled per user HERE, at the step that actually burns a derivation index.
-// The hourly cap used to count addresses created at the next step, so this
-// endpoint, the one that consumes the index, had no limit at all (LW-014).
-router.post("/allocate", require("../middleware/rateLimit").allocate, allocate); // reserve an index (atomic)
-router.post("/", create); // record the browser-derived address
+router.get("/quote", quote);
+router.post("/allocate", require("../middleware/rateLimit").allocate, allocate);
+router.post("/", create);
 router.get("/", list);
 router.patch("/:id/revoke", revoke);
-router.post("/:id/sweeps", recordSweep); // bookkeeping for a browser-signed sweep
+router.post("/:id/sweeps", recordSweep);
 
 module.exports = router;

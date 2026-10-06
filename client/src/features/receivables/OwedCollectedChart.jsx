@@ -30,10 +30,6 @@ function ChartTooltip({ active, payload, label }) {
   );
 }
 
-/**
- * 6-month owed (invoiced) vs collected (payments received) grouped bar chart.
- * `data` = [{ month, owed, collected }].
- */
 export default function OwedCollectedChart({ data }) {
   return (
     <div className="rec-chart-frame">
@@ -44,9 +40,6 @@ export default function OwedCollectedChart({ data }) {
           <YAxis tick={{ fill: "var(--muted)", fontSize: 11.5 }} tickLine={false} axisLine={false} width={66} tickFormatter={(v) => compactNgn(v, "").trim()} />
           <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--soft)" }} />
           <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
-          {/* Invoiced is navy (money owed, neutral); collected is the semantic
-              green (money actually received). Both are theme tokens so the
-              dark theme gets a navy that shows on a dark card. */}
           <Bar dataKey="owed" name="Invoiced" fill="var(--chart-a)" radius={[6, 6, 0, 0]} maxBarSize={44} minPointSize={2} isAnimationActive={!reduceMotion()} />
           <Bar dataKey="collected" name="Collected" fill="var(--chart-b)" radius={[6, 6, 0, 0]} maxBarSize={44} minPointSize={2} isAnimationActive={!reduceMotion()} />
         </BarChart>

@@ -5,11 +5,6 @@ import { price as fmtPrice, compact, pct, conditionText } from "./format";
 import CoinChart from "./CoinChart";
 import WatchEditRow from "./WatchEditRow";
 
-/**
- * Coin detail modal: large real chart with timeframes, key stats (24h high/low,
- * market cap, volume), the user's holding of the coin, and its active watches
- * (editable / removable). Full-screen on mobile via CSS.
- */
 export default function CoinDetailModal({
   market,
   holding,
@@ -42,10 +37,6 @@ export default function CoinDetailModal({
             <h3 className="section-title">
               {market.name} <span className="muted">{market.symbol}</span>
             </h3>
-            {/* An absent price says so rather than showing a bare "--" that
-                reads like the coin has no value. The chart below fetches on its
-                own and may well have history even when the live quote does
-                not. */}
             {market.priceUnavailable ? (
               <div className="muted small">
                 Live price unavailable right now. Your watch is still active.

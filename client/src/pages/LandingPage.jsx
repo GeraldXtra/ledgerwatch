@@ -13,16 +13,6 @@ import {
 } from "lucide-react";
 import LogoMark from "../components/LogoMark";
 
-/**
- * THE FRONT PAGE
- *
- * One screen says what the product does, one row of three says what is in
- * it, three steps say how to start, and a plain footer. It replaced a five
- * section broadsheet with a parallax ledger and numbered columns, which
- * users found too much. A visitor has a few seconds to work out whether
- * this is for them; short and clear serves them better than atmosphere.
- */
-
 const ROWS = [
   { who: "Dangote Cement", amount: "85,000", state: "Overdue 6 days", tone: "neg" },
   { who: "Zenith Trading", amount: "42,500", state: "Reminder sent", tone: "warn" },

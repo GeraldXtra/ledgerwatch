@@ -36,31 +36,12 @@ function ChartTooltip({ active, payload }) {
   );
 }
 
-/**
- * Real interactive coin chart from /api/coins/:id/chart. Timeframe buttons refetch;
- * area chart with a gradient tinted to the line color; line green when the period is up,
- * muted red when down. Skeleton while loading, designed empty state if no data.
- */
 export default function CoinChart({ coinId, defaultDays = 7 }) {
   const [days, setDays] = useState(defaultDays);
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
 
-  /**
-   * RETRIES, because one attempt was not enough and "No chart data" was a lie.
-   *
-   * This fetched once. The server builds its chart cache on demand from the
-   * price provider, so the very first request for a coin can come back empty
-   * while that fill is still in flight or after a rate limited attempt — and an
-   * empty `prices` array is a RESOLVED response, not an error, so the old code
-   * treated it as "this coin has no history" and rendered the empty state
-   * permanently. Reopening the modal was the only way to try again, which is
-   * why the chart appeared only after a reload.
-   *
-   * An empty series is therefore retried like a failure, with a widening delay,
-   * and only the last attempt is allowed to conclude there is genuinely nothing.
-   */
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -144,9 +125,6 @@ export default function CoinChart({ coinId, defaultDays = 7 }) {
                   <stop offset="100%" stopColor={stroke} stopOpacity={0.1} />
                 </linearGradient>
               </defs>
-              {/* Theme tokens, not hex: SVG presentation attributes accept
-                  var(), and the line colour above already relied on that. A
-                  literal grey grid was invisible on the dark ground. */}
               <CartesianGrid stroke="var(--line)" vertical={false} />
               <XAxis
                 dataKey="t"

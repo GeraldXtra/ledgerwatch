@@ -5,16 +5,8 @@ import { useAuth } from "../../context/AuthContext";
 import { ngn, shortDate } from "./format";
 import PaymentPanel from "./PaymentPanel";
 
-// Lazy: this panel pulls in qrcode to render the address. Most invoices have no
-// crypto address, so the library should not be in the main bundle.
 const CryptoPaymentPanel = lazy(() => import("./CryptoPaymentPanel"));
 
-/**
- * Debt detail: debtor header, key figures, the payment panel (progress + history +
- * record + receipt), the crypto payment address if one has been issued, and quick
- * actions. `debt` carries derived amountPaid/balance/displayStatus. Callbacks
- * bubble to the page. onChanged(updatedDebt) fires when a payment changes the debt.
- */
 export default function DebtDetailModal({
   debt,
   onClose,
@@ -30,7 +22,6 @@ export default function DebtDetailModal({
   const currency = debt.currency || "NGN";
   const balance = debt.balance != null ? debt.balance : debt.amount;
   const paid = debt.displayStatus === "paid" || balance <= 0;
-  // Absent config reads as enabled, matching the server.
   const cryptoEnabled = user?.crypto?.enabled !== false;
 
   return (
@@ -58,9 +49,6 @@ export default function DebtDetailModal({
         <Button onClick={() => onRemind(debt)}>
           <BellRing size={14} /> Generate reminder
         </Button>
-        {/* Hidden when the account has crypto payments switched off in Settings.
-            The server rejects issuance too, so this is the visible half of one
-            rule rather than the whole of it. */}
         {!paid && onCrypto && cryptoEnabled && (
           <Button onClick={() => onCrypto(debt)}>
             <Coins size={14} /> Crypto payment

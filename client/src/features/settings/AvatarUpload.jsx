@@ -5,30 +5,10 @@ import { Avatar, Button, useToast } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
-const OUTPUT_SIZE = 512; // square, matching the avatar's object-fit: cover
+const OUTPUT_SIZE = 512;
 
-/**
- * A phone photo is a few MB; anything far past that is not a profile picture,
- * and the whole file is read into memory as a data URL before it is drawn, so
- * the check has to come first rather than after.
- */
 const MAX_INPUT_BYTES = 20 * 1024 * 1024;
 
-/**
- * Square-crop and downscale in the browser before upload. A phone photo is
- * several MB; this lands around 60kB, which keeps the user document small and
- * stays far inside the server's 2MB decoded cap.
- *
- * EVERY CALLBACK IS WRAPPED, BECAUSE A THROW IN ONE GOES NOWHERE.
- *
- * `img.onload` runs long after this executor returned, so anything it threw —
- * most plausibly `getContext("2d")` handing back null for a very large image or
- * under memory pressure, and then `ctx.imageSmoothingQuality` throwing on it —
- * escaped into no handler at all. The promise then never settled: not resolved,
- * not rejected. The caller's `finally` never ran, so the button read
- * "Uploading…" for as long as the page stayed open and no error was ever shown.
- * A hung promise is the quietest failure there is.
- */
 function processImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -39,7 +19,6 @@ function processImage(file) {
         img.onerror = () => reject(new Error("That file is not a readable image"));
         img.onload = () => {
           try {
-            // Centre-crop to a square, then draw at OUTPUT_SIZE.
             const side = Math.min(img.width, img.height);
             const sx = (img.width - side) / 2;
             const sy = (img.height - side) / 2;
@@ -70,7 +49,6 @@ function processImage(file) {
   });
 }
 
-/** Profile picture control: click or drag to select, live preview, remove. */
 export default function AvatarUpload() {
   const { user, applyUser } = useAuth();
   const toast = useToast();

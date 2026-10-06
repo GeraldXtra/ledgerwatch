@@ -1,43 +1,3 @@
-/**
- * REGENERATE THE GUIDE'S SCREENSHOTS.
- *
- * Every picture under client/public/docs comes from this script, so a change
- * to the interface can be followed by a fresh set in a few minutes rather
- * than by hand. It drives a real Chrome against the LOCAL dev server and a
- * THROWAWAY database. Never point it at production: it creates a wallet,
- * issues a payment address and generates reminders on the account it is
- * given.
- *
- * How to run (from the repo root):
- *
- *   1. Seed a throwaway database and start the API against it:
- *        cd server
- *        MONGO_URI=mongodb://127.0.0.1:27017/ledgerwatch_shots node src/seed/seed.js --force
- *        MONGO_URI=mongodb://127.0.0.1:27017/ledgerwatch_shots SMTP_HOST= SMTP_USER= SMTP_PASS= \
- *          ANTHROPIC_API_KEY= TURNSTILE_SECRET_KEY= AUTOMATION_INTERVAL_MS=600000 node src/index.js
- *   2. Start the client with the human check off, so buttons are enabled in the pictures:
- *        cd client && VITE_TURNSTILE_SITE_KEY= npx vite --port 5173
- *   3. Mint a session token for demo@ledgerwatch.app in that database (utils/token.js), and
- *      a second one for any other verified account for the live trading picture.
- *   4. Install puppeteer-core somewhere on NODE_PATH (it is not a dependency of the client):
- *        mkdir /tmp/shots && cd /tmp/shots && npm i puppeteer-core@23
- *   5. Run:
- *        NODE_PATH=/tmp/shots/node_modules TOKEN=<jwt> TOKEN2=<jwt> node client/scripts/docs-screenshots.cjs
- *      SECTIONS=wallet,phone limits the run; a name substring as the first argument limits the shots.
- *      CHROME_PATH overrides the Chrome location.
- *
- * The wallet it creates is a throwaway with a fixed password and is never
- * funded. The recovery phrase step is blurred before it is captured.
- */
-/**
- * Screenshots of the new interface for the user guide.
- *
- * Runs against the local dev server and a throwaway database. Every picture
- * is written to client/public/docs as WebP. Desktop pictures are 1280 wide;
- * phone pictures are 390 wide at 2x.
- *
- *   TOKEN=<jwt> node shoot.cjs [only-name-substring]
- */
 const fs = require("fs");
 const path = require("path");
 const puppeteer = require("puppeteer-core");
@@ -48,7 +8,6 @@ const OUT = path.join(__dirname, "..", "public", "docs");
 const TOKEN = process.env.TOKEN;
 const TOKEN2 = process.env.TOKEN2 || "";
 const ONLY = process.argv[2] || "";
-// SECTIONS=a,b limits the run to sections whose name includes one of these.
 const SECTIONS = String(process.env.SECTIONS || "")
   .split(",")
   .map((s) => s.trim())
@@ -56,19 +15,6 @@ const SECTIONS = String(process.env.SECTIONS || "")
 const WALLET_PW = "docs-screenshots-only-1";
 const results = { ok: [], failed: [] };
 
-/**
- * THE "NEVER POINT IT AT PRODUCTION" WARNING, ENFORCED RATHER THAN TRUSTED.
- *
- * The header says in plain words that this must not be run against production
- * because it creates a wallet, issues a real payment address and generates
- * reminders on whatever account its token belongs to. Nothing checked. It
- * targets localhost, but the page it drives talks to whichever API the local
- * build was configured with, so a client built with a production VITE_API_URL
- * pointed the whole run at live data with only the operator's memory in the way.
- *
- * Localhost is required on both halves; anything else has to be waved through
- * deliberately with ALLOW_REMOTE=1, which is a thing somebody has to type.
- */
 function isLocal(url) {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(String(url || ""));
 }
@@ -102,7 +48,6 @@ async function shot(target, name, opts = {}) {
   }
 }
 
-/** Screenshot one element, or fall back to the viewport. */
 async function shotEl(page, selector, name, opts = {}) {
   const el = await page.$(selector);
   if (!el) {
@@ -113,7 +58,6 @@ async function shotEl(page, selector, name, opts = {}) {
   await shot(el, name, opts);
 }
 
-/** Click the first element matching `selector` whose text includes `text`. */
 async function clickText(page, selector, text, { exact = false, index = 0 } = {}) {
   const handles = await page.$$(selector);
   let seen = 0;
@@ -143,8 +87,6 @@ async function typeInto(page, selector, value, { index = 0 } = {}) {
 async function goto(page, route, wait = 1500) {
   await page.goto(`${BASE}${route}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#root > *", { timeout: 30000 });
-  // The "verification is switched off" box is a dev server notice that
-  // production never renders; the shots should look like production.
   await page.addStyleTag({ content: ".turnstile-missing { display: none !important; }" });
   await sleep(wait);
 }
@@ -194,7 +136,6 @@ async function section(name, fn) {
     args: ["--no-sandbox", "--disable-gpu", "--hide-scrollbars", "--lang=en-GB"],
   });
 
-  // ------------------------------------------------------------ public ----
   await section("public pages", async () => {
     const page = await newPage(browser);
     await page.setViewport({ width: 1280, height: 900 });
@@ -210,20 +151,17 @@ async function section(name, fn) {
     await page.close();
   });
 
-  // ------------------------------------------------------- receivables ----
   await section("receivables", async () => {
     const page = await newPage(browser, { token: TOKEN });
     await page.setViewport({ width: 1280, height: 980 });
     await goto(page, "/app/receivables", 5000);
     await shot(page, "receivables-overview");
 
-    // Debts tab
     await clickText(page, ".subtab", "Debts");
     await page.waitForSelector(".debts-table tbody tr", { timeout: 20000 });
     await sleep(2000);
     await shot(page, "receivables-debts");
 
-    // Record a debt
     await clickText(page, "button", "Record debt");
     await page.waitForSelector(".modal-panel", { timeout: 10000 });
     await sleep(600);
@@ -231,8 +169,6 @@ async function section(name, fn) {
     await page.keyboard.press("Escape");
     await sleep(500);
 
-    // Detail: find an unpaid row (the partial one for Dangote is first by default order?)
-    // Open the first row whose status is not paid.
     const rows = await page.$$(".debts-table tbody tr");
     let opened = false;
     for (const r of rows) {
@@ -252,7 +188,6 @@ async function section(name, fn) {
     await sleep(2500);
     await shotEl(page, ".modal-panel", "debt-detail");
 
-    // Record payment form inside the detail
     try {
       await clickText(page, ".modal-panel button", "Record payment");
       await sleep(700);
@@ -263,7 +198,6 @@ async function section(name, fn) {
       results.failed.push("debt-payment: " + e.message);
     }
 
-    // Generate reminder from the detail (no wallet yet, so no address prompt)
     await clickText(page, ".modal-panel button", "Generate reminder");
     await page.waitForFunction(() => document.querySelectorAll(".modal-panel").length >= 1 && document.querySelector(".reminder-box"), { timeout: 30000 });
     await sleep(1500);
@@ -274,7 +208,6 @@ async function section(name, fn) {
     await page.keyboard.press("Escape");
     await sleep(400);
 
-    // Debtors tab
     await clickText(page, ".subtab", "Debtors");
     await page.waitForSelector(".debtors-table tbody tr", { timeout: 20000 });
     await sleep(1500);
@@ -293,7 +226,6 @@ async function section(name, fn) {
     await page.close();
   });
 
-  // ------------------------------------------------------------- theme ----
   await section("dark theme", async () => {
     const page = await newPage(browser, { token: TOKEN, theme: "dark" });
     await page.setViewport({ width: 1280, height: 900 });
@@ -302,12 +234,10 @@ async function section(name, fn) {
     await page.close();
   });
 
-  // ------------------------------------------------------------ market ----
   await section("market (paper)", async () => {
     const page = await newPage(browser, { token: TOKEN });
     await page.setViewport({ width: 1280, height: 1000 });
     await goto(page, "/app/market", 7000);
-    // Raise the seeded alert, if the seed left one primed.
     try {
       await clickText(page, "button", "Check now");
       await sleep(6000);
@@ -333,7 +263,6 @@ async function section(name, fn) {
     const history = await cardWith("Alert history");
     if (history) await shot(history, "market-history");
 
-    // Trade panel from the first pending alert.
     const alertCard = await page.$(".alert-card");
     if (alertCard) {
       await clickText(page, ".alert-card button", "Buy");
@@ -351,7 +280,6 @@ async function section(name, fn) {
       results.failed.push("market-trade: no pending alert to open");
     }
 
-    // Coin detail from the watchlist.
     const row = await page.$(".market-table tbody tr");
     if (row) {
       await row.click();
@@ -363,17 +291,13 @@ async function section(name, fn) {
     await page.close();
   });
 
-  // ------------------------------------------------------------ wallet ----
   await section("wallet", async () => {
     const page = await newPage(browser, { token: TOKEN });
     await page.setViewport({ width: 1280, height: 900 });
     await goto(page, "/app/wallet", 4000);
     await shot(page, "wallet-setup");
-    // The sticky bar would overlay the top of a frame that has been scrolled
-    // into view for an element shot. Let it scroll away for this section.
     await page.addStyleTag({ content: ".topbar { position: static !important; }" });
 
-    // Create: the phrase step, blurred.
     await clickText(page, "button", "Create a wallet");
     await page.waitForSelector(".modal-panel", { timeout: 10000 });
     await sleep(500);
@@ -389,7 +313,6 @@ async function section(name, fn) {
     await page.keyboard.press("Escape");
     await sleep(500);
 
-    // Import dialog.
     await clickText(page, "button", "Import one");
     await page.waitForSelector(".modal-panel", { timeout: 10000 });
     await sleep(500);
@@ -397,7 +320,6 @@ async function section(name, fn) {
     await page.keyboard.press("Escape");
     await sleep(500);
 
-    // Really create one (throwaway, never funded).
     await clickText(page, "button", "Create a wallet");
     await page.waitForSelector(".modal-panel", { timeout: 10000 });
     await clickText(page, ".modal-panel button", "Show recovery phrase");
@@ -411,7 +333,6 @@ async function section(name, fn) {
     await page.waitForSelector(".mm", { timeout: 90000 });
     await sleep(3000);
 
-    // Pick Base, then the main view.
     await page.click(".net-trigger");
     await sleep(2500);
     await shotEl(page, ".mm-stage", "wallet-networks");
@@ -419,13 +340,10 @@ async function section(name, fn) {
     await sleep(6000);
     await shotEl(page, ".mm-stage", "wallet-main");
 
-    // Receive
     await clickText(page, ".mm-action", "Receive");
     await sleep(1200);
     await shotEl(page, ".mm-drawer", "wallet-receive");
 
-    // Send form and review. Send toggles the drawer, so make sure the form
-    // is the one showing before typing into it.
     await clickText(page, ".mm-action", "Send");
     try {
       await page.waitForSelector(".mm-drawer input", { timeout: 8000 });
@@ -441,14 +359,12 @@ async function section(name, fn) {
     await sleep(6000);
     await shotEl(page, ".mm-drawer", "wallet-send-review");
 
-    // Collected
     await clickText(page, ".mm-action", "Collected");
     await sleep(4000);
     await shotEl(page, ".mm-drawer", "wallet-collected");
-    await clickText(page, ".mm-action", "Collected"); // close
+    await clickText(page, ".mm-action", "Collected");
     await sleep(400);
 
-    // Import a token
     await clickText(page, ".mm-linkish", "Import a token");
     await page.waitForSelector(".modal-panel", { timeout: 10000 });
     await sleep(500);
@@ -456,14 +372,12 @@ async function section(name, fn) {
     await page.keyboard.press("Escape");
     await sleep(400);
 
-    // Activity tab
     await clickText(page, ".mm-tab", "Activity");
     await sleep(800);
     await shotEl(page, ".mm-stage", "wallet-activity");
     await clickText(page, ".mm-tab", "Tokens");
     await sleep(400);
 
-    // Token detail (first row, the native coin)
     const firstRow = await page.$(".mm-row");
     if (firstRow) {
       await firstRow.click();
@@ -474,7 +388,6 @@ async function section(name, fn) {
       await sleep(400);
     }
 
-    // Bitcoin
     await page.click(".net-trigger");
     await sleep(800);
     await clickText(page, ".net-item", "Bitcoin", { exact: false, index: 0 });
@@ -491,10 +404,7 @@ async function section(name, fn) {
     await page.close();
   });
 
-  // ------------------------------------------------------- market live ----
   await section("market (live)", async () => {
-    // The seeded demo account is locked to paper by the server, so live mode
-    // is shown from a second throwaway account with its own throwaway wallet.
     if (!TOKEN2) throw new Error("TOKEN2 is required for the live section");
     const page = await newPage(browser, { token: TOKEN2 });
     await page.setViewport({ width: 1280, height: 1000 });
@@ -516,11 +426,9 @@ async function section(name, fn) {
     await goto(page, "/app/market", 5000);
     await clickText(page, ".mode-btn", "Live wallet");
     await sleep(3000);
-    // Pick Base if the panel is asking for a network.
     try {
       await clickText(page, ".card .chip", "Base", { exact: true });
     } catch {}
-    // Wait for the chain read to finish: a zero state, a total, or an error.
     await page.waitForSelector(".live-zero-state, .live-total, .live-read-error", { timeout: 90000 });
     await sleep(2500);
     const cards = await page.$$(".card");
@@ -531,13 +439,11 @@ async function section(name, fn) {
         break;
       }
     }
-    // Back to paper so the account is left as the seed made it.
     await clickText(page, ".mode-btn", "Paper trading");
     await sleep(1500);
     await page.close();
   });
 
-  // ---------------------------------------------------- crypto payments ----
   await section("crypto payment address", async () => {
     const page = await newPage(browser, { token: TOKEN });
     await page.setViewport({ width: 1280, height: 980 });
@@ -545,7 +451,6 @@ async function section(name, fn) {
     await clickText(page, ".subtab", "Debts");
     await page.waitForSelector(".debts-table tbody tr", { timeout: 20000 });
     await sleep(1500);
-    // An unpaid, non partial row: "Pending" in the status pill.
     const rows = await page.$$(".debts-table tbody tr");
     let target = null;
     for (const r of rows) {
@@ -560,9 +465,6 @@ async function section(name, fn) {
     await page.waitForSelector(".modal-panel", { timeout: 10000 });
     await sleep(2000);
     await clickText(page, ".modal-panel button", "Crypto payment");
-    // The invoice dialog closes and the issue dialog takes its place. It is
-    // code split and pulls in ethers, which on the dev server takes a while
-    // the first time, and then it fetches a quote.
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll(".modal-panel")).some((p) => /Crypto payment for/.test(p.textContent)),
       { timeout: 120000 }
@@ -571,12 +473,9 @@ async function section(name, fn) {
     await sleep(1500);
     await shotEl(page, ".modal-panel", "crypto-issue");
 
-    // Issue it for real on the test network the account defaults to.
     await typeInto(page, ".modal-panel input[type=password]", WALLET_PW);
     await clickText(page, ".modal-panel button[type=submit]", "Create payment address");
-    // Back to the invoice, now carrying the address card.
     await page.waitForSelector(".crypto-card", { timeout: 180000 });
-    // Let the "address created" toast go before the picture.
     await sleep(7000);
     const card = await page.$(".crypto-card");
     await card.evaluate((e) => e.scrollIntoView({ block: "start" }));
@@ -585,7 +484,6 @@ async function section(name, fn) {
     await page.close();
   });
 
-  // ---------------------------------------------------------- settings ----
   await section("settings", async () => {
     const page = await newPage(browser, { token: TOKEN });
     await page.setViewport({ width: 1280, height: 900 });
@@ -603,7 +501,6 @@ async function section(name, fn) {
     await page.close();
   });
 
-  // ------------------------------------------------------------- phone ----
   await section("phone", async () => {
     const page = await newPage(browser, { phone: true, token: TOKEN });
     await goto(page, "/app/receivables", 5000);
@@ -611,12 +508,10 @@ async function section(name, fn) {
     await clickText(page, ".subtab", "Debts");
     await page.waitForSelector(".debts-table tbody tr", { timeout: 20000 });
     await sleep(1500);
-    // The rows, not the tiles above them: that is what the guide is showing.
     await page.evaluate(() => document.querySelector(".debts-table").scrollIntoView({ block: "start" }));
     await sleep(500);
     await shot(page, "phone-debts");
     const rows = await page.$$(".debts-table tbody tr");
-    // A DOM click: after the scroll above the row sits under the sticky bar.
     await rows[0].evaluate((r) => r.querySelector("td:nth-child(2)").click());
     await page.waitForSelector(".modal-panel", { timeout: 10000 });
     await sleep(2000);
@@ -649,15 +544,6 @@ async function section(name, fn) {
   await browser.close();
   console.log("\nOK:", results.ok.length, "FAILED:", results.failed.length);
   for (const f of results.failed) console.log("  -", f);
-  /**
-   * A FAILED SHOT IS A FAILED RUN.
-   *
-   * This printed the failures and then exited 0, so twenty pictures could fail
-   * to capture and anything running the script — a person reading one line of
-   * output, or a future CI step — saw success. A guide whose pictures quietly
-   * stopped updating is how the documentation drifts back out of true, which is
-   * the whole thing this script exists to prevent.
-   */
   if (results.failed.length > 0) process.exit(1);
 })().catch((err) => {
   console.error("fatal", err);

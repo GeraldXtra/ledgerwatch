@@ -1,44 +1,12 @@
-/**
- * LW-025 — the wallet history cursor must never advance past unread blocks,
- * and the inbound scan must notice tokens it was never told about.
- *
- * THE DEFECT, two halves. A failed log query hit `continue` and the cursor
- * was then set to `head` regardless, so the window was permanently unread
- * with nothing to say so. And a resume read at most four windows back from
- * head before jumping the cursor to head, so any gap longer than that was
- * skipped forever.
- *
- * THE FEATURE that rides on the same scan: it used to filter logs to each
- * registry contract in turn, so a token nobody imported could arrive, hold a
- * real balance, and never be shown anywhere. The filter is now on the
- * recipient alone, and an unknown contract is read and RECOMMENDED, never
- * auto-added, because on a real network most unsolicited tokens are bait.
- *
- * The chain is mocked at the one seam the service uses, `rpcCall`, so these
- * run without a network and without a node. Base Sepolia is used because it
- * is enabled with no environment at all.
- */
-
 process.env.SMTP_HOST = "";
 process.env.VAPID_PRIVATE_KEY = "";
 
-/**
- * The app is CommonJS and is loaded through Node's own `require`, which sits
- * outside vitest's module mocking, so `vi.mock` would be ignored. The
- * service reads `rpcCall` off the rpc module object at call time for exactly
- * this reason; the property is swapped here and put back afterwards.
- */
 const rpcService = require("../services/rpc.service");
 const realRpcCall = rpcService.rpcCall;
 const realRpcCallTyped = rpcService.rpcCallTyped;
 const rpcCall = vi.fn();
 beforeAll(() => {
   rpcService.rpcCall = rpcCall;
-  /**
-   * The typed seam, derived from the same mock. `null` is a transport failure
-   * (nobody answered); an object carrying `__rpcError` is a node that ANSWERED
-   * with an error, which is the case LW-084's fallback exists for.
-   */
   rpcService.rpcCallTyped = async (chain, method, params) => {
     const r = await rpcCall(chain, method, params);
     if (r && r.__rpcError) return { ok: false, reason: `rpc error: ${r.__rpcError}` };
@@ -70,7 +38,6 @@ const TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523
 const pad = (addr) => "0x" + addr.toLowerCase().slice(2).padStart(64, "0");
 const word = (n) => BigInt(n).toString(16).padStart(64, "0");
 
-/** ABI-encode a dynamic string return value. */
 function abiString(s) {
   const hex = Buffer.from(s, "utf8").toString("hex");
   const padded = hex.padEnd(Math.ceil(Math.max(hex.length, 1) / 64) * 64, "0");
@@ -88,11 +55,6 @@ function transferLog({ contract, to = WALLET, from = SENDER, amount, block, hash
   };
 }
 
-/**
- * A fake chain: `head` in blocks, a list of logs, a per-contract metadata
- * answer, and a set of windows that "fail" (return null, as rpcCall does
- * for a transport failure). `calls` records every eth_getLogs range asked.
- */
 function fakeChain({ head, logs = [], meta = {}, failWindows = [], refuseUnfiltered = false }) {
   const calls = [];
   rpcCall.mockReset();
@@ -106,7 +68,6 @@ function fakeChain({ head, logs = [], meta = {}, failWindows = [], refuseUnfilte
         : null;
       calls.push(addresses ? { from, to, address: true } : { from, to });
       if (failWindows.some((f) => f.from === from)) return null;
-      // A public node that will not serve a log query with no address filter.
       if (refuseUnfiltered && !addresses) {
         return { __rpcError: "Please specify an address in your request or, to remove restrictions, order a dedicated full node here" };
       }
@@ -153,8 +114,6 @@ describe("LW-025: the cursor only covers blocks that were actually read", () => 
     const head = 10_000;
     const user = await makeUser({ walletHistoryCursors: [{ chainId: CHAIN_ID, block: 1_000 }] });
 
-    // Resume starts 50 blocks below the cursor. First window succeeds, the
-    // second returns null (transport failure).
     const firstFrom = 950;
     const secondFrom = firstFrom + span;
     const calls = fakeChain({ head, failWindows: [{ from: secondFrom }] });
@@ -163,9 +122,7 @@ describe("LW-025: the cursor only covers blocks that were actually read", () => 
 
     expect(r.failed).toBe(true);
     expect(calls[0]).toEqual({ from: firstFrom, to: firstFrom + span - 1 });
-    expect(calls).toHaveLength(2); // stopped at the failure, did not carry on
-    // The defect: this used to be `head`. It must be the top of the window
-    // that was read, and nothing above it.
+    expect(calls).toHaveLength(2);
     expect(await cursorOf(user._id)).toBe(firstFrom + span - 1);
   });
 
@@ -182,21 +139,18 @@ describe("LW-025: the cursor only covers blocks that were actually read", () => 
   it("catches a long gap up over successive loads instead of skipping it", async () => {
     const chain = getChain(CHAIN_ID);
     const span = spanFor(chain);
-    const head = 100_000; // far more than one load's windows above the cursor
+    const head = 100_000;
     const user = await makeUser({ walletHistoryCursors: [{ chainId: CHAIN_ID, block: 1_000 }] });
 
     const calls = fakeChain({ head });
     await syncInboundTransfers({ userId: user._id, chainId: CHAIN_ID, address: WALLET });
 
     const after = await cursorOf(user._id);
-    // Read forward from the cursor, several windows, and stopped short of head
-    // rather than jumping to it: the rest is for the next load.
     expect(calls[0].from).toBe(950);
     expect(after).toBe(calls[calls.length - 1].to);
     expect(after).toBeLessThan(head);
     expect(after).toBeGreaterThan(1_000 + span);
 
-    // The next load continues from there.
     const calls2 = fakeChain({ head });
     await syncInboundTransfers({ userId: user._id, chainId: CHAIN_ID, address: WALLET });
     expect(calls2[0].from).toBe(after - 50);
@@ -215,7 +169,7 @@ describe("new token detection", () => {
       logs: [
         transferLog({
           contract: usdc.address.toLowerCase(),
-          amount: 2_500_000, // 2.5 USDC at 6 decimals
+          amount: 2_500_000,
           block: head - 10,
           hash: "0x" + "11".repeat(32),
         }),
@@ -242,7 +196,7 @@ describe("new token detection", () => {
       logs: [
         transferLog({
           contract: SPAM,
-          amount: 1_500_000_000_000_000_000n, // 1.5 at 18 decimals
+          amount: 1_500_000_000_000_000_000n,
           block: head - 3,
           hash: "0x" + "22".repeat(32),
         }),
@@ -269,9 +223,7 @@ describe("new token detection", () => {
       impersonates: null,
     });
     expect(d.firstFrom).toBe(SENDER);
-    // RECOMMENDED, not added. The custom list is the owner's decision.
     expect(u.customTokens).toHaveLength(0);
-    // But the arrival itself is history, with the decimals the contract gave.
     const tx = await WalletTx.findOne({ userId: user._id, tokenAddress: SPAM });
     expect(tx.symbol).toBe("SPAM");
     expect(tx.value).toBe("1.5");
@@ -295,7 +247,6 @@ describe("new token detection", () => {
   it("does not latch a contract that failed to answer; it is read on a later sync", async () => {
     const user = await makeUser();
     const head = 5_000;
-    // First sync: the node answers nothing for eth_call (transport failure).
     fakeChain({
       head,
       logs: [transferLog({ contract: SPAM, amount: 7, block: head - 1, hash: "0x" + "44".repeat(32) })],
@@ -306,10 +257,8 @@ describe("new token detection", () => {
     let u = await User.findById(user._id).lean();
     expect(u.discoveredTokens).toHaveLength(1);
     expect(u.discoveredTokens[0].readable).toBe(false);
-    // A node that did not answer is not an attempt against the contract.
     expect(u.discoveredTokens[0].lookupAttempts).toBe(0);
 
-    // Second sync: the contract answers. No new logs; the retry alone fixes it.
     fakeChain({ head: head + 10, meta: { [SPAM]: { symbol: "LATE", name: "Late", decimals: 8 } } });
     await syncInboundTransfers({ userId: user._id, chainId: CHAIN_ID, address: WALLET });
 
@@ -322,7 +271,7 @@ describe("new token detection", () => {
     const user = await makeUser();
     const head = 5_000;
     const nft = transferLog({ contract: SPAM, amount: 1, block: head - 1, hash: "0x" + "55".repeat(32) });
-    nft.topics.push(word(42)); // tokenId as a fourth indexed topic
+    nft.topics.push(word(42));
     fakeChain({ head, logs: [nft], meta: { [SPAM]: { symbol: "NFT", name: "Pic", decimals: 0 } } });
 
     const r = await syncInboundTransfers({ userId: user._id, chainId: CHAIN_ID, address: WALLET });
@@ -348,8 +297,6 @@ describe("new token detection", () => {
 
     const result = await syncInboundTransfers({ userId: user._id, chainId: CHAIN_ID, address: WALLET });
 
-    // Read, not failed: the known token's arrival is recorded and the cursor
-    // moves, while the unknown token could not be seen on this node.
     expect(result.failed).toBe(false);
     expect(result.limited).toBe(true);
     expect(await cursorOf(user._id)).toBe(head);
@@ -357,7 +304,6 @@ describe("new token detection", () => {
     expect(rows.map((r) => r.symbol)).toEqual([known.symbol]);
     const u = await User.findById(user._id).lean();
     expect((u.discoveredTokens || []).length).toBe(0);
-    // The second query per window carried the address list.
     expect(calls.some((c) => c.address)).toBe(true);
   });
 
@@ -378,7 +324,6 @@ describe("new token detection", () => {
       syncInboundTransfers({ userId: user._id, chainId: CHAIN_ID, address: WALLET }),
       syncInboundTransfers({ userId: user._id, chainId: CHAIN_ID, address: WALLET }),
     ]);
-    // A first-time lookback is four windows; two concurrent callers share one.
     expect(calls).toHaveLength(4);
   });
 });

@@ -1,6 +1,5 @@
 const { getPortfolio } = require("../services/market.service");
 
-// GET /api/portfolio  (cash, holdings w/ live value, total value, total P/L)
 async function get(req, res) {
   try {
     const portfolio = await getPortfolio(req.user._id, req.user.tradingMode === "live" ? "live" : "paper");

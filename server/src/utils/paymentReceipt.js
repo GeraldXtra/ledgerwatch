@@ -1,14 +1,3 @@
-/**
- * The receipt a payer gets when their crypto payment settles.
- *
- * Same table-based, inline-styled construction as the reminder email, and the
- * same CID logo attachment, because Gmail strips `data:` images. Built
- * programmatically and never model-generated: it states amounts and a
- * transaction hash, and those must be exact.
- *
- * House style: warm, plain, and free of hyphens and dashes.
- */
-
 const FONT = "'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 const INK = "#0a1428";
 const GOLD = "#c0a053";
@@ -41,9 +30,6 @@ function buildPaymentReceiptEmail({
   fullyPaid,
   isLate,
   remainingNgn,
-  // Partial payments only: what is STILL needed, recalculated from the new
-  // balance at the original snapshot rate, plus where to send it. Repeated here
-  // so the payer never has to dig out the first email to finish paying.
   stillOwedToken,
   stillOwedSymbol,
   payToAddress,
@@ -52,23 +38,6 @@ function buildPaymentReceiptEmail({
 }) {
   const supplier = esc(businessName || "your supplier");
 
-  /**
-   * ONLY A REAL CHAIN HASH IS SHOWN AS A TRANSACTION.
-   *
-   * `txHash` on a Payment row is an IDEMPOTENCY KEY, and only the crypto writer
-   * puts a chain hash in it. A bank payment recorded against an invoice that
-   * also has a crypto address stores `manual:<owner database id>:<key from the
-   * browser>`, and a force settlement stores `markpaid:<invoice id>:<kobo paid
-   * so far>`. Both were printed to the payer under the heading "Transaction" and
-   * linked to a block explorer, so a debtor's receipt carried a line of the
-   * business's internal record identifiers and a link that always 404s, which
-   * reads as the business's system being broken.
-   *
-   * Anything that is not 32 bytes of hex is not a transaction and is simply not
-   * mentioned. The href is escaped for the same reason the hash beside it always
-   * was: this is an email to a third party, and the asymmetry two lines apart
-   * was a latent injection point held shut only by validation somewhere else.
-   */
   const chainTxHash = /^0x[0-9a-fA-F]{64}$/.test(String(txHash || "")) ? String(txHash) : null;
   const explorer =
     chain && chain.explorer && chainTxHash ? `${chain.explorer}/tx/${chainTxHash}` : null;
@@ -78,8 +47,6 @@ function buildPaymentReceiptEmail({
     ? "Your payment has been received in full"
     : "Your payment has been received";
 
-  // Describes what actually happened. A bank payment has no token, no chain and
-  // no transaction hash, and saying otherwise would be plainly wrong.
   const receivedLine = isCrypto
     ? `We have received your payment of ${Number(amountUsdc).toFixed(2)} ${tokenSymbol} on ${
         chain ? chain.name : "chain"
@@ -96,13 +63,6 @@ function buildPaymentReceiptEmail({
       : `Thank you. There is ${ngn(remainingNgn)} naira still outstanding on this invoice.`,
   ];
 
-  /**
-   * The network is REQUIRED here, exactly as it is in the HTML half below.
-   * This branch used to make it optional, so the plain text alternative, which
-   * is what WhatsApp and many mail clients show, could print an address with no
-   * network at all. The same address exists on every EVM chain and a payment
-   * sent on the wrong one is gone. No network, no address.
-   */
   if (!fullyPaid && stillOwedToken > 0 && payToAddress && payToChainName) {
     lines.push(
       "",
@@ -135,8 +95,6 @@ function buildPaymentReceiptEmail({
 </head>
 <body style="margin:0;padding:0;background:#eef2f8;-webkit-text-size-adjust:100%">
 <div style="display:none;font-size:1px;color:#eef2f8;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${esc(
-    // Preheader — the line mail clients show beside the subject. Unguarded it
-    // rendered "NaN undefined received by …" on every bank receipt.
     isCrypto
       ? `${Number(amountUsdc).toFixed(2)} ${tokenSymbol} received by ${supplier}`
       : `${ngn(creditNgn)} naira received by ${supplier}`
@@ -199,19 +157,6 @@ function buildPaymentReceiptEmail({
                  <strong style="color:${INK}">&#8358;${ngn(remainingNgn)}</strong> is still outstanding on this invoice.
                </div>
              </td></tr>${
-               /* Everything needed to finish paying, repeated. The amount is
-                  RECALCULATED from the new balance at the rate originally
-                  quoted, so it already accounts for what was just paid — the
-                  payer never has to work it out or find the first email. */
-               /* A CRYPTO BLOCK WITHOUT A NETWORK IS NOT RENDERED AT ALL.
-                  Requiring payToChainName here is the structural half of LW-007:
-                  the tactical fix was to resolve the chain in the caller, and
-                  this is what makes forgetting it impossible to ship. An address
-                  with an amount and no network is worse than no block, because
-                  the same address exists on every EVM chain and the payer has
-                  been given everything they need to destroy the funds. If the
-                  chain cannot be resolved the payer is told to reply for
-                  details instead. */
                stillOwedToken > 0 && payToAddress && payToChainName
                  ? `<tr><td style="padding:12px 28px 4px">
                <table role="presentation" width="100%" cellpadding="0" cellspacing="0"

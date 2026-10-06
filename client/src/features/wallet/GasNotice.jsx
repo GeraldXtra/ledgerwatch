@@ -1,26 +1,9 @@
 import { Fuel, TriangleAlert } from "lucide-react";
 import { formatNative, shortfallMessage } from "./gas";
 
-/**
- * The one place a gas shortfall is explained, shared by send, sweep, approve and
- * swap so the wording never drifts between them.
- *
- * Renders nothing when the transaction is affordable, so callers can drop it in
- * unconditionally.
- */
 export default function GasNotice({ plan, chain }) {
   if (!plan) return null;
 
-  /**
-   * THE CHAIN HAS ALREADY SAID NO.
-   *
-   * Checked before the shortfall, because these are different refusals and the
-   * shortfall sentence would report "you are short 0" for this one. A revert was
-   * previously invisible here: the estimate failed, a made up gas figure took
-   * its place, and this rendered a calm "network fee is a typical transaction
-   * cost" note over a transaction guaranteed to fail and to cost its full fee
-   * anyway.
-   */
   if (plan.reverted) {
     return (
       <div className="against-note">
@@ -44,8 +27,6 @@ export default function GasNotice({ plan, chain }) {
     );
   }
 
-  // Affordable, but the estimate was not a real one — say so rather than
-  // presenting a guess with the same confidence as a measurement.
   if (plan.gasSource && plan.gasSource !== "estimated") {
     return (
       <p className="settings-note">

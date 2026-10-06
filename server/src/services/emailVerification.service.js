@@ -2,32 +2,12 @@ const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const { sendEmail, getLogoAttachment } = require("./notify.service");
 
-/**
- * Email verification codes.
- *
- * Six digits, thirty minutes, hashed at rest, rate limited on both the guessing
- * side and the sending side. Every one of those is load bearing and the reasons
- * are written next to the code that enforces them.
- */
-
 const CODE_LENGTH = 6;
-const TTL_MS = 30 * 60 * 1000; // thirty minutes, as specified
+const TTL_MS = 30 * 60 * 1000;
 const MAX_ATTEMPTS = 6;
 const RESEND_COOLDOWN_MS = 60 * 1000;
 const SALT_ROUNDS = 10;
 
-/**
- * `crypto.randomInt` rather than `Math.random`.
- *
- * Math.random is seeded from a predictable source and is not designed to resist
- * anyone. This code is a credential that logs somebody into an account holding
- * a ledger of who owes them money, so it gets a cryptographic generator like the
- * password hashing a few lines down.
- *
- * Zero padded so every code is exactly six characters. Without the padding one
- * in ten codes is five digits, which looks broken to the person typing it and
- * silently breaks any fixed length input.
- */
 function generateCode() {
   return String(crypto.randomInt(0, 10 ** CODE_LENGTH)).padStart(CODE_LENGTH, "0");
 }
@@ -39,16 +19,6 @@ const esc = (s) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
-/**
- * The verification email.
- *
- * Built with nested tables and fully inlined styles, because Outlook renders
- * through Word and Gmail strips a <style> block. The logo is attached by content
- * id rather than embedded as a data URI, because Gmail strips those too and the
- * mark would simply be missing.
- *
- * House style: no hyphens or dashes anywhere in the copy.
- */
 function buildVerificationEmail({ name, code, minutes, hasLogo }) {
   const first = String(name || "").trim().split(/\s+/)[0] || "there";
   const logo = hasLogo
@@ -153,13 +123,6 @@ function buildVerificationEmail({ name, code, minutes, hasLogo }) {
   return { html, text };
 }
 
-/**
- * Mint a code, store its hash, and email it.
- *
- * The plain code exists only inside this function and inside the email. It is
- * never returned to a caller and never logged, so a controller cannot leak it
- * into a response body by accident.
- */
 async function issueCode(user, { force = false } = {}) {
   const now = Date.now();
   const last = user.emailVerification?.lastSentAt;
@@ -197,14 +160,6 @@ async function issueCode(user, { force = false } = {}) {
   return { ok: true, expiresAt: user.emailVerification.expiresAt };
 }
 
-/**
- * Check a submitted code.
- *
- * Expiry is tested BEFORE the hash comparison, so an expired code reports as
- * expired rather than as wrong. Those are different problems with different
- * fixes, and telling somebody their correct code is invalid is the fastest way
- * to make them think the product is broken.
- */
 async function checkCode(user, submitted) {
   const v = user.emailVerification || {};
   if (!v.codeHash || !v.expiresAt) {

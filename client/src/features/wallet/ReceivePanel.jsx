@@ -4,7 +4,6 @@ import { Check, Copy, Droplets, ExternalLink, Network } from "lucide-react";
 import { Button } from "../../components/ui";
 import NetworkScopeNotice from "./NetworkScopeNotice";
 
-// Receive screen: address, a scannable QR, copy-to-clipboard, and the chain faucet.
 export default function ReceivePanel({ address, chain }) {
   const [qr, setQr] = useState("");
   const [copied, setCopied] = useState(false);
@@ -28,7 +27,6 @@ export default function ReceivePanel({ address, chain }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* clipboard blocked — the address is visible to copy manually */
     }
   }
 
@@ -42,10 +40,6 @@ export default function ReceivePanel({ address, chain }) {
           </span>
         </h3>
         <p className="muted small" style={{ margin: "4px 0 0" }}>
-          {/* Names the network explicitly. The same address is valid on every
-              chain, so "here is my address" is ambiguous without it, and a
-              sender who picks the wrong network delivers to a balance the
-              recipient is not looking at. */}
           Share this address to receive funds <strong>on {chain?.name}</strong>. Anything sent on a
           different network will not appear here.
         </p>
@@ -60,9 +54,6 @@ export default function ReceivePanel({ address, chain }) {
         </Button>
       </div>
 
-      {/* Test networks carry a faucet in the registry. The address is what
-          the faucet asks for, so the link belongs next to it. Real networks
-          have none and show nothing. */}
       {chain?.faucet && (
         <a className="faucet-link" href={chain.faucet} target="_blank" rel="noopener noreferrer">
           <Droplets size={14} /> Get free test {chain.nativeSymbol} from a faucet{" "}

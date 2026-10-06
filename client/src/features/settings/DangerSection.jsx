@@ -7,10 +7,6 @@ import { clearWallet, hasWallet } from "../wallet/keystore";
 import { clearBitcoinAddressCache } from "../wallet/bitcoin/addressCache";
 import { clearPendingSends } from "../wallet/bitcoin/pendingSend";
 
-/**
- * Destructive actions, each gated behind typing an exact confirmation word, so
- * a misclick can never wipe a ledger.
- */
 function DangerAction({ title, body, extra, phrase, confirmLabel, disabled, onConfirm }) {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
@@ -77,32 +73,12 @@ export default function DangerSection() {
   async function clearData() {
     await http.post("/api/auth/me/clear-data");
     toast("All your data has been cleared.", { type: "success" });
-    // Reload so every page refetches against the now-empty ledger.
     setTimeout(() => window.location.assign("/app"), 700);
   }
 
-  /**
-   * DELETING THE ACCOUNT LEFT THE ENCRYPTED WALLET IN THIS BROWSER.
-   *
-   * The confirmation says "permanently deletes your account and everything in
-   * it", and everything server-side did go. Nothing in the browser was touched:
-   * the encrypted keystore stayed in localStorage under the old account id,
-   * along with the remembered Bitcoin address, so on a shared or borrowed
-   * machine that ciphertext outlived the account the person believed they had
-   * erased.
-   *
-   * It is NOT cleaned up silently, and it is not the default. The keystore is
-   * the only copy of a wallet that may hold real mainnet funds, and an owner who
-   * never wrote down their phrase would lose them with no way back. So the
-   * choice is put in front of them, off unless they tick it, with what it costs
-   * stated next to it.
-   */
   async function deleteAccount() {
     await http.delete("/api/auth/me");
     if (alsoWipeWallet) {
-      // Before logout: both of these resolve the storage key from the JWT that
-      // is still in this tab, and after signing out there is no account id to
-      // scope them to.
       clearWallet();
       clearBitcoinAddressCache(user?._id);
       clearPendingSends(user?._id);

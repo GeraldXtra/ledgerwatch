@@ -8,10 +8,6 @@ const TYPES = [
   { value: "price_above", label: "Price above" },
 ];
 
-/**
- * Inline editor for a watch condition (type + value). Calls onSave({type,value})
- * which should PATCH the watch. Used in the detail modal and the watch list.
- */
 export default function WatchEditRow({ watch, onSave, onCancel }) {
   const [type, setType] = useState(watch.condition.type);
   const [value, setValue] = useState(String(watch.condition.value));

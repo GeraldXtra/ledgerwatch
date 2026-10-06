@@ -11,34 +11,10 @@ function when(value) {
   return isNaN(d.getTime()) ? "" : d.toLocaleString();
 }
 
-/**
- * Locally-recorded transaction history.
- *
- * EVERY ROW NAMES ITS OWN CHAIN, and its explorer link is resolved from that
- * row's `chainId` rather than from whichever network happens to be selected.
- * The link previously came from the selected chain, which matched only because
- * the list is filtered per chain today — the first view showing more than one
- * network would have sent every link to the wrong explorer.
- *
- * Naming the chain is also the point: a row reading "−80 USDC · confirmed" with
- * no network is exactly what let a same-chain self-transfer look like a
- * completed cross-chain move.
- */
 export default function TxHistory({ txs, chain, chains, error, onRetry, onReceive }) {
-  // Registry lookup, so no explorer URL is hardcoded here. Falls back to the
-  // active chain for rows written before chainId was recorded.
   const chainFor = (tx) =>
     (chains || []).find((c) => c.chainId === tx.chainId) ||
     (chain && chain.chainId === tx.chainId ? chain : null);
-  /**
-   * A HISTORY THAT COULD NOT BE READ IS NOT AN EMPTY HISTORY.
-   *
-   * The empty state below is a definite claim — "No transactions yet" — and it
-   * was being shown to anyone whose history request failed, telling somebody who
-   * has made transfers that they never made one. The Bitcoin panel next door
-   * already separates the two, and so does this now. It says nothing about the
-   * balance, which is read from the chain and is unaffected.
-   */
   if (error && (!txs || txs.length === 0)) {
     return (
       <div className="stack-sm">
@@ -79,9 +55,6 @@ export default function TxHistory({ txs, chain, chains, error, onRetry, onReceiv
       {txs.map((tx) => {
         const outgoing = tx.direction !== "in";
         const txChain = chainFor(tx);
-        // A transfer to yourself on one network. Called out because it looks
-        // like a successful move and is in fact a round trip that only cost a
-        // fee — the single most confusing row this history can contain.
         const selfSend =
           tx.from && tx.to && tx.from.toLowerCase() === tx.to.toLowerCase();
         return (

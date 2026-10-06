@@ -13,20 +13,16 @@ const {
   dispatchReminder,
 } = require("../services/reminder.service");
 
-// GET /api/push/key -> VAPID public key (null when push is not configured).
 async function key(req, res) {
   return res.json({ publicKey: publicKey(), configured: pushConfigured() });
 }
 
-// POST /api/push/subscribe { subscription }
 async function subscribe(req, res) {
   try {
     const sub = req.body && req.body.subscription;
     if (!sub || !sub.endpoint || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) {
       return res.status(400).json({ error: "Invalid subscription" });
     }
-    // Real values are a URL of a few hundred characters and two short base64
-    // keys. Anything past these bounds is not a browser subscription.
     if (
       typeof sub.endpoint !== "string" ||
       sub.endpoint.length > 2048 ||
@@ -38,12 +34,6 @@ async function subscribe(req, res) {
       return res.status(400).json({ error: "Invalid subscription" });
     }
 
-    /**
-     * THE ENDPOINT IS A URL THIS SERVER WILL POST TO. It was stored verbatim,
-     * so a subscription could point at an internal address and /api/push/test
-     * became a yes/no oracle for scanning the network behind this server. Only
-     * https, and only the hosts the three browser push services actually use.
-     */
     let host;
     try {
       const u = new URL(String(sub.endpoint));
@@ -61,9 +51,6 @@ async function subscribe(req, res) {
       return res.status(400).json({ error: "That push service is not supported" });
     }
 
-    // Upsert by endpoint AND owner. Filtering on the endpoint alone let one
-    // account submit another's endpoint and take the row over, cutting the
-    // victim off from every payment alert (LW-009).
     await PushSubscription.findOneAndUpdate(
       { endpoint: sub.endpoint, userId: req.user._id },
       {
@@ -81,7 +68,6 @@ async function subscribe(req, res) {
   }
 }
 
-// POST /api/push/unsubscribe { endpoint }
 async function unsubscribe(req, res) {
   try {
     const endpoint = req.body && req.body.endpoint;
@@ -94,7 +80,6 @@ async function unsubscribe(req, res) {
   }
 }
 
-// POST /api/push/test -> lets the user verify delivery end to end.
 async function test(req, res) {
   try {
     const result = await notifyUser(req.user._id, {
@@ -121,33 +106,11 @@ async function test(req, res) {
   }
 }
 
-/**
- * TOKENS ALREADY SPENT.
- *
- * The action token is signed with a fifteen minute life and carries no id, so
- * nothing recorded that it had been used: whoever held one could press the
- * button as often as they liked for a quarter of an hour, and "Send reminder"
- * would mail and WhatsApp a real customer, from the business's own address,
- * every single time — `force: true` below deliberately skips the once-per-
- * cadence guard that would otherwise have absorbed it. SECURITY.md lists
- * single-use action tokens as a MUST.
- *
- * The token's own signature is the key. It is the part that is unique per
- * token, it is already opaque, and it means no change to how tokens are minted
- * (push.service.js), which matters because a `jti` would have to be persisted
- * somewhere and this server has no shared store.
- *
- * In process, like the rate limiter next door and for the same reason: one
- * process, no Redis. A restart forgets which tokens were spent, which is a
- * fifteen minute window at worst and is the same trade the rate limiter makes.
- */
-const spentTokens = new Map(); // signature -> expiry in ms
+const spentTokens = new Map();
 const TOKEN_TTL_MS = 15 * 60 * 1000;
 
 function spendToken(token) {
   const now = Date.now();
-  // Pruned on every call: entries are worthless the moment the token expires,
-  // so the map can never grow past the tokens minted in one fifteen minutes.
   for (const [sig, expiry] of spentTokens) {
     if (expiry <= now) spentTokens.delete(sig);
   }
@@ -157,17 +120,6 @@ function spendToken(token) {
   return true;
 }
 
-/**
- * POST /api/push/action { token, action }
- *
- * Authenticated by the short-lived action token in the body, because a service
- * worker cannot attach the Bearer JWT. The token is bound to one action and one
- * resource, it is re-checked against the requested action here, and it is spent
- * on first use.
- *
- * NOTE: buy/sell are deliberately NOT executable from a notification — those
- * deep-link into the app so the user still sets an amount and confirms.
- */
 async function action(req, res) {
   try {
     const { token } = req.body || {};
@@ -180,24 +132,11 @@ async function action(req, res) {
       return res.status(401).json({ error: "Invalid or expired action token" });
     }
 
-    /**
-     * THE RE-CHECK THE COMMENT ABOVE HAS ALWAYS CLAIMED (LW-047).
-     *
-     * The service worker sends the action it thinks it is invoking alongside
-     * the token, and this handler read only the token's own claim and ignored
-     * it. Nothing unsafe followed, because the token is the authority either
-     * way — but a comment that describes a control which does not exist is how
-     * the control ends up genuinely missing after the next change. So the two
-     * are compared: they disagree only if a caller has paired a token with the
-     * wrong button, which is not a thing the app does.
-     */
     const requested = req.body && req.body.action;
     if (requested && String(requested) !== claims.act) {
       return res.status(400).json({ error: "That button does not match its token" });
     }
 
-    // Single use, BEFORE anything is sent. A second press of the same button, or
-    // a replay by anyone who copied the token, gets this and nothing else.
     if (!spendToken(token)) {
       return res.status(409).json({ error: "That notification action has already been used." });
     }
@@ -218,8 +157,6 @@ async function action(req, res) {
       if (!debt) return res.status(404).json({ error: "Debt not found" });
       const channel = claims.act === "send_whatsapp" ? "whatsapp" : "email";
       const generated = await generateReminderForDebt(debt, user);
-      // force: the user tapped this button on the notification, so it is an
-      // explicit instruction to send, not an automation pass to be rate limited.
       const deliveries = await dispatchReminder(generated.reminder, debt, user, {
         channels: [channel],
         force: true,
@@ -229,8 +166,6 @@ async function action(req, res) {
 
     return res.status(400).json({ error: "Unknown action" });
   } catch (err) {
-    // A reminder action on an invoice that has since been settled is refused
-    // by the reminder engine with a 409 (LW-018); pass the reason through.
     if (err && err.status) return res.status(err.status).json({ error: err.message });
     console.error("push action error:", err.message);
     return res.status(500).json({ error: "Action failed" });

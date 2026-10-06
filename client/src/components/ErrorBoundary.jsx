@@ -1,10 +1,5 @@
 import { Component } from "react";
 
-/**
- * Top-level error boundary. A render/runtime error anywhere below shows a calm
- * light card instead of a white screen. Purely a safety net — it changes no
- * behavior on the happy path.
- */
 export default class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
@@ -16,7 +11,6 @@ export default class ErrorBoundary extends Component {
   }
 
   componentDidCatch(error, info) {
-    // Surface it for debugging; never rethrow (that would blank the screen).
     console.error("Unhandled UI error:", error, info);
   }
 

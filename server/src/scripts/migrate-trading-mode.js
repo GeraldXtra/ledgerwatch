@@ -1,39 +1,9 @@
-/**
- * Backfill `mode` on the trading collections, and replace the stale unique index
- * on Portfolio.
- *
- * WHY THIS EXISTS
- *
- * Splitting paper from live added a `mode` field to Watch, Alert, Portfolio and
- * SimTrade. A Mongoose `default` only applies to documents created AFTER the
- * change, so every existing row had no `mode` at all and matched neither book.
- * The visible symptom was "Could not load Portfolio" on paper trading: the
- * lookup for `{userId, mode:"paper"}` found nothing, tried to create a second
- * portfolio, and collided with the old `userId_1` unique index, which Mongoose
- * does not drop on its own.
- *
- * Everything that existed before the split was simulated, so it all becomes
- * "paper". Nothing here can turn a paper row into a live one.
- *
- * Idempotent. Safe to run repeatedly; the second run reports zero changes.
- *
- *   node src/scripts/migrate-trading-mode.js            (dry run, default)
- *   node src/scripts/migrate-trading-mode.js --apply
- */
 require("dotenv").config();
 const mongoose = require("mongoose");
 
 const APPLY = process.argv.includes("--apply");
 const COLLECTIONS = ["portfolios", "watches", "alerts", "simtrades"];
 
-/**
- * ONLY WHEN RUN DIRECTLY.
- *
- * This body used to execute on `require`, so anything that loaded the scripts
- * directory — a test sweep, a tooling pass, an editor's module graph — connected
- * to Mongo and started a migration. Guarded on being the process entry point,
- * which is what `node src/scripts/<name>.js` gives and a require never does.
- */
 if (require.main === module) {
   (async () => {
     const uri = process.env.MONGO_URI;
@@ -57,12 +27,6 @@ if (require.main === module) {
       touched += missing;
     }
 
-    /**
-     * The index swap. `userId_1` being unique is what made a second book
-     * impossible, so it has to go before a live portfolio can ever be created.
-     * The uniqueness still matters — two paper books for one person would split
-     * their cash silently — so it moves onto the pair.
-     */
     console.log("\n  portfolios indexes:");
     const idx = await db.collection("portfolios").indexes();
     for (const i of idx) console.log(`    ${i.name}${i.unique ? "  UNIQUE" : ""}`);
@@ -80,7 +44,6 @@ if (require.main === module) {
     if (!wanted) {
       console.log("    userId_1_mode_1 is missing and must be created.");
       if (APPLY) {
-        // Backfill first, or documents with no mode collide on null.
         await db.collection("portfolios").createIndex({ userId: 1, mode: 1 }, { unique: true });
         console.log("    created userId_1_mode_1 (unique)");
       }

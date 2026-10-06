@@ -16,7 +16,6 @@ export function signedUsd(n) {
   })}`;
 }
 
-// Adaptive price: more decimals for sub-$1 coins so they don't read as "$0.00".
 export function price(n) {
   if (n == null || isNaN(n)) return "--";
   const v = Number(n);
@@ -25,7 +24,6 @@ export function price(n) {
   return `$${v.toLocaleString("en-US", { maximumFractionDigits: digits })}`;
 }
 
-// Compact large figures: $1.2B, $920.4M, $12.3K.
 export function compact(n) {
   if (n == null || isNaN(n)) return "--";
   const v = Number(n);
@@ -38,7 +36,6 @@ export function compact(n) {
   return `${sign}$${abs.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
-// Signed percentage: +2.14% / -0.87%.
 export function pct(n) {
   if (n == null || isNaN(n)) return "--";
   const v = Number(n);

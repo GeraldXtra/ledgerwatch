@@ -3,11 +3,6 @@ import PublicShell from "../components/PublicShell";
 import { Blocks, slugify } from "../docs/Blocks";
 import { PRIVACY, TERMS } from "../docs/legal";
 
-/**
- * The privacy policy and the terms. One component, two documents, both kept
- * as data in docs/legal.js so they read as the letters they are and can be
- * changed without touching a component.
- */
 export default function LegalPage({ which }) {
   const doc = which === "terms" ? TERMS : PRIVACY;
 

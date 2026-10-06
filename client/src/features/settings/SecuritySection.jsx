@@ -29,9 +29,6 @@ export default function SecuritySection() {
         currentPassword: pw.currentPassword,
         newPassword: pw.newPassword,
       });
-      // Changing the password signs every OTHER device out. The server reissues
-      // a session for this one so the person is not logged out of the screen
-      // they are standing on.
       if (data && data.token) setToken(data.token);
       setPw({ currentPassword: "", newPassword: "", confirm: "" });
       toast("Password changed. Other devices have been signed out.", { type: "success" });

@@ -5,8 +5,6 @@ import { Button, Card, Input } from "../../components/ui";
 
 const SUGGESTIONS = ["watch BTC drop 5%", "watch ETH, SOL", "how is my portfolio?"];
 
-// onAction is called after a message that may have changed watches/portfolio,
-// so the parent can refresh its data.
 export default function ChatBox({ onAction }) {
   const [messages, setMessages] = useState([
     {
@@ -26,10 +24,6 @@ export default function ChatBox({ onAction }) {
     try {
       const { data } = await http.post("/api/ai/chat", { message });
       setMessages((m) => [...m, { role: "agent", text: data.reply }]);
-      // Both branches of the condition that used to be here called `onAction`,
-      // so the check read as though the reply's contents decided something and
-      // decided nothing. That is the construction LW-008 hid inside, and the
-      // page wants a refresh after any agent reply anyway.
       if (onAction) onAction();
     } catch (err) {
       setMessages((m) => [

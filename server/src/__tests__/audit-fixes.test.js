@@ -1,13 +1,3 @@
-/**
- * Regression tests for the defects this audit found and fixed.
- *
- * `ARCHITECTURE.md` invariant 20 says every fixed defect gets a test named for
- * it. Before this pass there were five such tests against roughly seventy fixed
- * defects. These cover the ones fixed here that are assertable on the server
- * without a network: the rest are interface behaviour and are noted in the
- * report instead of being faked with a mock that proves nothing.
- */
-
 process.env.SMTP_HOST = "";
 process.env.SMTP_USER = "";
 process.env.SMTP_PASS = "";
@@ -27,25 +17,12 @@ let seq = 0;
 const anEmail = () => `owner-${Date.now()}-${++seq}@example.com`;
 
 describe("LW-044 — a percentage watch with no baseline must heal itself", () => {
-  /**
-   * The register recorded this as FIXED. The only recapture that existed ran in
-   * `updateWatchCondition`, i.e. when a person EDITS the watch — which is the
-   * original bug report's own workaround, not a fix. A watch created while the
-   * price feed was down stayed inert forever and said nothing.
-   *
-   * The heal now lives in `runPricePass`. Driving a whole pass needs the market
-   * transport, so what is asserted here is the half that is pure: the condition
-   * evaluator's treatment of a missing versus a zero baseline, which was the
-   * second half of the same defect.
-   */
   it("does not fire on a null baseline, rather than dividing by it", () => {
     const watch = { condition: { type: "drop_pct", value: 10 }, baselinePrice: null };
     expect(evaluateCondition(watch, 100)).toEqual({ hit: false, pctChange: null });
   });
 
   it("refuses a zero baseline for the right reason, not as 'missing'", () => {
-    // `!baseline` rejected a legitimate 0 as though it were absent. It is still
-    // refused — nothing can divide by it — but the two cases are now distinct.
     const watch = { condition: { type: "rise_pct", value: 10 }, baselinePrice: 0 };
     expect(evaluateCondition(watch, 100)).toEqual({ hit: false, pctChange: null });
   });
@@ -62,13 +39,6 @@ describe("LW-044 — a percentage watch with no baseline must heal itself", () =
 });
 
 describe("A2-14 — a live alert must reach a terminal state", () => {
-  /**
-   * `runPricePass` will not raise a second alert while one is pending on the
-   * same watch. Nothing ever moved a LIVE alert off `pending`, because the live
-   * path signs a swap in the browser and never calls `actOnAlert`. So every live
-   * watch alerted exactly once, ever, and then went silent — for precisely the
-   * users who had opted into real money.
-   */
   async function aLiveAlert() {
     const user = await User.create({
       name: "Owner",
@@ -100,7 +70,6 @@ describe("A2-14 — a live alert must reach a terminal state", () => {
 
   it("blocks its own watch for as long as it stays pending", async () => {
     const { watch, alert } = await aLiveAlert();
-    // The exact guard `runPricePass` applies.
     const waiting = await Alert.exists({ mode: "live", watchId: watch._id, status: "pending" });
     expect(waiting).toBeTruthy();
     expect(alert.status).toBe("pending");
@@ -108,8 +77,6 @@ describe("A2-14 — a live alert must reach a terminal state", () => {
 
   it("carries the fields needed to close it against a real transaction", async () => {
     const { alert } = await aLiveAlert();
-    // The model gained these so a live trade has somewhere to be recorded
-    // without inventing rows in the simulated book (which was LW-075).
     alert.status = "approved";
     alert.userAction = "buy";
     alert.txHash = `0x${"1".repeat(64)}`;
@@ -122,7 +89,6 @@ describe("A2-14 — a live alert must reach a terminal state", () => {
     expect(closed.txHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(closed.chainId).toBe(8453);
 
-    // And the watch is free again.
     const waiting = await Alert.exists({
       mode: "live",
       watchId: closed.watchId,
@@ -133,16 +99,6 @@ describe("A2-14 — a live alert must reach a terminal state", () => {
 });
 
 describe("A2-04 — Google sign-in must not adopt an unverified account", () => {
-  /**
-   * `register` creates a row before the address is proven. Anyone could register
-   * someone else's address, choose a password, and wait: when the real owner
-   * signed in with Google, the callback matched BY EMAIL, linked, marked the
-   * address verified and issued a session — inside the pre-registrant's account,
-   * whose password still worked and whose sessions were untouched.
-   *
-   * Google asserts `email_verified`, so the person signing in owns the address
-   * and the unverified row does not. The takeover invalidates both.
-   */
   it("an unverified row is the state that made the attack possible", async () => {
     const user = await User.create({
       name: "Victim",
@@ -164,7 +120,6 @@ describe("A2-04 — Google sign-in must not adopt an unverified account", () => 
       tokenVersion: 3,
     });
 
-    // What the callback now does for an unverified, unlinked row.
     const before = user.passwordHash;
     user.passwordHash = await bcrypt.hash("replacement-not-known-to-anyone", 10);
     user.tokenVersion = (Number(user.tokenVersion) || 0) + 1;
@@ -173,19 +128,13 @@ describe("A2-04 — Google sign-in must not adopt an unverified account", () => 
     await user.save();
 
     const after = await User.findById(user._id);
-    // The pre-registrant's password no longer opens the account...
     expect(await bcrypt.compare(attackerPassword, after.passwordHash)).toBe(false);
     expect(after.passwordHash).not.toBe(before);
-    // ...and every token they already hold is refused by requireAuth, which
-    // compares the token's `v` against this.
     expect(after.tokenVersion).toBe(4);
     expect(after.emailVerified).toBe(true);
   });
 
   it("leaves an already-verified account's sessions alone when linking", async () => {
-    // Whoever holds a verified account proved the address themselves at
-    // registration, so linking Google to it is safe and must not sign them out
-    // of their other devices.
     const user = await User.create({
       name: "Owner",
       email: anEmail(),
@@ -206,13 +155,6 @@ describe("A2-04 — Google sign-in must not adopt an unverified account", () => 
 });
 
 describe("A3-03 — a fallback exchange rate must be recorded as one", () => {
-  /**
-   * When the price feed is unreachable the quote is taken from
-   * NGN_PER_USD_FALLBACK and `rateTimestamp` is stamped `now`, so the interface
-   * showed a hardcoded constant as a rate fetched a second ago. The quote then
-   * settles the invoice for the rest of its life, so the whole gap between that
-   * constant and the market is absorbed by the business — silently.
-   */
   it("the address records whether its rate was live or a fallback", async () => {
     const user = await User.create({
       name: "Owner",

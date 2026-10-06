@@ -10,15 +10,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-/**
- * THE OPEN MODALS, OUTERMOST FIRST (LW-039).
- *
- * Every modal listened for Escape on `window`, and two listeners on the same
- * target cannot stop each other, so with a sweep running inside an invoice
- * dialog one Escape reached both: the sweep modal correctly ignored it, and the
- * invoice dialog behind it closed and unmounted the whole subtree while the
- * transactions kept broadcasting. Only the modal on top answers Escape now.
- */
 const openModals = [];
 
 const WorkspaceContext = createContext(null);
@@ -85,10 +76,6 @@ export function DetailPane({ screen = "screen", onBack, active = true, children 
 
 export default function Modal({ onClose, label = "Dialog", size = "md", children }) {
   const panelRef = useRef(null);
-  // The opener is captured during the FIRST RENDER, before anything in the
-  // dialog has taken focus. Captured in the effect it would have recorded an
-  // autofocused input inside the dialog, and "restored" focus to a detached
-  // node on close.
   const previousFocusRef = useRef(null);
   if (previousFocusRef.current === null) {
     previousFocusRef.current = typeof document !== "undefined" ? document.activeElement : null;
@@ -98,8 +85,6 @@ export default function Modal({ onClose, label = "Dialog", size = "md", children
 
   useEffect(() => {
     const panel = panelRef.current;
-    // A form that autofocuses its first field has already taken focus by the
-    // time this runs, and keeps it.
     if (panel && !panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
     return () => {
       const prev = previousFocusRef.current;
@@ -107,7 +92,6 @@ export default function Modal({ onClose, label = "Dialog", size = "md", children
     };
   }, []);
 
-  // Register on the stack for the life of this modal.
   useEffect(() => {
     const id = {};
     openModals.push(id);
@@ -123,7 +107,7 @@ export default function Modal({ onClose, label = "Dialog", size = "md", children
       if (e.key === "Escape") {
         const top = openModals[openModals.length - 1];
         const mine = panelRef.current && panelRef.current.__modalId;
-        if (top && mine && top !== mine) return; // a modal above this one owns Escape
+        if (top && mine && top !== mine) return;
         onClose();
       }
     }

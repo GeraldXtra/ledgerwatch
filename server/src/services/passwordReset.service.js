@@ -2,22 +2,6 @@ const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const { sendEmail, getLogoAttachment } = require("./notify.service");
 
-/**
- * Password reset codes.
- *
- * DELIBERATELY A SEPARATE STATE FROM EMAIL VERIFICATION, in its own sub document
- * on the user, with its own service. The two look alike (six digits, a TTL, an
- * attempt cap) and it would be tempting to reuse `emailVerification`. That would
- * let a reset code confirm an email address, and a verification code change a
- * password, because the check would have no way to tell which purpose a given
- * hash was minted for. A credential that can do two things is two credentials
- * with one set of defences.
- *
- * Six digits, fifteen minutes, hashed at rest, capped attempts, throttled
- * resends. A reset code is a credential that hands over the account, so it is
- * treated exactly like the password it replaces.
- */
-
 const CODE_LENGTH = 6;
 const TTL_MS = 15 * 60 * 1000;
 const MAX_ATTEMPTS = 6;
@@ -35,11 +19,6 @@ const esc = (s) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
-/**
- * The reset email. Nested tables, inlined styles, logo by content id, and no
- * dashes or hyphens anywhere in the copy, all for the same reasons as the
- * verification email beside it.
- */
 function buildResetEmail({ name, code, minutes, hasLogo }) {
   const first = String(name || "").trim().split(/\s+/)[0] || "there";
   const logo = hasLogo
@@ -130,10 +109,6 @@ function buildResetEmail({ name, code, minutes, hasLogo }) {
   return { html, text };
 }
 
-/**
- * Mint a reset code, store its hash on `user.passwordReset`, and email it.
- * The plain code exists only here and in the email.
- */
 async function issueResetCode(user, { force = false } = {}) {
   const now = Date.now();
   const last = user.passwordReset?.lastSentAt;
@@ -176,15 +151,6 @@ async function issueResetCode(user, { force = false } = {}) {
   return { ok: true, expiresAt: user.passwordReset.expiresAt };
 }
 
-/**
- * Check a submitted reset code.
- *
- * Unlike the verification check, a match here does NOT clear the state. The
- * code is only spent once the new password has actually been written, so a
- * failure between "code accepted" and "password saved" leaves the person able
- * to try again rather than locked out with a code that no longer exists.
- * `clearResetState` is called by the controller after the save.
- */
 async function checkResetCode(user, submitted) {
   const v = user.passwordReset || {};
   if (!v.codeHash || !v.expiresAt) {
@@ -229,7 +195,6 @@ async function checkResetCode(user, submitted) {
   return { ok: true };
 }
 
-/** Spend the code. Called only after the new password has been saved. */
 function clearResetState(user) {
   user.passwordReset = {
     codeHash: null,

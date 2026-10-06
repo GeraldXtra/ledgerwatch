@@ -14,46 +14,22 @@ const {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SALT_ROUNDS = 10;
-// A display name is a display name. Anything longer than this is a payload,
-// and it ends up in emails, statements and push notifications.
 const MAX_NAME_LENGTH = 80;
-// Compared against when a sign in names an address that has no account, so
-// that branch takes as long as a wrong password does. Any valid bcrypt hash
-// will do; this is bcrypt("not-a-password") at cost 10.
 const DUMMY_HASH = bcrypt.hashSync("not-a-password", SALT_ROUNDS);
 
-/**
- * POST /api/auth/register
- * Body: { name, email, password, bankDetails? }
- * Creates the user (hashed password) and auto-creates their sim Portfolio.
- * Returns { token, user }.
- */
 async function register(req, res) {
   try {
     const { name, email, password, bankDetails, turnstileToken } = req.body || {};
 
-    // Human check first, before any database work. A bot that cannot pass this
-    // should not be able to make us hash a password or probe which emails exist.
     const human = await verifyTurnstile(turnstileToken, req.ip);
     if (!human.ok) return res.status(400).json({ error: human.error, turnstile: true });
 
-    // Validation
     if (!name || !email || !password) {
       return res.status(400).json({ error: "name, email and password are required" });
     }
     if (!EMAIL_REGEX.test(email)) {
       return res.status(400).json({ error: "Invalid email format" });
     }
-    /**
-     * EIGHT, the same as everywhere else.
-     *
-     * Registration accepted six while `changePassword` and `resetPassword` both
-     * demanded eight, so the weakest passwords in the system were the ones
-     * nobody had ever revisited, and a person trying to change a six character
-     * password to another six character one was told it was too short — which
-     * reads as a bug in the app rather than a rule. Accounts created before this
-     * are unaffected: this is checked on the way in, not on sign in.
-     */
     if (String(password).length < 8) {
       return res.status(400).json({ error: "Password must be at least 8 characters" });
     }
@@ -63,7 +39,6 @@ async function register(req, res) {
 
     const normalizedEmail = String(email).toLowerCase().trim();
 
-    // Duplicate email pre-check
     const existing = await User.findOne({ email: normalizedEmail });
     if (existing) {
       return res.status(409).json({ error: "Email already registered" });
@@ -79,20 +54,10 @@ async function register(req, res) {
       emailVerified: false,
     });
 
-    // Auto-create the user's sim Portfolio (cashBalance default 1,000,000).
     await Portfolio.create({ userId: user._id });
 
-    /**
-     * NO TOKEN YET. The account exists but cannot be used until the code that
-     * has just been emailed is entered. Returning a session here would make the
-     * verification step decorative, which is the usual way this control ends up
-     * proving nothing.
-     */
     const sent = await issueCode(user);
     if (!sent.ok) {
-      // The account was created and the code was not delivered. Say so plainly
-      // and point at the resend, rather than leaving somebody staring at a code
-      // screen waiting for mail that is never coming.
       return res.status(201).json({
         verificationRequired: true,
         email: user.email,
@@ -108,7 +73,6 @@ async function register(req, res) {
       expiresAt: sent.expiresAt,
     });
   } catch (err) {
-    // Safety net for the unique index race.
     if (err && err.code === 11000) {
       return res.status(409).json({ error: "Email already registered" });
     }
@@ -117,11 +81,6 @@ async function register(req, res) {
   }
 }
 
-/**
- * POST /api/auth/login
- * Body: { email, password }
- * Returns { token, user }.
- */
 async function login(req, res) {
   try {
     const { email, password, turnstileToken } = req.body || {};
@@ -136,24 +95,12 @@ async function login(req, res) {
     const normalizedEmail = String(email).toLowerCase().trim();
     const user = await User.findOne({ email: normalizedEmail });
 
-    /**
-     * Same message AND the same cost whether the address exists or not. The
-     * unknown-address branch used to return before bcrypt ran, so it answered
-     * in a millisecond where a wrong password took a tenth of a second, and
-     * that difference is enough to list which addresses have accounts. The
-     * comparison below runs against a throwaway hash when there is no user.
-     */
     const hash = user ? user.passwordHash : DUMMY_HASH;
     const match = await bcrypt.compare(String(password), hash);
     if (!user || !match) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    /**
-     * An unverified account cannot sign in. Accounts that predate verification
-     * have `emailVerified` false with no code ever issued, so they are treated as
-     * grandfathered rather than locked out of their own ledger.
-     */
     const neverIssued = !user.emailVerification || !user.emailVerification.lastSentAt;
     if (!user.emailVerified && !neverIssued) {
       const sent = await issueCode(user);
@@ -173,22 +120,11 @@ async function login(req, res) {
   }
 }
 
-/**
- * POST /api/auth/forgot-password
- * Body: { email, turnstileToken }
- *
- * Always answers the same way whether or not the address exists, including
- * when the real account is inside its resend cooldown. Any difference in the
- * response would let somebody test which emails have accounts here.
- */
 async function forgotPassword(req, res) {
   try {
     const { email, turnstileToken } = req.body || {};
     if (!email) return res.status(400).json({ error: "email is required" });
 
-    // This endpoint sends mail to whatever address it is given, so it is gated
-    // by the same human check as registration. Without it, it is an open relay
-    // for mailing anyone repeatedly at the reputation of our own domain.
     const human = await verifyTurnstile(turnstileToken, req.ip);
     if (!human.ok) return res.status(400).json({ error: human.error, turnstile: true });
 
@@ -210,12 +146,6 @@ async function forgotPassword(req, res) {
   }
 }
 
-/**
- * POST /api/auth/resend-reset-code
- * Body: { email }
- * The reset screen's "send a new code". Throttled by the service's cooldown;
- * answers generically for the same reason as forgotPassword.
- */
 async function resendResetCode(req, res) {
   try {
     const { email } = req.body || {};
@@ -235,15 +165,6 @@ async function resendResetCode(req, res) {
   }
 }
 
-/**
- * POST /api/auth/reset-password
- * Body: { email, code, newPassword }
- *
- * Checks the code, refuses a password that is the same as the current one,
- * writes the new hash, spends the code, and issues NO session. The person
- * signs in with the password they just chose, which is the one proof that the
- * reset actually worked.
- */
 async function resetPassword(req, res) {
   try {
     const { email, code, newPassword } = req.body || {};
@@ -255,7 +176,6 @@ async function resetPassword(req, res) {
     }
 
     const user = await User.findOne({ email: String(email).toLowerCase().trim() });
-    // Same shape as a wrong code, so this cannot be used to discover accounts.
     if (!user) return res.status(400).json({ error: "That code is not correct." });
 
     const check = await checkResetCode(user, code);
@@ -267,12 +187,6 @@ async function resetPassword(req, res) {
       });
     }
 
-    /**
-     * The new password must actually be new. Somebody who reset because they
-     * suspect the old one leaked, then typed the old one again from habit, has
-     * changed nothing and believes they have. Compared against the stored hash
-     * rather than any plain text, because the plain text does not exist here.
-     */
     const unchanged = await bcrypt.compare(String(newPassword), user.passwordHash);
     if (unchanged) {
       return res.status(400).json({
@@ -282,8 +196,6 @@ async function resetPassword(req, res) {
     }
 
     user.passwordHash = await bcrypt.hash(String(newPassword), SALT_ROUNDS);
-    // Every session issued before this moment stops working. Somebody who reset
-    // because they suspect a leak is, above all, trying to sign the leak out.
     user.tokenVersion = (user.tokenVersion || 0) + 1;
     clearResetState(user);
     await user.save();
@@ -298,32 +210,13 @@ async function resetPassword(req, res) {
   }
 }
 
-/**
- * GET /api/auth/me  (protected)
- * Returns { user }.
- *
- * THE AVATAR IS READ HERE, not carried on req.user.
- *
- * The auth middleware deliberately leaves `avatarUrl` out of the document it
- * loads on every request, because it is a base64 data URL of up to 2.7 MB and
- * every request was paying for it (see middleware/auth.js). This route is one
- * of the two that actually shows the picture, so it asks for that one field and
- * folds it back in. Without this, signing in would return a user with no avatar
- * and the header would quietly lose it.
- */
 async function me(req, res) {
   const withAvatar = await User.findById(req.user._id).select("avatarUrl").lean();
   const user = publicUser(req.user);
-  // A failed read is not "no avatar": if the lookup came back empty the field
-  // stays null and the UI falls back to initials, which is what it does anyway.
   if (user && withAvatar) user.avatarUrl = withAvatar.avatarUrl || null;
   return res.status(200).json({ user });
 }
 
-/**
- * PATCH /api/auth/me  (protected)
- * Updates the logged-in user's name and/or bankDetails. Returns { user }.
- */
 async function updateMe(req, res) {
   try {
     const { name, companyName, bankDetails, autoSend, notifyPrefs, crypto } = req.body || {};
@@ -335,18 +228,9 @@ async function updateMe(req, res) {
       }
       updates.name = name.trim();
     }
-    // Company name may be intentionally cleared, so an empty string is valid.
     if (typeof companyName === "string") {
       updates.companyName = companyName.trim().slice(0, 120);
     }
-    /**
-     * MERGE, never replace (LW-033). The whole sub document used to be
-     * rewritten from the three keys in the request, so fixing a typo in the
-     * account name with `{bankDetails: {accountName}}` wiped the account
-     * number and bank, every later reminder fell to the "reach out for my
-     * details" branch, and nothing said so. Only the keys that were sent are
-     * written, as dotted paths, and an explicit empty string still clears one.
-     */
     if (bankDetails && typeof bankDetails === "object") {
       for (const key of ["accountName", "accountNumber", "bankName"]) {
         if (typeof bankDetails[key] === "string") {
@@ -361,8 +245,6 @@ async function updateMe(req, res) {
         txUpdates: notifyPrefs.txUpdates !== false,
       };
     }
-    // Opt-in automatic reminder delivery. Coerced to booleans so a stray value can't
-    // enable a channel unexpectedly.
     if (autoSend && typeof autoSend === "object") {
       updates.autoSend = {
         enabled: Boolean(autoSend.enabled),
@@ -371,10 +253,6 @@ async function updateMe(req, res) {
       };
     }
 
-    // Crypto payment settings. Validated and clamped in one place, because a bad
-    // sweep destination or a confirmation depth of zero costs real money — see
-    // buildCryptoUpdate. It uses dotted paths so one field can be saved without
-    // wiping the derivation counter that lives in the same sub-document.
     if (crypto && typeof crypto === "object") {
       Object.assign(updates, buildCryptoUpdate(crypto));
     }
@@ -393,22 +271,12 @@ async function updateMe(req, res) {
 
     return res.status(200).json({ user: publicUser(user) });
   } catch (err) {
-    // Validation failures carry their own status and a message written for the
-    // user. Reporting "a bad sweep address" as a 500 would be both wrong and
-    // unhelpful.
     if (err && err.status) return res.status(err.status).json({ error: err.message });
     console.error("updateMe error:", err.message);
     return res.status(500).json({ error: "Update failed" });
   }
 }
 
-/**
- * POST /api/auth/verify-email
- * Body: { email, code }
- * On success the account is verified and a session is issued, so the person is
- * signed straight in rather than being sent back to a login form they have just
- * proven they can pass.
- */
 async function verifyEmailCode(req, res) {
   try {
     const { email, code } = req.body || {};
@@ -416,22 +284,6 @@ async function verifyEmailCode(req, res) {
 
     const user = await User.findOne({ email: String(email).toLowerCase().trim() });
 
-    /**
-     * THE TAKEOVER THAT LIVED HERE.
-     *
-     * An `if (user.emailVerified)` branch returned a session token BEFORE the
-     * code was checked, meant to make a double submitted form idempotent. The
-     * code was only ever tested for presence, so anyone who knew a registered
-     * email could POST it with "000000" and receive a seven day session for the
-     * account. Every account that had finished signing up was in exactly the
-     * state that branch handed a token to.
-     *
-     * Now an already verified account is answered EXACTLY like an unknown one:
-     * same status, same sentence. Nothing is issued without a correct, live
-     * code, and the response shape cannot be used to tell which addresses are
-     * registered. A person who double submits sees "not correct" and simply
-     * signs in, which the message tells them.
-     */
     const notCorrect = {
       error: "That code is not correct. If you have already confirmed this address, sign in instead.",
     };
@@ -449,12 +301,6 @@ async function verifyEmailCode(req, res) {
   }
 }
 
-/**
- * POST /api/auth/resend-code
- * Body: { email }
- * Always answers the same way whether or not the address exists, so it cannot be
- * used to enumerate accounts. The cooldown lives in the service.
- */
 async function resendVerificationCode(req, res) {
   try {
     const { email } = req.body || {};

@@ -18,26 +18,17 @@ import { canDerive } from "../wallet/derivation";
 import { executeSweepBatch, friendlySweepError, planSweep } from "./sweep";
 import { ngn, shortHash, usdc, usdcAmount } from "./format";
 
-/**
- * Review and sign a sweep of one or many payment addresses.
- *
- * Mirrors SendForm's hard human-in-the-loop shape: full summary first, password
- * second, signing only after both. Nothing here is automatic, and the agent
- * never reaches this code — sweeping spends real funds.
- */
 export default function SweepModal({ addresses, chains, mainAddress, destination, onClose, onDone }) {
   const [plans, setPlans] = useState(null);
   const [planError, setPlanError] = useState("");
   const [password, setPassword] = useState("");
-  const [phase, setPhase] = useState("review"); // review | running | finished
+  const [phase, setPhase] = useState("review");
   const [rows, setRows] = useState({});
   const [error, setError] = useState("");
   const [cannotDerive, setCannotDerive] = useState(false);
 
   const dest = destination || mainAddress;
 
-  // Plan every selected address up front, so the review screen shows real
-  // figures and real gas requirements rather than estimates made after the fact.
   useEffect(() => {
     let active = true;
     Promise.all(
@@ -72,14 +63,6 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
     const amountNgn = sweepable.reduce((s, p) => s + p.amountNgn, 0);
     const feeWei = sweepable.reduce((s, p) => s + (p.needsGasFunding ? p.fundingWei : 0n), 0n);
     const needFunding = sweepable.filter((p) => p.needsGasFunding).length;
-    /**
-     * Every figure in this dialog used to be labelled with the literal "USDC".
-     * A batch can mix stablecoins — an invoice is issued in whatever verified
-     * token was chosen, and on the mainnets that includes USDT — so the label
-     * was simply wrong on any USDT row. Each row now names its own token, and
-     * the total only names one when the whole batch shares it. A mixed batch
-     * gets no symbol rather than an invented one.
-     */
     const symbols = new Set(sweepable.map((p) => p.tokenSymbol).filter(Boolean));
     const symbol = symbols.size === 1 ? [...symbols][0] : null;
     return { amount, amountNgn, feeWei, needFunding, symbol, mixed: symbols.size > 1 };
@@ -93,8 +76,6 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
 
     setPhase("running");
     try {
-      // Unlock ONCE for the whole batch. scrypt takes seconds, so unlocking per
-      // address would make a batch of five unusable.
       const master = await unlockWallet(password, () => {});
       if (!canDerive(master)) {
         setCannotDerive(true);

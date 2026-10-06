@@ -13,20 +13,10 @@ import { fetchPaymentAddresses } from "../receivables/cryptoApi";
 import SweepModal from "../receivables/SweepModal";
 import { ngn, shortHash, usdcAmount } from "../receivables/format";
 
-/**
- * Money collected at per-invoice payment addresses, and the way to move it into
- * the main wallet.
- *
- * Balances are read LIVE from the chain rather than taken from `receivedUsdc`.
- * The stored figure is what the watcher confirmed and settled; the balance is
- * what is actually sitting at the address. They diverge after a previous sweep,
- * or when funds arrived in a way the watcher did not attribute, and a sweep must
- * always act on the truth.
- */
 export default function CollectedPanel({ chain, mainAddress, sweepDestination, onSwept }) {
   const [rows, setRows] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
-  const [sweeping, setSweeping] = useState(null); // array of PaymentAddress docs
+  const [sweeping, setSweeping] = useState(null);
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
@@ -38,27 +28,10 @@ export default function CollectedPanel({ chain, mainAddress, sweepDestination, o
       const mine = (data.addresses || []).filter((a) => a.chainId === chain.chainId);
 
       const provider = getProvider(chain.chainId);
-      // Read every balance concurrently, but let individual failures through as
-      // null rather than blanking the whole list — one flaky RPC call must not
-      // hide addresses that do hold money.
       const withBalances = await Promise.all(
         mine.map(async (pa) => {
           try {
             const token = new ethers.Contract(pa.tokenContract, ERC20_ABI, provider);
-            /**
-             * DECIMALS COME FROM THE CONTRACT, NEVER FROM A CONSTANT.
-             *
-             * This read `Number(pa.tokenDecimals) || 6`. USDC is 6 decimals
-             * nearly everywhere and 18 on BNB Chain, so an assumed 6 on a BNB
-             * address would show a balance a million million times too large —
-             * and this figure is what the owner ticks to decide what to sweep,
-             * and what the naira estimate beside it is computed from. `|| 6`
-             * also silently rewrote a legitimate zero-decimal token. LW-027
-             * closed exactly this pattern in the server's watcher; it had
-             * survived here. A stored value is used when it is a real integer,
-             * otherwise the contract is asked, and a contract that will not
-             * answer makes the row UNREADABLE rather than guessed.
-             */
             const stored = Number(pa.tokenDecimals);
             const decimals =
               Number.isInteger(stored) && stored >= 0 && stored <= 36
@@ -68,18 +41,6 @@ export default function CollectedPanel({ chain, mainAddress, sweepDestination, o
               throw new Error("This token's contract did not report its decimals");
             }
             const raw = await token.balanceOf(pa.address);
-            // The native coin at the same address. A payer who sends plain ETH
-            // or BNB to an invoice address instead of the stablecoin used to
-            // land in a fourth bucket the app never mentioned: not credited, not
-            // overpaid, not unattributed — invisible, under a screen that said
-            // "Nothing collected". It cannot be swept from here (this panel
-            // sweeps the token), but the owner's phrase controls the address, so
-            // the least this can do is say the money is there.
-            //
-            // In its OWN try: this is an extra fact about the address, and a
-            // failure to read it must never turn a row whose stablecoin balance
-            // was read perfectly well into "Balance unavailable". Unknown here
-            // simply means the note is not shown.
             let nativeAmount = null;
             try {
               nativeAmount = Number(ethers.formatEther(await provider.getBalance(pa.address)));
@@ -98,9 +59,6 @@ export default function CollectedPanel({ chain, mainAddress, sweepDestination, o
         })
       );
 
-      // Anything holding a balance, plus anything we could not read (so a failure
-      // is visible rather than silently dropped), plus anything holding native
-      // coin that nothing else in the app would ever show.
       setRows(
         withBalances.filter(
           (r) => r.failed || (r.live && r.live > 0) || (r.nativeAmount && r.nativeAmount > 0)
@@ -109,9 +67,6 @@ export default function CollectedPanel({ chain, mainAddress, sweepDestination, o
       setError("");
     } catch (err) {
       setRows([]);
-      // Names the cause. "Could not load" on its own gives the user nothing to
-      // act on and reads the same whether the network is down or the account is
-      // empty — the two things they most need to tell apart.
       const reason = rpcErrorReason(err);
       setError(
         reason ? `Could not load collected balances: ${reason}` : "Could not load collected balances."

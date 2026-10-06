@@ -6,15 +6,10 @@ import { saveAddress } from "./walletApi";
 import { assessWalletPassword, MIN_WALLET_PASSWORD } from "./passwordStrength";
 import { useAuth } from "../../context/AuthContext";
 
-/**
- * Create a new wallet: generate → show the recovery phrase ONCE (with an explicit
- * "I've written it down" confirmation) → encrypt with a password and store only the
- * ciphertext. The plaintext key/phrase never leave this component's memory.
- */
 export default function CreateWalletModal({ onClose, onDone }) {
   const { user } = useAuth();
-  const [step, setStep] = useState("generate"); // generate → backup → password
-  const generated = useMemo(() => createWallet(), []); // in-memory only
+  const [step, setStep] = useState("generate");
+  const generated = useMemo(() => createWallet(), []);
   const [written, setWritten] = useState(false);
   const [showPk, setShowPk] = useState(false);
   const [password, setPassword] = useState("");
@@ -23,8 +18,6 @@ export default function CreateWalletModal({ onClose, onDone }) {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
 
-  // After the state it reads. Declared above `password` it sat in the temporal
-  // dead zone and threw on first render.
   const strength = useMemo(
     () => assessWalletPassword(password, { email: user?.email, name: user?.name }),
     [password, user]
@@ -35,9 +28,6 @@ export default function CreateWalletModal({ onClose, onDone }) {
   async function finish(e) {
     e.preventDefault();
     setError("");
-    // Eight characters with no other check was the whole gate on the one password
-    // in this product that cannot be reset and is attacked offline. See
-    // passwordStrength.js and docs/SECURITY.md B1.
     const verdict = assessWalletPassword(password, { email: user?.email, name: user?.name });
     if (!verdict.ok) return setError(verdict.reason);
     if (password !== confirm) return setError("Passwords do not match.");
@@ -144,9 +134,6 @@ export default function CreateWalletModal({ onClose, onDone }) {
               autoFocus
               required
             />
-            {/* Live, and phrased as guidance rather than a scold. The gate is in
-                passwordStrength.js; this is the same verdict shown before the
-                user submits, so the requirement is never a surprise at the end. */}
             <div className="caption muted" style={{ marginTop: 6 }}>
               {password
                 ? strength.ok

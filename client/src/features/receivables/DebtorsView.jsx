@@ -5,11 +5,6 @@ import http from "../../api/http";
 import { Avatar, Card, EmptyState, SkeletonLines } from "../../components/ui";
 import { ngn, shortDate } from "./format";
 import ReliabilityBadge from "./ReliabilityBadge";
-/**
- * The debtor profile is a dialog opened from a row, and it is the last static
- * path pulling recharts into the main bundle (LW-046). Deferred: nobody has it
- * open when the page loads, and by the time they click, the chunk has arrived.
- */
 const DebtorProfile = lazy(() => import("./DebtorProfile"));
 
 const SORTS = {

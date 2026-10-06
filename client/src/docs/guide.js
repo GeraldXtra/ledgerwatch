@@ -1,16 +1,3 @@
-/**
- * THE USER GUIDE, AS DATA.
- *
- * Every page is an object: a slug (its address under /docs), a title, the
- * group it sits in, one line of introduction, and a list of blocks that
- * docs/Blocks.jsx renders. Inline text may use **bold**, `code` and
- * [a link](/path). Pictures live in client/public/docs and are referenced by
- * file name only.
- *
- * The order of this array is the order of the sidebar and of the previous
- * and next links. Keep the first page the introduction.
- */
-
 const h2 = (text) => ({ type: "h2", text });
 const h3 = (text) => ({ type: "h3", text });
 const p = (text) => ({ type: "p", text });
@@ -30,7 +17,6 @@ export const GROUPS = [
 ];
 
 export const GUIDE = [
-  // ---------------------------------------------------------------- START --
   {
     slug: "introduction",
     group: "start",
@@ -160,7 +146,6 @@ export const GUIDE = [
     ],
   },
 
-  // ---------------------------------------------------------- RECEIVABLES --
   {
     slug: "receivables",
     group: "receivables",
@@ -476,7 +461,6 @@ export const GUIDE = [
     ],
   },
 
-  // --------------------------------------------------------------- MARKET --
   {
     slug: "market-watch",
     group: "market",
@@ -665,7 +649,6 @@ export const GUIDE = [
     ],
   },
 
-  // --------------------------------------------------------------- WALLET --
   {
     slug: "wallet",
     group: "wallet",
@@ -883,7 +866,6 @@ export const GUIDE = [
     ],
   },
 
-  // ------------------------------------------------------------- SETTINGS --
   {
     slug: "settings",
     group: "settings",
@@ -975,7 +957,6 @@ export const GUIDE = [
     ],
   },
 
-  // ----------------------------------------------------------------- HELP --
   {
     slug: "safety",
     group: "help",

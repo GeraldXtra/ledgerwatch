@@ -14,39 +14,16 @@ const TYPES = [
 
 const isPriceType = (t) => t === "price_below" || t === "price_above";
 
-/**
- * Create a watch on ANY coin: a searchable coin picker (/api/coins/search) plus an
- * inline condition builder. Posts { coinId, symbol, type, value } to /api/watches.
- * onAdded() refreshes the parent.
- *
- * DELIBERATELY INDEPENDENT OF TRADING MODE.
- * Watching a coin is not trading it. Nothing here consults paper/live mode, the
- * selected chain, the wallet, or whether a tradeable pair exists — a coin with
- * no pool on the current chain is still perfectly watchable, it is simply
- * paper-only for execution, which the trade path already labels. Adding a gate
- * here would silently make watching depend on wallet state it has no business
- * caring about.
- */
 export default function AddWatchForm({ onAdded }) {
-  const [coin, setCoin] = useState(null); // { id, symbol, name }
+  const [coin, setCoin] = useState(null);
   const [type, setType] = useState("price_below");
   const [value, setValue] = useState("");
   const [livePrice, setLivePrice] = useState(null);
-  // Why the price hint is missing, when it is. Separate from `error`, which is
-  // about the watch itself — a missing hint must never look like a failure to
-  // create the watch.
   const [priceNote, setPriceNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
 
-  /**
-   * The picked coin's live price, as a HINT only.
-   *
-   * This never gates selection or submission: the watch is created from
-   * coinId/symbol/type/value, none of which come from here. A failure states
-   * that the hint is unavailable and leaves the form fully usable.
-   */
   useEffect(() => {
     setLivePrice(null);
     setPriceNote("");
@@ -56,9 +33,6 @@ export default function AddWatchForm({ onAdded }) {
       .get("/api/markets", { params: { ids: coin.id } })
       .then(({ data }) => {
         if (!active) return;
-        // Explicit shape check rather than an optional chain that quietly
-        // yields undefined. If the server ever changes this response, we say so
-        // instead of silently showing no price forever.
         if (!data || !Array.isArray(data.markets)) {
           setPriceNote("Live price unavailable (unexpected response).");
           return;
@@ -107,9 +81,6 @@ export default function AddWatchForm({ onAdded }) {
       setCoin(null);
       if (onAdded) onAdded();
     } catch (err) {
-      // Say WHICH failure. A bare "could not create" gave the owner nothing to
-      // act on when the real cause was a signed-out session, a rate limit, or
-      // no network at all.
       const status = err?.response?.status;
       const server = err?.response?.data?.error;
       setError(
@@ -175,12 +146,6 @@ export default function AddWatchForm({ onAdded }) {
               <span className="num" style={{ color: "var(--ink)" }}>{fmtPrice(livePrice)}</span> now.{" "}
             </>
           ) : null}
-          {/* One sentence used to serve both price conditions, and it only made
-              sense for one of them: it told somebody who had picked "Price
-              above" to set a value ABOVE the current price, which is the value
-              that will never fire. The first thing a new user does on this page
-              is add a watch, and following the tip produced one that looked
-              broken. Each condition now gets the advice that fires it. */}
           {type === "price_below"
             ? "Tip: set a value above the current price to trigger on the next check."
             : type === "price_above"
@@ -188,8 +153,6 @@ export default function AddWatchForm({ onAdded }) {
             : "Measured from the price captured when the watch is created."}
         </p>
 
-        {/* The hint failed, the form did not. Said out loud rather than leaving
-            an empty space that reads as "nothing is happening". */}
         {priceNote && (
           <p className="muted caption" style={{ margin: 0 }}>
             {priceNote}

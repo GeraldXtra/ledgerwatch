@@ -1,21 +1,11 @@
-/**
- * Generates the PWA PNG icons from the LedgerWatch logo mark.
- *
- * Android requires real PNGs for install prompts and notification badges (SVG is
- * unreliable there), so these are encoded here rather than shipped as SVG only.
- * Uses nothing but Node built-ins — no image dependency to install or audit.
- *
- *   node scripts/make-icons.cjs
- */
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 
-// Brand: navy field, gold keyline crest, ivory rising chevron, gold ledger rule.
 const FIELD_TOP = [28, 51, 88];
 const FIELD_BOT = [10, 21, 41];
 const CREST = [14, 28, 52];
-const GOLD = [192, 160, 83]; // --gold-500, the one accent
+const GOLD = [192, 160, 83];
 const IVORY = [255, 255, 255];
 
 function crc32(buf) {
@@ -44,9 +34,8 @@ function png(size, pixels) {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(size, 0);
   ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // RGBA
-  // Raw scanlines, each prefixed with filter byte 0.
+  ihdr[8] = 8;
+  ihdr[9] = 6;
   const raw = Buffer.alloc(size * (size * 4 + 1));
   let o = 0;
   for (let y = 0; y < size; y++) {
@@ -67,14 +56,6 @@ function png(size, pixels) {
   ]);
 }
 
-/**
- * The crest, painted per pixel. Mirrors client/public/icon.svg.
- *
- * Full bleed navy, because Android crops an installed icon to a circle and a
- * transparent or inset background loses its corners. The crest sits well inside
- * that safe area, and it is carried by its GOLD KEYLINE rather than a fill: a
- * navy shield on a navy field would simply disappear.
- */
 function lerp(a, b, t) {
   return [
     Math.round(a[0] + (b[0] - a[0]) * t),
@@ -83,7 +64,6 @@ function lerp(a, b, t) {
   ];
 }
 
-// Distance from a point to a line segment — how every stroke below is drawn.
 function distSeg(px, py, x1, y1, x2, y2) {
   const dx = x2 - x1;
   const dy = y2 - y1;
@@ -93,13 +73,6 @@ function distSeg(px, py, x1, y1, x2, y2) {
   return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
 }
 
-/**
- * Point inside the crest, shrunk by `pad`.
- *
- * Straight shoulders with rounded top corners down to y=32, then an elliptical
- * taper to the point. The SVG uses a cubic there; a quarter ellipse is within a
- * pixel of it at these sizes and needs no curve solver.
- */
 function inCrest(gx, gy, pad) {
   const top = 9 + pad;
   const tip = 59.5 - pad * 1.15;
@@ -123,8 +96,6 @@ function inCrest(gx, gy, pad) {
 }
 
 function paint(x, y, size) {
-  // Normalised, then into the 64 unit crest space with the same 18.75% inset the
-  // SVG uses, so the PNG and the SVG are the same drawing.
   const u = x / size;
   const v = y / size;
   const gx = (u * 512 - 80) / 5.5;
@@ -133,16 +104,13 @@ function paint(x, y, size) {
   const field = lerp(FIELD_TOP, FIELD_BOT, v);
   if (!inCrest(gx, gy, 0)) return field;
 
-  // The ledger rule — the one gold accent.
   if (distSeg(gx, gy, 22.5, 42, 41.5, 42) <= 1.6) return GOLD;
-  // Money rising across it.
   if (
     distSeg(gx, gy, 21.8, 34, 32, 23.2) <= 2.3 ||
     distSeg(gx, gy, 32, 23.2, 42.2, 34) <= 2.3
   ) {
     return IVORY;
   }
-  // Engraved keyline: the band between two inset crests.
   if (inCrest(gx, gy, 3.4) && !inCrest(gx, gy, 4.6)) return GOLD;
   return CREST;
 }

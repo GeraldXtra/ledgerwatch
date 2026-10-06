@@ -2,14 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowUp, ArrowDown } from "lucide-react";
 import { price as fmtPrice } from "./format";
 
-/**
- * A price that visibly ticks: when `value` changes, it flashes green + up arrow if
- * it rose, red + down arrow if it fell, fading back over ~800ms. Respects
- * prefers-reduced-motion (no flash, just the new number).
- */
 export default function AnimatedPrice({ value, format = fmtPrice, className = "" }) {
   const prev = useRef(value);
-  const [dir, setDir] = useState(null); // "up" | "down" | null
+  const [dir, setDir] = useState(null);
   const timer = useRef(null);
 
   useEffect(() => {

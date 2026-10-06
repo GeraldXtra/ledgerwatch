@@ -15,13 +15,9 @@ const signToken = require("../utils/token");
 
 const SALT_ROUNDS = 10;
 
-// Avatars arrive as base64 data URLs. Only real raster image types are accepted,
-// and the cap is measured on the DECODED bytes so base64's ~33% overhead cannot
-// smuggle a larger file past the limit.
 const DATA_URL_RE = /^data:image\/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=]+)$/;
-const MAX_AVATAR_BYTES = 2 * 1024 * 1024; // 2MB
+const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 
-// The shared demo account must keep working for testing.
 const PROTECTED_EMAIL = "demo@ledgerwatch.app";
 
 function decodedByteLength(b64) {
@@ -29,7 +25,6 @@ function decodedByteLength(b64) {
   return Math.floor((b64.length * 3) / 4) - padding;
 }
 
-// POST /api/auth/me/avatar   { dataUrl }
 async function setAvatar(req, res) {
   try {
     const dataUrl = (req.body && req.body.dataUrl) || "";
@@ -56,7 +51,6 @@ async function setAvatar(req, res) {
   }
 }
 
-// DELETE /api/auth/me/avatar
 async function removeAvatar(req, res) {
   try {
     const user = await User.findByIdAndUpdate(
@@ -71,7 +65,6 @@ async function removeAvatar(req, res) {
   }
 }
 
-// POST /api/auth/me/password   { currentPassword, newPassword }
 async function changePassword(req, res) {
   try {
     const { currentPassword, newPassword } = req.body || {};
@@ -82,17 +75,13 @@ async function changePassword(req, res) {
       return res.status(400).json({ error: "New password must be at least 8 characters" });
     }
 
-    // req.user is loaded without passwordHash by the auth middleware, so re-fetch.
     const user = await User.findById(req.user._id);
     if (!user) return res.status(401).json({ error: "User no longer exists" });
 
-    // Coerced: bcrypt throws on a non-string, which answered 500 instead of 400.
     const match = await bcrypt.compare(String(currentPassword), user.passwordHash);
     if (!match) return res.status(400).json({ error: "Current password is incorrect" });
 
     user.passwordHash = await bcrypt.hash(String(newPassword), SALT_ROUNDS);
-    // Sign every other session out. The one making this request is reissued
-    // below so the person is not logged out of the device they are using.
     user.tokenVersion = (user.tokenVersion || 0) + 1;
     await user.save();
 
@@ -103,8 +92,6 @@ async function changePassword(req, res) {
   }
 }
 
-// Every collection owned by a user, scoped by userId. Shared by clear-data and
-// delete-account so the two can never drift apart.
 async function wipeUserData(userId) {
   await Promise.all([
     Debt.deleteMany({ userId }),
@@ -114,21 +101,8 @@ async function wipeUserData(userId) {
     Alert.deleteMany({ userId }),
     SimTrade.deleteMany({ userId }),
     Portfolio.deleteMany({ userId }),
-    // Payment addresses were missing here, so clearing data or deleting an
-    // account left rows the watch pass kept scanning forever on behalf of a user
-    // that no longer existed.
     PaymentAddress.deleteMany({ userId }),
     WalletTx.deleteMany({ userId }),
-    /**
-     * LW-030. Push subscriptions were left behind as orphans, and the wallet
-     * history cursors stayed on the User document. The cursor one was the
-     * bad half: every WalletTx row was deleted but the scan resumed from the
-     * old cursor, so every inbound transfer the wallet had ever received was
-     * permanently invisible, with no way to get it back from the UI. Clearing
-     * the cursors makes the next History open re-walk the lookback, and the
-     * discovered-token list goes with them since it is derived from the same
-     * scan.
-     */
     PushSubscription.deleteMany({ userId }),
     User.updateOne(
       { _id: userId },
@@ -137,11 +111,9 @@ async function wipeUserData(userId) {
   ]);
 }
 
-// POST /api/auth/me/clear-data
 async function clearData(req, res) {
   try {
     await wipeUserData(req.user._id);
-    // Recreate an empty simulated portfolio so Market Watch still has one.
     await Portfolio.create({ userId: req.user._id });
     return res.json({ ok: true });
   } catch (err) {
@@ -150,7 +122,6 @@ async function clearData(req, res) {
   }
 }
 
-// DELETE /api/auth/me
 async function deleteAccount(req, res) {
   try {
     if (String(req.user.email).toLowerCase() === PROTECTED_EMAIL) {

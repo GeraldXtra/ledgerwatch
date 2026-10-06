@@ -9,7 +9,6 @@ function formatDateTime(value) {
   return d.toLocaleString();
 }
 
-// Human copy for a per-channel delivery status.
 const DELIVERY_LABEL = {
   sent: "Sent",
   failed: "Failed",
@@ -29,34 +28,14 @@ function DeliveryChip({ delivery }) {
   );
 }
 
-/**
- * Reminder modal for a single debt: the freshly generated message, provider send
- * actions (WhatsApp / Email / Both) plus the always-available wa.me link, and the
- * reminder log with per-channel delivery records.
- * `result` is the response from POST /remind. `debt` is the target debt.
- */
 export default function ReminderPanel({ debt, result, onClose }) {
   const toast = useToast();
   const [reminders, setReminders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(null); // which channel-set is in flight
-  /**
-   * A FAILED LOAD USED TO CLAIM THERE IS NO HISTORY (LW-029).
-   *
-   * Both loaders below emptied the list on a failure, and an empty list renders
-   * "No reminders generated yet." — a statement about this invoice, produced by
-   * a dropped connection. The owner then resends a reminder they have already
-   * sent today. The list is left alone now and the failure is reported.
-   */
+  const [sending, setSending] = useState(null);
   const [logError, setLogError] = useState("");
 
   const hasEmail = Boolean(debt.debtorEmail);
-  /**
-   * Reserved, non-routable domains (RFC 2606 / RFC 6761). Mail to these is
-   * accepted at the SMTP handshake and bounced afterwards, so it records as
-   * "sent" while never arriving — the worst of both outcomes. Mirrors the same
-   * check on the server.
-   */
   const emailUndeliverable =
     hasEmail && /@([^@]*\.)?(example|test|invalid|localhost)(\.[a-z]{2,})?$/i.test(debt.debtorEmail);
 
@@ -95,11 +74,8 @@ export default function ReminderPanel({ debt, result, onClose }) {
     return () => {
       active = false;
     };
-    // reload when a new reminder was generated (result changes)
   }, [debt._id, result]);
 
-  // POST /send — dispatch via the configured providers. Degrades gracefully:
-  // an unconfigured provider comes back "skipped", surfaced as an info toast.
   async function send(channels, label) {
     setSending(label);
     try {
@@ -112,9 +88,6 @@ export default function ReminderPanel({ debt, result, onClose }) {
       if (sent.length) {
         toast(`Sent via ${sent.map((d) => d.channel).join(" & ")}.`, { type: "success" });
       }
-      // Accepted by the mail server but it will not arrive — a reserved recipient
-      // domain, typically. Reported separately from success, because it looks
-      // exactly like success otherwise.
       sent
         .filter((d) => d.warning)
         .forEach((d) => toast(d.warning, { type: "error", duration: 9000 }));
@@ -134,9 +107,6 @@ export default function ReminderPanel({ debt, result, onClose }) {
       }
       await loadReminders();
     } catch (err) {
-      // No server response at all means the request never completed: a timeout,
-      // a dropped connection, or the server restarting mid-send. Say which,
-      // rather than the bare "Send failed" that explained nothing.
       const served = err?.response?.data?.error;
       toast(
         served ||
@@ -218,9 +188,6 @@ export default function ReminderPanel({ debt, result, onClose }) {
             </span>
           </div>
 
-          {/* Said BEFORE sending, not after. A reserved domain is accepted by the
-              mail server and bounced later, so the send reports success and the
-              client never hears from you. */}
           {emailUndeliverable && (
             <div className="against-note">
               <TriangleAlert size={15} />

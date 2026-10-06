@@ -3,25 +3,10 @@ const { formatDate } = require("../utils/reminderTemplate");
 
 const MODEL = "claude-sonnet-4-6";
 
-/**
- * LW-010. The SDK's defaults are a ten minute timeout and two retries, which
- * is a worst case near half an hour on ONE call. That call is awaited inside
- * the reminder pass, which runs under the automation loop's overlap guard, so
- * for that whole window every tick logged "previous pass still running" and
- * returned: no reminders, no price pass, and no payment watch. A confirmed
- * payment sat undetected while the log looked like healthy overlap protection.
- *
- * A reminder draft that has not come back in thirty seconds is not coming
- * back, and the template fallback is right there.
- */
 const REQUEST_TIMEOUT_MS = Number(process.env.ANTHROPIC_TIMEOUT_MS || 30000);
 
 let client = null;
 
-/**
- * Lazily create the Anthropic client. Returns null if no API key is configured,
- * so all AI features degrade gracefully (Module 1 must work with NO AI).
- */
 function getClient() {
   if (!process.env.ANTHROPIC_API_KEY) return null;
   if (!client) {
@@ -44,10 +29,6 @@ function extractText(response) {
   return text || null;
 }
 
-/**
- * Draft a nicer reminder message. Returns the AI text, or null if AI is
- * unavailable or the call fails (caller falls back to the plain template).
- */
 async function draftReminder({
   debtorName,
   amount,
@@ -101,27 +82,6 @@ async function draftReminder({
   }
 }
 
-/**
- * Answer a natural-language question over a compact summary of the user's debts.
- * Returns AI text, or null if AI is unavailable / fails (caller computes a fallback).
- */
-/**
- * The most debtor rows one question may send to the AI provider.
- *
- * The caller passes EVERY invoice the account has, with names, amounts and due
- * dates, on every question. SECURITY.md B6 requires debtor PII sent to a third
- * party to be minimised, and it is the one asset that cannot be un-disclosed
- * once sent. It is also uncapped third-party spend and, past a certain size, a
- * request that simply fails — the aiCall limiter bounds how MANY calls are made
- * and says nothing about how large each one is.
- *
- * 200 rows answers any question a person actually asks while keeping a large
- * book from being shipped wholesale. Which 200 matters: open invoices first,
- * soonest due first, because "who owes me and when" is what the assistant is
- * for, and a paid invoice from last year is not part of that answer. The prompt
- * is told plainly that it is a subset, so it cannot state a total it was never
- * given — a confidently wrong total would be worse than a refusal.
- */
 const MAX_DEBT_ROWS = 200;
 
 function trimDebtsForPrompt(debtsSummary) {
@@ -175,9 +135,6 @@ async function answerReceivablesQuery(question, debtsSummary) {
   }
 }
 
-/**
- * Word a market alert explanation. Returns text or null (caller uses a template).
- */
 async function explainAlert({
   symbol,
   conditionType,
@@ -215,15 +172,6 @@ async function explainAlert({
   }
 }
 
-/**
- * Market agent chat. Parses watch commands into a structured intent AND answers
- * questions using the provided context. Returns a parsed object
- * `{ watches: [{ symbol, type, value }], reply }` or null on failure/no key
- * (caller falls back to the basic parser + computed summary).
- *
- * @param {string} message
- * @param {object} context  { watches, portfolio, prices, supportedSymbols }
- */
 async function marketChat(message, context) {
   const anthropic = getClient();
   if (!anthropic) return null;
@@ -269,7 +217,6 @@ async function marketChat(message, context) {
   }
 }
 
-// Tolerant JSON extraction from the model's reply.
 function safeParseChatJson(text) {
   try {
     return JSON.parse(text);

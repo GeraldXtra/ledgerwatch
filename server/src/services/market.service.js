@@ -8,13 +8,10 @@ const { getPrices, getPrice } = require("./coingecko.service");
 const { explainAlert } = require("./anthropic.service");
 const { notifyUser, signActionToken } = require("./push.service");
 
-// Section 2a constants.
 const STARTING_CASH = 1000000;
 const TRADE_FRACTION = 0.1;
-// Crypto analog of the reminder cadence guard — don't re-alert a watch this soon.
-const ALERT_COOLDOWN_MS = 5 * 60 * 1000; // 5 min
+const ALERT_COOLDOWN_MS = 5 * 60 * 1000;
 
-// small error helper so controllers can map to status codes
 function httpError(status, message) {
   const err = new Error(message);
   err.status = status;
@@ -27,23 +24,13 @@ function fmt(n) {
   return num.toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
-// ---- watches ---------------------------------------------------------------
-
 const VALID_TYPES = ["drop_pct", "rise_pct", "price_below", "price_above"];
 
-/**
- * Create a watch for a user. Accepts either a known symbol (resolved via coinMap)
- * OR an explicit { coinId, symbol } pair from the coin search — so ANY coin can be
- * watched. Captures the current price as baseline. Throws 400 on invalid input.
- */
 async function createWatch(userId, { symbol, type, value, coinId }, mode = "paper") {
   let resolvedCoinId;
   let resolvedSymbol;
 
   if (coinId) {
-    // From the search picker: trust the CoinGecko id, derive a display symbol.
-    // Both are bounded and shaped: the id becomes an upstream URL and both
-    // are rendered on every screen and in every push notification.
     resolvedCoinId = String(coinId).trim().toLowerCase();
     if (!/^[a-z0-9-]{1,64}$/.test(resolvedCoinId)) {
       throw httpError(400, "That is not a valid coin id.");
@@ -70,14 +57,11 @@ async function createWatch(userId, { symbol, type, value, coinId }, mode = "pape
     throw httpError(400, "Condition value must be a number greater than 0");
   }
 
-  // Baseline = current price (USD). If CoinGecko is unavailable, baseline stays null.
   const price = await getPrice(resolvedCoinId);
   const baselinePrice = price && typeof price.usd === "number" ? price.usd : null;
 
   const watch = await Watch.create({
     userId,
-    // Watches belong to one book. A watch made while in paper mode must not
-    // start firing real money alerts the moment somebody switches to live.
     mode: mode === "live" ? "live" : "paper",
     coinId: resolvedCoinId,
     symbol: resolvedSymbol,
@@ -89,11 +73,6 @@ async function createWatch(userId, { symbol, type, value, coinId }, mode = "pape
   return watch;
 }
 
-/**
- * Edit a watch's condition (threshold) without deleting and recreating it.
- * Re-captures baseline when switching to a percentage type that has none, and
- * resets lastTriggeredAt so the new condition can fire. Throws 400/404.
- */
 async function updateWatchCondition(userId, watchId, { type, value }) {
   const watch = await Watch.findOne({ _id: watchId, userId });
   if (!watch) throw httpError(404, "Watch not found");
@@ -111,37 +90,22 @@ async function updateWatchCondition(userId, watchId, { type, value }) {
   const typeChanged = nextType !== prevType;
   watch.condition = { type: nextType, value: numValue };
 
-  // For pct conditions, measure from "now" when the type is (re)set to a pct type —
-  // recapture the baseline if it's missing OR the type actually changed. Otherwise a
-  // stale creation-time baseline would fire a spurious immediate alert on the next pass.
   const isPct = nextType === "drop_pct" || nextType === "rise_pct";
   if (isPct && (watch.baselinePrice == null || typeChanged)) {
     const price = await getPrice(watch.coinId);
     if (price && typeof price.usd === "number") watch.baselinePrice = price.usd;
   }
 
-  watch.lastTriggeredAt = null; // allow the edited condition to fire
+  watch.lastTriggeredAt = null;
   await watch.save();
   return watch;
 }
 
-// ---- condition evaluation + alerts ----------------------------------------
-
-/**
- * Evaluate a watch's condition against a current price.
- * @returns {{ hit: boolean, pctChange: number|null }}
- */
 function evaluateCondition(watch, price) {
   const { type, value } = watch.condition;
   const baseline = watch.baselinePrice;
 
   switch (type) {
-    /**
-     * `baseline == null`, not `!baseline`. The original rejected a baseline of
-     * exactly 0 as if it were missing — the second half of LW-044. A zero
-     * baseline still cannot divide, so it is refused separately and for the
-     * real reason.
-     */
     case "drop_pct": {
       if (baseline == null || baseline <= 0) return { hit: false, pctChange: null };
       const pct = ((baseline - price) / baseline) * 100;
@@ -162,7 +126,6 @@ function evaluateCondition(watch, price) {
 }
 
 function suggestionForType(type) {
-  // buy the dip, sell the rally
   if (type === "drop_pct" || type === "price_below") return "buy";
   if (type === "rise_pct" || type === "price_above") return "sell";
   return "hold";
@@ -193,14 +156,6 @@ function buildAlertMessage(watch, price, pctChange) {
   }
 }
 
-/**
- * PRICE PASS core (section 4). Evaluates active watches against cached prices
- * and creates Alerts for conditions that hit (respecting the cooldown guard).
- * Never throws for a single watch — each is wrapped in try/catch by the caller
- * expectation, but we also guard here. Returns { alertsCreated, watchesChecked }.
- *
- * @param {{ userId?: string }} [opts]
- */
 async function runPricePass({ userId } = {}) {
   const query = { active: true };
   if (userId) query.userId = userId;
@@ -221,28 +176,6 @@ async function runPricePass({ userId } = {}) {
       if (!priceRow || typeof priceRow.usd !== "number") continue;
       const price = priceRow.usd;
 
-      /**
-       * LW-044, THE HALF THAT WAS NEVER BUILT.
-       *
-       * A percentage watch measures against `baselinePrice`, captured when the
-       * watch is created. If CoinGecko was unreachable at that moment the
-       * baseline is null, and `evaluateCondition` returns {hit:false} for a null
-       * baseline — so the watch is inert. Forever, silently.
-       *
-       * The register records LW-044 as FIXED, describing exactly this self-heal:
-       * "a percentage watch with a null baseline takes the next available price
-       * as its baseline". The only recapture that was ever written lives in
-       * `updateWatchCondition`, which runs when a person EDITS the watch — which
-       * is the original bug report's own workaround, not a fix.
-       *
-       * Here is the fix, on the pass that actually runs. Taking the first price
-       * we can see is the correct baseline: it is the earliest moment this watch
-       * could honestly have started measuring from.
-       *
-       * `== null` is deliberate and covers both null and undefined. `!baseline`
-       * was the original defect's other half — it also rejects a legitimate
-       * baseline of exactly 0.
-       */
       const isPct =
         watch.condition.type === "drop_pct" || watch.condition.type === "rise_pct";
       if (isPct && watch.baselinePrice == null) {
@@ -252,16 +185,12 @@ async function runPricePass({ userId } = {}) {
           `[market] watch ${watch._id} (${watch.symbol}) had no baseline and has taken ` +
             `${price} as its starting point. It was inert until now.`
         );
-        // Deliberately no alert on this pass: a baseline set from this tick
-        // cannot yet have moved away from it, and firing here would raise a
-        // spurious alert the instant the price feed came back.
         continue;
       }
 
       const { hit, pctChange } = evaluateCondition(watch, price);
       if (!hit) continue;
 
-      // Cooldown guard — spaces out re-alerts after the watch last fired.
       if (
         watch.lastTriggeredAt &&
         now - new Date(watch.lastTriggeredAt).getTime() < ALERT_COOLDOWN_MS
@@ -269,12 +198,6 @@ async function runPricePass({ userId } = {}) {
         continue;
       }
 
-      // PRIMARY dedup guard: never stack a second alert on a watch the user has
-      // not answered yet. A condition that stays true — e.g. a price_below whose
-      // threshold sits above market — otherwise re-fires on EVERY pass, which is
-      // what produced hundreds of pending alerts from a handful of watches. The
-      // cooldown above only spaces them out; this stops them entirely until the
-      // human approves or dismisses the one already waiting.
       const alreadyWaiting = await Alert.exists({
         mode: watch.mode || "paper",
         watchId: watch._id,
@@ -311,9 +234,6 @@ async function runPricePass({ userId } = {}) {
       await watch.save();
       alertsCreated++;
 
-      // Actionable push. Buy/Sell deliberately carry NO action token — they deep
-      // link into the app so the user still sets an amount and confirms. Only
-      // Dismiss resolves straight from the notification. No-ops if push is off.
       try {
         await notifyUser(
           watch.userId,
@@ -323,16 +243,11 @@ async function runPricePass({ userId } = {}) {
             tag: `alert-${alert._id}`,
             type: "alert",
             url: `/app/market?alert=${alert._id}`,
-            // ORDERED BY VALUE. The service worker trims this list to whatever
-            // Notification.maxActions allows — 2 on Chrome desktop — and it trims
-            // from the end, so Dismiss is the one that goes when there is only
-            // room for two. Buy and Sell are the actions worth keeping.
             actions: [
               { action: "buy", title: "Buy" },
               { action: "sell", title: "Sell" },
               { action: "dismiss", title: "Dismiss" },
             ],
-            // Only the dismiss action is executable from the notification.
             tokens: { dismiss: signActionToken(watch.userId, "dismiss_alert", alert._id) },
             alertId: String(alert._id),
           },
@@ -347,27 +262,12 @@ async function runPricePass({ userId } = {}) {
         `Automation: failed to evaluate watch ${watch._id}:`,
         err.message
       );
-      // continue to the next watch
     }
   }
 
   return { alertsCreated, watchesChecked };
 }
 
-/**
- * THESE TWO ENTRY POINTS SIMULATE. A LIVE ALERT MUST NOT REACH THEM.
- *
- * `approveAlert` and `actOnAlert` move a pretend cash balance and write a
- * SimTrade. In live mode the browser never calls them — it opens the real swap
- * dialog and closes the alert through POST /api/alerts/:id/executed, which
- * records the on chain transaction and touches no simulated ledger. But the
- * endpoints stayed reachable by any signed-in caller regardless of mode, and
- * called with a live alert they stamped a SimTrade `mode: "live"` and adjusted a
- * live cash balance that starts at zero. That is a trade record asserting a real
- * trade happened when nothing touched a chain, sitting in the live history
- * beside ones that did — the trading equivalent of a payment row with no
- * payment, and the same class of defect as LW-075.
- */
 function assertPaperAlert(alert) {
   if (alert && alert.mode === "live") {
     throw httpError(
@@ -378,14 +278,10 @@ function assertPaperAlert(alert) {
   }
 }
 
-// ---- portfolio -------------------------------------------------------------
-
 async function loadOrCreatePortfolio(userId, mode = "paper") {
   const book = mode === "live" ? "live" : "paper";
   let portfolio = await Portfolio.findOne({ userId, mode: book });
   if (!portfolio) {
-    // A live book starts empty. Seeding it with the paper starting cash would
-    // put a million naira of imaginary money next to real holdings.
     portfolio = await Portfolio.create({
       userId,
       mode: book,
@@ -395,9 +291,6 @@ async function loadOrCreatePortfolio(userId, mode = "paper") {
   return portfolio;
 }
 
-/**
- * Compute the user's sim portfolio with live (cached) values and total P/L.
- */
 async function getPortfolio(userId, mode = "paper") {
   const portfolio = await loadOrCreatePortfolio(userId, mode);
   const holdings = portfolio.holdings || [];
@@ -424,16 +317,6 @@ async function getPortfolio(userId, mode = "paper") {
   const cashBalance = portfolio.cashBalance;
   const totalValue = cashBalance + holdingsValue;
 
-  /**
-   * THE BASELINE IS THE BOOK'S OWN STARTING CASH, not the practice one.
-   *
-   * `totalValue - STARTING_CASH` was applied to every book, and STARTING_CASH is
-   * the million dollars the PRACTICE account opens with. `loadOrCreatePortfolio`
-   * deliberately opens a live book at zero, so a live-mode user was reported as
-   * down one million dollars — a figure that was then handed to the AI as
-   * context, which would happily discuss a catastrophic loss that never
-   * happened.
-   */
   const startingCash = portfolio.mode === "live" ? 0 : STARTING_CASH;
   const totalPnl = totalValue - startingCash;
 
@@ -448,25 +331,6 @@ async function getPortfolio(userId, mode = "paper") {
   };
 }
 
-/**
- * Approve an alert -> create a SimTrade and update the Portfolio per section 2a.
- * Throws with a status code on invalid states. Returns { alert, trade, portfolio }.
- */
-/**
- * Act on an alert with a side and an amount BOTH chosen by the user.
- *
- * The agent's `suggestion` is advisory: the user may buy when it suggested sell,
- * or the reverse. Whatever they choose is recorded on the alert alongside the
- * suggestion, so history shows recommendation vs decision.
- *
- * Amount is validated HERE, server-side — never trusted from the client:
- *   buy  — quote value may not exceed available cash
- *   sell — token qty may not exceed the held position
- *
- * @param {string} userId
- * @param {object} alert   pending Alert document
- * @param {{ action:"buy"|"sell", amount:number, denom:"token"|"quote" }} intent
- */
 async function actOnAlert(userId, alert, intent) {
   if (alert.status !== "pending") {
     throw httpError(409, `Alert is already ${alert.status}`);
@@ -485,7 +349,6 @@ async function actOnAlert(userId, alert, intent) {
 
   const portfolio = await loadOrCreatePortfolio(userId, alert.mode || "paper");
 
-  // Current price: live if available, else the price captured on the alert.
   const row = await getPrice(alert.coinId);
   const price =
     (row && row.usd) || Number(alert.priceAtAlert) || 0;
@@ -493,8 +356,6 @@ async function actOnAlert(userId, alert, intent) {
     throw httpError(400, `No price available for ${alert.symbol} right now`);
   }
 
-  // Normalise the amount to BOTH denominations so validation and the trade
-  // record agree regardless of which unit the user typed in.
   const denom = intent.denom === "quote" ? "quote" : "token";
   const qty = denom === "quote" ? rawAmount / price : rawAmount;
   const value = denom === "quote" ? rawAmount : rawAmount * price;
@@ -537,7 +398,6 @@ async function actOnAlert(userId, alert, intent) {
 
     portfolio.cashBalance += qty * price;
     holding.qty -= qty;
-    // Selling out completely removes the position rather than leaving dust.
     if (holding.qty <= 1e-12) portfolio.holdings.splice(idx, 1);
   }
 
@@ -562,8 +422,6 @@ async function actOnAlert(userId, alert, intent) {
   alert.actedAt = new Date();
   await alert.save();
 
-  // The SAME book the trade was written to. Without the mode this returned
-  // the paper portfolio for a live alert, so the screen redrew the wrong one.
   const enrichedPortfolio = await getPortfolio(userId, alert.mode || "paper");
   return { alert, trade, portfolio: enrichedPortfolio };
 }
@@ -574,7 +432,7 @@ async function approveAlert(userId, alert) {
   }
   assertPaperAlert(alert);
 
-  const side = alert.suggestion; // "buy" | "sell" | "hold"
+  const side = alert.suggestion;
   const portfolio = await loadOrCreatePortfolio(userId, alert.mode || "paper");
   let trade = null;
 
@@ -589,7 +447,7 @@ async function approveAlert(userId, alert) {
     }
     if (!price || price <= 0) throw httpError(400, "No price available for buy");
 
-    const spend = portfolio.cashBalance * TRADE_FRACTION; // never exceeds cash
+    const spend = portfolio.cashBalance * TRADE_FRACTION;
     const qty = spend / price;
 
     portfolio.cashBalance -= spend;
@@ -630,7 +488,7 @@ async function approveAlert(userId, alert) {
     const currentPrice =
       (row && row.usd) || Number(alert.priceAtAlert) || holding.avgBuyPrice;
 
-    const qty = holding.qty; // full holding
+    const qty = holding.qty;
     const proceeds = qty * currentPrice;
     portfolio.cashBalance += proceeds;
     portfolio.holdings.splice(idx, 1);
@@ -646,7 +504,6 @@ async function approveAlert(userId, alert) {
       approvedByUser: true,
     });
   }
-  // side === "hold" -> no trade, just approve
 
   await portfolio.save();
 
@@ -657,19 +514,11 @@ async function approveAlert(userId, alert) {
   return { alert, trade, portfolio: enrichedPortfolio };
 }
 
-// ---- no-AI fallback helpers -----------------------------------------------
-
-/**
- * Parse simple "watch <SYMBOL> [drop|rise] <n>%" commands (and comma lists like
- * "watch ETH, SOL"). Returns an array of { symbol, type, value }. Empty array if
- * the message is not a watch command (treated as a question).
- */
 function parseWatchCommand(message) {
   if (!message || !/watch/i.test(message)) return [];
 
   const lower = message.toLowerCase();
 
-  // Detect a condition: "drop 5%" / "rise 2 %" / "down 3%"
   let type = null;
   let value = null;
   const condMatch = lower.match(/\b(drop|down|fall|rise|up|gain)\b[^\d]*(\d+(?:\.\d+)?)\s*%?/);
@@ -679,7 +528,6 @@ function parseWatchCommand(message) {
     value = Number(condMatch[2]);
   }
 
-  // Extract candidate symbols (uppercase tokens or known symbols).
   const tokens = message
     .replace(/[,/]/g, " ")
     .split(/\s+/)
@@ -702,16 +550,6 @@ function parseWatchCommand(message) {
   return results;
 }
 
-/**
- * Build a plain-text portfolio/status summary for the no-AI fallback.
- *
- * THE BOOK IS RESOLVED FROM THE USER, not defaulted to paper. The mode argument
- * was optional and defaulted through `getPortfolio` to the practice book, so a
- * person trading real money who asked "how is my portfolio doing" was answered
- * with their imaginary one — same shape as LW-075, at a call site that fix did
- * not reach. The caller passes no mode, so the answer has to be looked up here
- * rather than assumed, and the summary now says which book it is describing.
- */
 async function buildPortfolioSummaryText(userId, mode) {
   let book = mode === "live" || mode === "paper" ? mode : null;
   if (!book) {

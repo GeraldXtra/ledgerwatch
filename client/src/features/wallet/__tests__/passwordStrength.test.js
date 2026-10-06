@@ -1,21 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { assessWalletPassword, MIN_WALLET_PASSWORD } from "../passwordStrength";
 
-/**
- * The gate on the one password in this product that cannot be reset.
- *
- * `docs/SECURITY.md` B1 requires a minimum above 8 and a strength check, because
- * the keystore ciphertext lives in localStorage and is attacked offline, where
- * there is no rate limit and no lockout. These assert the rules hold rather than
- * the wording of any particular message.
- */
 describe("assessWalletPassword", () => {
   it("sets the floor above the old eight-character rule", () => {
     expect(MIN_WALLET_PASSWORD).toBeGreaterThan(8);
   });
 
   it("refuses anything under the floor, however varied", () => {
-    // The old gate accepted every one of these.
     for (const p of ["Passw0rd", "aB3!xY9z", "Tr0ub4dr", "9$Kq2Lm!"]) {
       const v = assessWalletPassword(p);
       expect(v.ok, `${p} should be refused`).toBe(false);
@@ -65,13 +56,10 @@ describe("assessWalletPassword", () => {
     const ctx = { email: "adaeze@example.com", name: "Adaeze Okonkwo" };
     expect(assessWalletPassword("adaeze-my-wallet-key", ctx).ok).toBe(false);
     expect(assessWalletPassword("okonkwo trading ledger", ctx).ok).toBe(false);
-    // The same password without that context is fine, so the rule is about the
-    // account and not about the words.
     expect(assessWalletPassword("okonkwo trading ledger").ok).toBe(true);
   });
 
   it("ignores a context whose values are too short to be meaningful", () => {
-    // A three-letter name must not blocklist every password containing it.
     const v = assessWalletPassword("copper harbour violin", { name: "Ada" });
     expect(v.ok).toBe(true);
   });

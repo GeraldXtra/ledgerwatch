@@ -6,32 +6,11 @@ import AuthPage from "./pages/AuthPage";
 import Dashboard from "./pages/Dashboard";
 import ReceivablesPage from "./features/receivables/ReceivablesPage";
 
-// Wallet pulls in ethers + qrcode — code-split so those load only on demand.
 const WalletPage = lazy(() => import("./features/wallet/WalletPage"));
 
-/**
- * MARKET WATCH IS SPLIT TOO. (LW-046, BUILD_PLAN P7-3.)
- *
- * It was the last large static import, and it is the heaviest thing in the app
- * after the wallet: recharts for the charts, ethers and the whole DEX layer for
- * live trading, the quoter and the router encoding. All of that was in the main
- * chunk, so it was downloaded by every visitor to the FRONT PAGE — before
- * signing in, and whether or not they ever open Market Watch.
- *
- * Receivables stays static on purpose: it is the app's default route
- * (`/app/*` redirects to it), so splitting it would only add a round trip
- * before the first screen anybody sees.
- */
 const MarketWatchPage = lazy(() => import("./features/market/MarketWatchPage"));
 
-/**
- * Settings too: it reaches into the keystore for the backup and reveal panels,
- * and carries the avatar cropper. Nobody lands on it, so nothing is lost by
- * fetching it when it is opened.
- */
 const SettingsPage = lazy(() => import("./pages/Settings"));
-// The guide, the policy pages and the contact form carry a lot of text that
-// the app itself never needs. Split, so signing in does not download it.
 const DocsPage = lazy(() => import("./pages/DocsPage"));
 const LegalPage = lazy(() => import("./pages/LegalPage"));
 const ContactPage = lazy(() => import("./pages/ContactPage"));
@@ -63,15 +42,12 @@ function Booting() {
   );
 }
 
-/** Signed-in users skip the public pages and land in the app. */
 function PublicOnly({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <Booting />;
   return user ? <Navigate to="/app" replace /> : children;
 }
 
-/** A code-split public page. The wait is a moment, so the fallback is quiet:
-    a reader of the guide has no "workspace" to load. */
 function Public({ children }) {
   return (
     <Suspense
@@ -86,7 +62,6 @@ function Public({ children }) {
   );
 }
 
-/** The dashboard requires a session. */
 function RequireAuth({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <Booting />;
@@ -113,19 +88,11 @@ export default function App() {
             </PublicOnly>
           }
         />
-        {/* The user guide. Public, so someone deciding whether to sign up can
-            read how the product works, and reachable signed in, from the Help
-            icon and the footer. */}
         <Route path="/docs" element={<Public><DocsPage /></Public>} />
         <Route path="/docs/:slug" element={<Public><DocsPage /></Public>} />
-        {/* The policy, the terms and the contact form. Public for the same
-            reason as the guide, and reachable from every footer. */}
         <Route path="/privacy" element={<Public><LegalPage which="privacy" /></Public>} />
         <Route path="/terms" element={<Public><LegalPage which="terms" /></Public>} />
         <Route path="/contact" element={<Public><ContactPage /></Public>} />
-        {/* The shell renders sidebar + topbar and an <Outlet> for the section, so
-            each tab gets a real shareable URL and /app/settings can exist. Each
-            page's own data flow is unchanged. */}
         <Route
           path="/app"
           element={

@@ -24,11 +24,6 @@ import { fetchPaymentAddresses } from "./cryptoApi";
 import { hasWallet } from "../wallet/keystore";
 import { useAuth } from "../../context/AuthContext";
 
-// Lazy, on purpose. This modal reaches ethers (for HD derivation) and qrcode,
-// which together are the largest dependency in the app. Importing it eagerly
-// pulls both into the main bundle, so every user would download the crypto
-// stack just to open the dashboard — the wallet is code-split for exactly this
-// reason. cryptoApi itself is a plain http wrapper and stays eager.
 const CryptoPaymentModal = lazy(() => import("./CryptoPaymentModal"));
 
 function kpis(debts) {
@@ -39,7 +34,6 @@ function kpis(debts) {
   return { totalOutstanding, overdue, collected, activeDebtors };
 }
 
-// Client-side sort so both asc (key_asc) and desc (key) work over the loaded list.
 const SORT_CMP = {
   amount: (a, b) => a.amount - b.amount,
   balance: (a, b) => (a.balance ?? a.amount) - (b.balance ?? b.amount),
@@ -56,9 +50,6 @@ function sortDebts(debts, sort) {
   return asc ? out : out.reverse();
 }
 
-// `onLedgerChanged` is called after anything that moves money, so the figures
-// rail at the top of the page can restate itself instead of showing the numbers
-// it read when the page first loaded.
 export default function DebtsPanel({ onLedgerChanged }) {
   const toast = useToast();
   const { user } = useAuth();
@@ -79,20 +70,9 @@ export default function DebtsPanel({ onLedgerChanged }) {
   const [reminder, setReminder] = useState(null);
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  // Crypto payment addresses. `cryptoIds` drives the ledger indicator, so the
-  // table can show which invoices are awaiting a stablecoin payment without
-  // anyone having to open each one. `cryptoKey` bumps to re-read after an
-  // address is issued or revoked.
-  //
-  // A Map rather than a Set: the chip used to print the literal "USDC" for every
-  // row, and an invoice can be issued in USDT wherever a verified contract
-  // exists. The symbol the payer was actually told to send is carried alongside
-  // the id so the ledger never names the wrong token.
   const [cryptoDebt, setCryptoDebt] = useState(null);
   const [cryptoIds, setCryptoIds] = useState(() => new Map());
   const [cryptoKey, setCryptoKey] = useState(0);
-  // Set when Generate Reminder had to issue an address first, so the reminder can
-  // be generated as soon as that address exists.
   const [remindAfterAddress, setRemindAfterAddress] = useState(null);
 
   const debounceRef = useRef(null);
@@ -115,29 +95,17 @@ export default function DebtsPanel({ onLedgerChanged }) {
     }
   }, [search, status, from, to]);
 
-  /**
-   * Reload the ledger AND tell the page the figures moved.
-   *
-   * Deliberately separate from `load`, which also runs on every debounced
-   * keystroke in the search box: typing changes what is listed, not what is
-   * owed, and refetching the analytics on each keystroke would be a request per
-   * search with no new information in it.
-   */
   const reloadAll = useCallback(async () => {
     await load();
     if (onLedgerChanged) onLedgerChanged();
   }, [load, onLedgerChanged]);
 
-  // Debounce search; other filters apply immediately.
   useEffect(() => {
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(debounceRef.current);
   }, [load, search]);
 
-  // Which invoices have a live payment address. Deliberately independent of
-  // `load` so retyping in the search box does not refetch it, and silent on
-  // failure — the indicator is a convenience and must never break the ledger.
   useEffect(() => {
     let active = true;
     fetchPaymentAddresses()
@@ -156,13 +124,11 @@ export default function DebtsPanel({ onLedgerChanged }) {
     };
   }, [cryptoKey]);
 
-  // --- sorting toggles asc/desc via a "_asc" suffix (client-side) ---
   function onSort(key) {
     setSort((cur) => (cur === key ? `${key}_asc` : key));
   }
   const sortedDebts = useMemo(() => sortDebts(debts, sort), [debts, sort]);
 
-  // --- selection ---
   function toggle(id) {
     setSelected((s) => {
       const next = new Set(s);
@@ -175,7 +141,6 @@ export default function DebtsPanel({ onLedgerChanged }) {
   }
   const clearSel = () => setSelected(new Set());
 
-  // --- actions ---
   async function createDebt(payload) {
     await http.post("/api/debts", payload);
     setAdding(false);
@@ -187,14 +152,6 @@ export default function DebtsPanel({ onLedgerChanged }) {
     await reloadAll();
   }
   async function deleteDebt(debt) {
-    /**
-     * The old wording named the two harmless consequences and omitted the one
-     * that cannot be undone: the invoice's crypto payment address goes too, and
-     * with it the derivation index, which is the only record of which key
-     * reaches any money sitting at that address. The server now refuses when an
-     * address is still holding a confirmed balance; this says so up front, and
-     * reports the refusal instead of failing silently.
-     */
     if (
       !window.confirm(
         `Delete the invoice for ${debt.debtorName}?
@@ -226,10 +183,6 @@ export default function DebtsPanel({ onLedgerChanged }) {
     await reloadAll();
   }
   async function markPaid(debt) {
-    // This had no error path: a failed request produced an unhandled rejection
-    // and the screen did nothing at all, so the owner pressed the button again.
-    // Marking an invoice paid changes what is owed, and a silent failure leaves
-    // them chasing — or not chasing — on a balance they believe they corrected.
     try {
       await http.patch(`/api/debts/${debt._id}/paid`);
     } catch (err) {
@@ -243,33 +196,14 @@ export default function DebtsPanel({ onLedgerChanged }) {
     toast(`${debt.debtorName}'s debt marked fully paid`, { type: "success" });
     await reloadAll();
   }
-  /**
-   * Generate a reminder, issuing the invoice's crypto payment address first if it
-   * does not have one yet.
-   *
-   * WHY THIS CANNOT BE FULLY AUTOMATIC. The address is derived in the browser from
-   * the wallet's own password on branch m/44'/60'/0'/2/<index>. The server holds no
-   * key and must never hold one, so it cannot mint the address itself and the
-   * reminder endpoint can only attach an address that already exists. Asking for
-   * the password once, here, is the closest this can get to automatic without
-   * breaking the single signing path the whole wallet design rests on.
-   *
-   * Order matters: the address must be saved BEFORE the reminder is generated,
-   * because `generateReminderForDebt` looks up the active address and folds the
-   * payment block into the message at generation time. Generating first would
-   * produce a reminder with no payment details and no way to add them afterwards.
-   */
   async function generateReminder(debt) {
     const wantsCrypto =
-      user?.crypto?.enabled !== false && // account setting, defaults on
-      hasWallet() && // a wallet exists in THIS browser for THIS account
-      !cryptoIds.has(String(debt._id)) && // no active address yet
-      (debt.balance ?? debt.amount) > 0; // nothing to ask for otherwise
+      user?.crypto?.enabled !== false &&
+      hasWallet() &&
+      !cryptoIds.has(String(debt._id)) &&
+      (debt.balance ?? debt.amount) > 0;
 
     if (wantsCrypto) {
-      // Hand off to the issuance modal, which owns the unlock, the atomic index
-      // allocation and the derivation. Remember the debt so the reminder is
-      // generated the moment the address lands.
       setRemindAfterAddress(debt);
       setCryptoDebt(debt);
       return;
@@ -283,8 +217,6 @@ export default function DebtsPanel({ onLedgerChanged }) {
       setReminder({ debt, result: data });
       await load();
     } catch (err) {
-      // This had no error path at all: a failure produced an unhandled rejection
-      // and the user saw nothing happen.
       toast(err?.response?.data?.error || "Could not generate the reminder.", { type: "error" });
     }
   }
@@ -296,15 +228,6 @@ export default function DebtsPanel({ onLedgerChanged }) {
     }
     setBulkBusy(true);
     let ok = 0;
-    /**
-     * EVERY FAILURE USED TO BE SWALLOWED AND THE RESULT ANNOUNCED IN GREEN.
-     *
-     * The loop counted successes, ignored every rejection, and then raised a
-     * success toast built from that count — so with the server unreachable the
-     * owner was congratulated with "Generated 0 reminders" and reasonably
-     * concluded the work was done. The failures are counted and named now, and
-     * the tone follows the outcome: green only when every one went through.
-     */
     let failed = 0;
     let firstError = "";
     for (const d of targets) {
@@ -478,9 +401,6 @@ export default function DebtsPanel({ onLedgerChanged }) {
             const pending = remindAfterAddress;
             setCryptoDebt(null);
             setRemindAfterAddress(null);
-            // Cancelling the address must not silently cancel the reminder the
-            // user actually asked for. Generate it without the payment block and
-            // say why it is missing, rather than appearing to do nothing.
             if (pending) {
               toast("Reminder drafted without payment details, because no address was issued.", { type: "info" });
               doGenerateReminder(pending);
@@ -493,14 +413,10 @@ export default function DebtsPanel({ onLedgerChanged }) {
             setRemindAfterAddress(null);
             setCryptoKey((k) => k + 1);
             if (pending) {
-              // Straight on to the reminder. The address now exists, so generation
-              // folds the payment block into the message.
               toast("Payment address created. Drafting the reminder.", { type: "success" });
               doGenerateReminder(pending);
               return;
             }
-            // Land back on the invoice so the new address, QR and amount are
-            // there to read immediately rather than being hunted for.
             setDetailId(id);
             toast("Payment address created. Share it with your client.", { type: "success" });
           }}
@@ -514,7 +430,6 @@ export default function DebtsPanel({ onLedgerChanged }) {
   );
 }
 
-// Local helper: a row of skeleton blocks for the KPI row.
 function SkeletonBlockRow() {
   return (
     <>

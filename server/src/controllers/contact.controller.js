@@ -3,26 +3,6 @@ const ContactMessage = require("../models/ContactMessage");
 const { sendEmail, normalizeFrom } = require("../services/notify.service");
 const { verifyTurnstile } = require("../services/turnstile.service");
 
-/**
- * POST /api/contact
- *
- * The public Contact page. Anyone may write, signed in or not, so every input
- * is treated as hostile: lengths are capped before anything is looked at, the
- * topic is an allowlist, the human check is the same Turnstile exchange the
- * sign in form uses, and the route is rate limited per address.
- *
- * Two things are refused on purpose:
- *
- *   1. A HONEYPOT. The form carries a hidden `extra` field that a person
- *      never sees and a bot fills in. A submission with it set is answered
- *      with success and stored nowhere, so the bot learns nothing.
- *
- *   2. SECRETS. A message that contains what looks like a private key or a
- *      recovery phrase is refused with an explanation. Nobody at LedgerWatch
- *      ever needs either, a support inbox is the last place they should sit,
- *      and a person who pastes one has usually been told to by somebody else.
- */
-
 const TOPIC_LABEL = {
   payment: "A payment or an invoice",
   wallet: "The wallet",
@@ -48,12 +28,6 @@ function esc(s) {
   );
 }
 
-/**
- * The two shapes a wallet secret takes when pasted into a text box. The key
- * pattern is exact. The phrase check is deliberately narrow, a line that is
- * exactly twelve or twenty four short lowercase words and nothing else, so an
- * ordinary sentence about a missing payment is never mistaken for one.
- */
 function containsSecret(message) {
   if (/0x[0-9a-fA-F]{64}/.test(message)) return "a private key";
   for (const line of message.split("\n")) {
@@ -68,34 +42,12 @@ function containsSecret(message) {
   return null;
 }
 
-/**
- * The account behind a Bearer token, when one was sent and it is valid.
- * Attribution only. A bad or missing token does not refuse the message; the
- * page is public and a person locked out of their account is exactly the
- * person who needs this form.
- */
 async function optionalUserId(req) {
   const header = String((req.headers && req.headers.authorization) || "");
   if (!header.startsWith("Bearer ")) return null;
   try {
     const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET);
     if (!payload || !payload.id) return null;
-
-    /**
-     * THE SESSION VERSION IS CHECKED HERE TOO (LW-023).
-     *
-     * Every other authenticated path in this codebase refuses a token whose `v`
-     * is not the account's current `tokenVersion`, which a password change or a
-     * reset bumps. This one verified the signature and stopped, so it was the
-     * single place a session that had been deliberately signed out still spoke
-     * for the account — for up to seven days, until the token expired on its
-     * own. The blast radius is a mislabelled support message and nothing more,
-     * which is exactly why it is worth closing: LW-023 was closed to eliminate
-     * the PATTERN, and one surviving instance is how the pattern comes back.
-     *
-     * Unattributed is the safe answer for every failure here. The page is
-     * public and the message is stored either way.
-     */
 
     const User = require("../models/User");
     const user = await User.findById(payload.id).select("tokenVersion").lean();
@@ -107,7 +59,6 @@ async function optionalUserId(req) {
   }
 }
 
-/** Where a new message is announced. CONTACT_EMAIL, else the sending address. */
 function ownerAddress() {
   const explicit = String(process.env.CONTACT_EMAIL || "").trim();
   if (explicit) return explicit;
@@ -160,23 +111,6 @@ function buildNotice(doc) {
   return { subject, plain, html };
 }
 
-/**
- * WHY THIS WHOLE HANDLER IS WRAPPED.
- *
- * It was the one async route handler in the codebase with no try/catch, and it
- * calls Mongoose (`ContactMessage.create`, `doc.save`), which genuinely throws:
- * a validation error, a duplicate key, a lost connection. Express 4 does not
- * catch a rejected promise from an async handler, and `server/src/index.js`
- * installs no `process.on("unhandledRejection")`, so on Node 15+ the default is
- * to terminate the process.
- *
- * The consequence was out of all proportion to the route: one database blip
- * during a contact-form submission took down the entire API — every user's
- * reminders, payment watching and wallet proxy — until the host restarted it.
- * And `/api/contact` is public and unauthenticated, so it was reachable by
- * anyone. The Bitcoin controller has no try/catch either, but that is backed by
- * a service documented and written never to throw; this one was not.
- */
 async function submit(req, res) {
   try {
     return await submitInner(req, res);
@@ -193,8 +127,6 @@ async function submit(req, res) {
 async function submitInner(req, res) {
   const body = req.body || {};
 
-  // The honeypot. Answered as success on purpose. The field is called
-  // `extra` rather than anything a browser's autofill might recognise.
   if (typeof body.extra === "string" && body.extra.trim()) {
     return res.json({ ok: true });
   }
@@ -236,8 +168,6 @@ async function submitInner(req, res) {
     userAgent,
   });
 
-  // Announce it. A failure here is recorded on the row, never surfaced as a
-  // failure to the person writing: their message is safe either way.
   const to = ownerAddress();
   if (to) {
     const notice = buildNotice(doc);

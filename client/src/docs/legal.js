@@ -1,10 +1,3 @@
-/**
- * The privacy policy and the terms, as the owner wrote them.
- *
- * Kept as data so they read as documents and render through the same blocks
- * as the guide. House style: plain words, first person, no dashes anywhere.
- */
-
 const h2 = (text) => ({ type: "h2", text });
 const p = (text) => ({ type: "p", text });
 const ul = (items) => ({ type: "ul", items });

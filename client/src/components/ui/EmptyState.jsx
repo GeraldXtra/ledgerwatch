@@ -1,7 +1,3 @@
-/**
- * Designed empty state: icon in a soft disc, title, one-line description, and an
- * optional action (button/element).
- */
 export default function EmptyState({ icon, title, hint, action }) {
   return (
     <div className="empty">

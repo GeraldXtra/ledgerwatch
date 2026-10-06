@@ -22,25 +22,11 @@ import {
 } from "./cryptoApi";
 import { agoLabel, ngn, usdc } from "./format";
 
-/**
- * Issue a stablecoin payment address for one invoice.
- *
- * ORDER MATTERS: the password is validated BEFORE an index is allocated.
- * Allocating permanently consumes a derivation index — the counter only ever
- * moves forward and an index is never reused — so allocating first would burn
- * one on every mistyped password. The gap would be harmless but pointless.
- *
- * The address is derived HERE, in the browser, from the decrypted keystore. Only
- * the public address and its index are ever sent to the server.
- */
 export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
   const { user } = useAuth();
-  const [chains, setChains] = useState(null); // null = still loading
-  // "we could not ask" is not "there is none" — see the note on the load below.
+  const [chains, setChains] = useState(null);
   const [chainsError, setChainsError] = useState("");
   const [chainId, setChainId] = useState(null);
-  // Which stablecoin the payer will be told to send. Null means "the chain's
-  // first", which is what the server does with no symbol.
   const [tokenSymbol, setTokenSymbol] = useState(null);
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState("");
@@ -49,9 +35,6 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
   const [error, setError] = useState("");
   const [cannotDerive, setCannotDerive] = useState(false);
 
-  // Checked synchronously: whether a keystore exists at all. Whether it can
-  // DERIVE cannot be known until it is decrypted, so that check happens on
-  // submit — see `cannotDerive`.
   const walletPresent = hasWallet();
 
   useEffect(() => {
@@ -59,15 +42,8 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
     fetchChains()
       .then((list) => {
         if (!active) return;
-        // Only chains with a configured stablecoin can accept an invoice payment.
-        // `tokens` also carries the wrapped native and the tradeable assets, so
-        // it was the wrong list to test: an invoice can only be denominated in a
-        // stablecoin, which is what `stables` is.
         const usable = list.filter((c) => (c.stables || []).length > 0);
         setChains(usable);
-        // The account's chosen default from Settings, then Base Sepolia (the app
-        // default and cheapest to test on), then whatever is enabled. Hardcoding
-        // a chain here would quietly ignore the preference the user just set.
         const preferredId = user?.crypto?.defaultChainId || 84532;
         const preferred =
           usable.find((c) => c.chainId === preferredId) ||
@@ -77,16 +53,6 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
       })
       .catch((err) => {
         if (!active) return;
-        /**
-         * A DROPPED REQUEST USED TO READ AS A CONFIGURATION FACT.
-         *
-         * This was `.catch(() => setChains([]))`, and an empty list renders "No
-         * network with a configured stablecoin is enabled, so an address cannot
-         * be issued" — a definite statement about how the server is set up,
-         * produced by a connection that failed. The owner concludes the feature
-         * is switched off and stops trying. The list is left unknown and the
-         * failure is reported as a failure.
-         */
         setChainsError(
           err?.response?.data?.error ||
             "The list of networks could not be loaded, so no address can be issued right now. This is a connection problem, not a setting. Close this and try again."
@@ -102,19 +68,12 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
     [chains, chainId]
   );
 
-  // Every stablecoin this chain is verified to accept. The registry ships it on
-  // the chain record, so offering the choice costs no extra request.
   const tokens = useMemo(() => (chain && chain.stables) || [], [chain]);
 
-  // A token chosen on one network does not exist on the next. Reset to that
-  // chain's first stablecoin whenever the network changes, so the quote and the
-  // address can never be issued in a token the chain does not carry.
   useEffect(() => {
     setTokenSymbol(tokens.length ? tokens[0].symbol : null);
   }, [tokens]);
 
-  // Re-quote whenever the chain or the token changes. This reserves nothing, so
-  // switching networks to compare is free.
   useEffect(() => {
     if (!chainId || !walletPresent) return;
     let active = true;
@@ -138,18 +97,8 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
     if (!chain) return setError("Choose a network first.");
     if (!password) return setError("Enter your wallet password.");
 
-    // 1. Prove the password works AND that this wallet can derive at all, before
-    //    anything irreversible happens. One unlock, reused below: scrypt is
-    //    deliberately slow, so unlocking twice would double the wait.
-    //
-    //    The unlock gets its OWN try/catch so "that password did not work" is
-    //    said only when the unlock is what failed. Pattern matching over every
-    //    error in one block risks blaming the password for an unrelated failure,
-    //    which is the worst mistake this particular screen could make.
     let master;
     try {
-      // The progress callback matters here: scrypt runs for seconds, and a button
-      // that just says "working" for that long reads as a hang.
       setBusy("Unlocking your wallet");
       master = await unlockWallet(password, (pct) => {
         const done = Math.round((Number(pct) || 0) * 100);
@@ -173,19 +122,11 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
     }
 
     try {
-      // 2. Reserve an index atomically. From here on the index is spent.
       setBusy("Reserving an address");
       const alloc = await allocateIndex(chain.chainId);
 
-      // 3. Derive in the browser. The key exists only inside this call.
       const address = deriveAddressFromWallet(master, alloc.derivationIndex);
 
-      // 4. Send the PUBLIC address up to be recorded against the invoice.
-      //    `tokenSymbol` goes with it: the quote above was priced in this token,
-      //    and without it the server falls back to the chain's FIRST stablecoin.
-      //    On a mainnet that meant a USDT quote could be recorded as a USDC
-      //    address — the payer would be told the USDT figure and the watcher
-      //    would be looking for USDC, so the invoice would never settle.
       setBusy("Saving the address");
       const saved = await createPaymentAddress({
         debtId: debt._id,
@@ -195,24 +136,6 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
         tokenSymbol: tokenSymbol || undefined,
       });
 
-      /**
-       * 5. THE ADDRESS THE SERVER RECORDED MUST BE THE ONE THIS WALLET DERIVED
-       *    (LW-013). It is about to be shown to a payer and printed in every
-       *    reminder. If any layer between here and the database changed a
-       *    character, money sent to it would be unreachable by anyone, so it
-       *    is compared before it is ever displayed, and the mismatch is said.
-       *
-       *    THE CHECK USED TO LEAVE THE DANGEROUS ROW IN PLACE. It threw, and the
-       *    message said "Nothing has been shown to the payer. Revoke it and try
-       *    again" — but the row was already saved with status `active`, so
-       *    `generateReminderForDebt` picked it up and printed it, with the
-       *    amount and the network, in the very next reminder. A mismatched
-       *    address is one nobody holds the key to, so that reminder would have
-       *    sent a real payer's money somewhere unrecoverable. The row is now
-       *    revoked HERE, before anything is said, and the message reports
-       *    whether that succeeded rather than asserting a safety that was never
-       *    performed.
-       */
       const stored = saved && saved.paymentAddress;
       if (
         !stored ||
@@ -226,7 +149,6 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
             await revokePaymentAddress(stored._id);
             revoked = true;
           } catch {
-            /* reported in the message below, never swallowed */
           }
         }
         throw new Error(
@@ -239,15 +161,12 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
       setPassword("");
       onCreated(saved);
     } catch (err) {
-      // The wallet is already open by this point, so nothing here is ever a
-      // password problem. Report what actually went wrong.
       const msg = err?.response?.data?.error || err.message || "";
       setError(msg || "Could not create the payment address.");
       setBusy("");
     }
   }
 
-  // ---- No wallet at all ----
   if (!walletPresent) {
     return (
       <Modal label="Crypto payment" onClose={onClose}>
@@ -276,7 +195,6 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
     );
   }
 
-  // ---- Wallet present but mathematically unable to derive ----
   if (cannotDerive) {
     return (
       <Modal label="Crypto payment" onClose={onClose}>
@@ -320,8 +238,6 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
       <Head onClose={onClose} title={`Crypto payment for ${debt.debtorName}`} />
 
       <div className="row wrap">
-        {/* The network badge that stood here is gone at the owner's request.
-            The chain is named in the quote itself and in the payer's message. */}
         {quote && quote.rateStale && (
           <span className="pill warn">Rate is a fallback, not live</span>
         )}
@@ -348,8 +264,6 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
           </Select>
         </Field>
 
-        {/* Only offered where there is a real choice. On a testnet there is one
-            verified stablecoin, and a select with a single option is noise. */}
         {tokens.length > 1 && (
           <Field label="Token the payer sends">
             <Select
@@ -400,17 +314,7 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
               <div>
                 <dt>Rate used</dt>
                 <dd className="num">
-                  {/* The token the quote is actually priced in, never the
-                      literal "USDC": this dialog can now issue a USDT address,
-                      and a rate labelled with the wrong token is the first step
-                      towards a payer sending the wrong one. */}
                   {ngn(quote.ngnPerUsd)} per {(quote.token && quote.token.symbol) || "USDC"}
-                  {/* A FALLBACK RATE IS NOT A FRESH ONE. When the price feed is
-                      unreachable the server quotes from NGN_PER_USD_FALLBACK and
-                      stamps the timestamp `now`, so this line used to read "just
-                      now" for a hardcoded constant. The quote is then frozen into
-                      the invoice for life, so the whole gap between that constant
-                      and the market is absorbed by the business. Say which it is. */}
                   <span className="quote-sub">
                     {quote.rateStale ? "fallback rate, not live" : agoLabel(quote.rateTimestamp)}
                   </span>

@@ -14,7 +14,6 @@ const TL_ICON = {
 };
 
 function BehaviourChart({ timeline }) {
-  // Cumulative collected over time from payment events.
   const data = useMemo(() => {
     let cum = 0;
     return timeline
@@ -57,10 +56,6 @@ function BehaviourChart({ timeline }) {
   );
 }
 
-/**
- * Debtor profile modal: header with reliability, cumulative-collected chart,
- * a chronological timeline, and a link to the printable statement.
- */
 export default function DebtorProfile({ debtorKey, onClose }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
@@ -82,7 +77,6 @@ export default function DebtorProfile({ debtorKey, onClose }) {
       const { data } = await http.get(`/api/debtors/${encodeURIComponent(debtorKey)}/statement`);
       setStatement(data.statement);
     } catch {
-      /* ignore */
     }
   }
 

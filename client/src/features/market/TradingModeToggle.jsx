@@ -6,17 +6,6 @@ import { useAuth } from "../../context/AuthContext";
 import { hasWallet } from "../wallet/keystore";
 import { setTradingMode } from "../wallet/walletApi";
 
-/**
- * Paper vs live trading.
- *
- * PAPER IS THE DEFAULT FOR EVERYONE, including accounts that could trade live.
- * It is how somebody tries the agent before risking anything, so it is never
- * gated, never degraded, and needs no wallet.
- *
- * Live mode is opted into deliberately. The demo account is refused by the
- * SERVER — this component hides the control as a courtesy, but the rejection
- * that matters happens in the API, because the demo credentials are published.
- */
 export default function TradingModeToggle({ mode, onChange }) {
   const { user, applyUser } = useAuth();
   const toast = useToast();
@@ -90,10 +79,6 @@ export default function TradingModeToggle({ mode, onChange }) {
           and it becomes available here.
         </p>
       )}
-
-      {/* The persistent "live mode spends real funds" note is gone at the
-          owner's request. The toast on switching still says it once, and every
-          trade is still quoted, checked and signed individually. */}
     </div>
   );
 }

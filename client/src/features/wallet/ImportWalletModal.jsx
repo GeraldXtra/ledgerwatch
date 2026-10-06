@@ -12,13 +12,9 @@ import { saveAddress } from "./walletApi";
 import { assessWalletPassword } from "./passwordStrength";
 import { useAuth } from "../../context/AuthContext";
 
-/**
- * Import an existing wallet from a recovery phrase or a private key, then encrypt it
- * with a password and store only the ciphertext (same guarantee as create).
- */
 export default function ImportWalletModal({ onClose, onDone }) {
   const { user } = useAuth();
-  const [mode, setMode] = useState("phrase"); // phrase | key | keystore
+  const [mode, setMode] = useState("phrase");
   const [secret, setSecret] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -37,15 +33,7 @@ export default function ImportWalletModal({ onClose, onDone }) {
       );
     }
     if (!password) return setError("Enter the password.");
-    /**
-     * A keystore already HAS a password — the one it was encrypted with. Asking
-     * the user to invent a new one and confirm it would be nonsense, and getting
-     * it wrong would produce a file they cannot open. So the confirm step, and
-     * the minimum length, apply only when a NEW encryption password is being set.
-     */
     if (mode !== "keystore") {
-      // Same gate as creating a wallet: this password encrypts the imported key
-      // on this device and is never recoverable.
       const verdict = assessWalletPassword(password, { email: user?.email, name: user?.name });
       if (!verdict.ok) return setError(verdict.reason);
       if (password !== confirm) return setError("Passwords do not match.");
@@ -56,9 +44,6 @@ export default function ImportWalletModal({ onClose, onDone }) {
       let wallet;
       let address;
       if (mode === "keystore") {
-        // Decrypting here also PROVES the password is right before anything is
-        // stored — an imported keystore that cannot be opened is worse than a
-        // failed import, because it looks like a working wallet.
         ({ wallet, address } = await importFromKeystore(secret, password, (p) =>
           setProgress(Math.round(p * 100))
         ));
@@ -85,7 +70,6 @@ export default function ImportWalletModal({ onClose, onDone }) {
     }
   }
 
-  /** Read an uploaded .json keystore into the same field a paste would fill. */
   function onFile(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -120,15 +104,6 @@ export default function ImportWalletModal({ onClose, onDone }) {
           ]}
         />
 
-        {/* THE COST OF THE MIDDLE OPTION, SAID WHERE THE CHOICE IS MADE.
-            A wallet imported from a bare private key cannot derive anything: no
-            per-invoice payment addresses, which is the whole point of the
-            receivables feature, and no Bitcoin, because both need the seed a
-            lone secp256k1 scalar does not carry. That wording already existed in
-            derivation.js and in bitcoin/derivation.js, but it was only ever
-            shown at signing time — so the limitation was discovered later, on an
-            invoice, with a "re-import it using your recovery phrase" message.
-            The keystore tab explained itself and this one offered "0x…". */}
         {mode === "key" && (
           <p className="inline-warn">
             A private key is one account and carries no seed, so a wallet
@@ -174,9 +149,6 @@ export default function ImportWalletModal({ onClose, onDone }) {
             style={{ resize: "vertical", fontFamily: "inherit" }}
           />
         </Field>
-        {/* A keystore brings its own password, so there is nothing to confirm —
-            asking would invite the user to "set" a password the file does not
-            have and then wonder why it will not open. */}
         <div className={mode === "keystore" ? "" : "grid2"}>
           <Field label={mode === "keystore" ? "Keystore password" : "Password"}>
             <Input

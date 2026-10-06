@@ -3,9 +3,6 @@ import { Button, Modal, StatusPill } from "../../components/ui";
 import { ngn, shortDate, dateTime, METHOD_LABEL } from "./format";
 import { downloadCsv } from "./csv";
 
-/**
- * Printable statement of all a debtor's debts + payments, with CSV export.
- */
 export default function DebtorStatement({ statement, onClose }) {
   const { businessName, debtor, debts, totals, generatedAt } = statement;
 

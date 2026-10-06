@@ -1,77 +1,29 @@
 const axios = require("axios");
 
-/**
- * CoinGecko data layer — ONE shared cache used by BOTH the automation loop and the
- * API routes (section 4a). The browser may poll often; the server serves from cache
- * and only refreshes from CoinGecko when a per-endpoint TTL expires. A single-flight
- * guard collapses concurrent identical refreshes into one upstream call. On 429 or
- * any failure we serve stale cache, flag `stale:true`, log once (throttled), and
- * never throw.
- */
 const TIMEOUT = 9000;
 
-/**
- * TTLs, AND WHY THEY ARE NOT CONSTANTS ANY MORE.
- *
- * These were tuned for a laptop with a developer's own allowance. In production
- * the browser polls /api/markets every ten seconds, so a 45 second markets TTL
- * is about eighty upstream calls an hour for that endpoint alone, before charts,
- * logos, coin search and the invoice rate. An authenticated key absorbs that
- * comfortably. A keyless request does not: the free allowance is per IP, it is
- * small, and on a shared datacenter IP most of it is already spent by somebody
- * else before this app asks for anything.
- *
- * So when there is no key the TTLs widen. That is not a degraded mode for its
- * own sake — it is the difference between a cache that refills and one that gets
- * refused on every attempt and therefore stays empty, which is what makes every
- * price, logo and chart blank at once. A price a couple of minutes old beats no
- * price at all, and a chart is historical data that barely moves.
- *
- * Set COINGECKO_API_KEY and the tighter numbers apply automatically.
- */
 const KEYLESS_TTL_FACTOR = 4;
 
 function ttlFactor() {
   return cgConfig().keyed ? 1 : KEYLESS_TTL_FACTOR;
 }
 
-const BASE_MARKETS_TTL = 45 * 1000; // 45s keyed, 3 min keyless
-const BASE_CHART_TTL = 5 * 60 * 1000; // 5 min keyed, 20 min keyless
-const BASE_SEARCH_TTL = 10 * 60 * 1000; // 10 min keyed, 40 min keyless
+const BASE_MARKETS_TTL = 45 * 1000;
+const BASE_CHART_TTL = 5 * 60 * 1000;
+const BASE_SEARCH_TTL = 10 * 60 * 1000;
 
 const marketsTtl = () => BASE_MARKETS_TTL * ttlFactor();
 const chartTtl = () => BASE_CHART_TTL * ttlFactor();
 const searchTtl = () => BASE_SEARCH_TTL * ttlFactor();
 
-/**
- * Exported for callers that report cache age. These keep the keyed values so a
- * consumer's arithmetic does not change shape; the live TTL is read through the
- * functions above.
- */
 const MARKETS_TTL = BASE_MARKETS_TTL;
 const CHART_TTL = BASE_CHART_TTL;
 const SEARCH_TTL = BASE_SEARCH_TTL;
 
-// ---- caches ---------------------------------------------------------------
-const marketsCache = new Map(); // coinId -> { data, ts }
-const chartCache = new Map(); //  "id:days" -> { data, ts }
-const searchCache = new Map(); // q(lower) -> { data, ts }
+const marketsCache = new Map();
+const chartCache = new Map();
+const searchCache = new Map();
 
-/**
- * EVERY CACHE IN THIS FILE IS BOUNDED. None of them used to be.
- *
- * Nothing here ever removed an entry — a stale one was overwritten on the next
- * lookup of the same key and otherwise stayed for the life of the process. The
- * search cache was the worst of them, because its key is whatever text a user
- * typed, so every distinct search anybody had ever run was retained for ever.
- * On an always-on host, memory that only grows eventually restarts the process
- * that runs the payment watcher, which is a money-path failure arriving by a
- * route nobody would connect to a coin search box.
- *
- * The caps are generous — the point is a ceiling, not tight accounting. Deleting
- * before setting moves a refreshed key to the end of the insertion order, so the
- * entry evicted is always the least recently written one.
- */
 const MAX_MARKETS_ENTRIES = 2000;
 const MAX_CHART_ENTRIES = 500;
 const MAX_SEARCH_ENTRIES = 500;
@@ -90,8 +42,7 @@ function cacheSet(cache, key, value, max) {
   }
 }
 
-// ---- single-flight --------------------------------------------------------
-const inFlight = new Map(); // key -> Promise
+const inFlight = new Map();
 function singleFlight(key, fn) {
   if (inFlight.has(key)) return inFlight.get(key);
   const p = (async () => {
@@ -105,23 +56,7 @@ function singleFlight(key, fn) {
   return p;
 }
 
-// ---- throttled error logging (log once per ~60s, not per request) ---------
-/**
- * ONE TIMESTAMP PER SCOPE. It used to be one timestamp for the whole file.
- *
- * Six unrelated lookups call this — markets, chart, search, asset_platforms,
- * coin platforms and the naira rate — and they shared a single minute. Whichever
- * failed first took the slot, so a chart failing constantly meant a completely
- * separate failure of the NGN rate was never printed at all, and the person
- * reading the log concluded the chart was the only problem. The naira rate is
- * the number an invoice's payment amount is calculated from, so hiding its
- * failure behind a decorative chart is the worst possible pairing.
- *
- * ARCHITECTURE.md section 7.3 names this exact anti-pattern: per-scope throttles,
- * "never one global throttle shared by four subsystems". The suppressed count
- * rides along so a storm still reads as a storm.
- */
-const lastErrorLogAt = new Map(); // scope -> { at, suppressed }
+const lastErrorLogAt = new Map();
 const ERROR_LOG_THROTTLE_MS = 60000;
 
 function logError(scope, err) {
@@ -136,14 +71,6 @@ function logError(scope, err) {
   }
   lastErrorLogAt.set(scope, { at: now, suppressed: 0 });
 
-  /**
-   * A pause is not a failure and must not be reported as one.
-   *
-   * When the breaker is open, cgGet throws without going near the network. Left
-   * to the line below, that would print "CoinGecko markets failed: paused for
-   * 240s" once a minute, which reads as the upstream refusing us again and
-   * hides the fact that the ORIGINAL refusal is the thing to fix.
-   */
   if (err && err.cgPaused) {
     console.warn(`CoinGecko ${scope} skipped — ${err.message}. Serving cached data.`);
     return;
@@ -155,9 +82,6 @@ function logError(scope, err) {
       err ? err.message : "unknown"
     } — serving cached data`
   );
-  // The single most common cause in production, and not guessable from the
-  // status alone, so it is said out loud next to the failure rather than left
-  // for somebody to rediscover.
   if (isRefusal(status) && !cgConfig().keyed) {
     console.error(
       "CoinGecko refused an unauthenticated request. Hosted IPs are rate limited " +
@@ -168,29 +92,6 @@ function logError(scope, err) {
   }
 }
 
-// ---- upstream transport ----------------------------------------------------
-
-/**
- * THE ONE PLACE THIS PROCESS TALKS TO COINGECKO.
- *
- * WHY THIS EXISTS. Every call used to be a bare `axios.get` against
- * `api.coingecko.com` with no API key. That works from a laptop and fails on a
- * host: CoinGecko rate limits the keyless endpoint hard, and shared datacenter
- * IPs (Render, Railway, Fly, Vercel, AWS) burn the quota long before this app
- * asks for anything. The failure was invisible in exactly the way section 12
- * warns about, because every caller swallows its own error and serves cache —
- * and on a fresh deploy the cache is EMPTY, so "serve stale" served nothing.
- *
- * The visible symptom was the whole market surface going dark at once: no live
- * price, no coin logos (they are the `image` field of the same markets row), no
- * chart, and no coin search. Four separate-looking bugs, one cause.
- *
- * Set COINGECKO_API_KEY. A demo key goes to api.coingecko.com with the
- * `x-cg-demo-api-key` header; a Pro key needs COINGECKO_PLAN=pro, which switches
- * the host to pro-api.coingecko.com and the header to `x-cg-pro-api-key`.
- * Sending a demo key to the pro host, or the reverse, is a 401 — hence one
- * function deciding both together rather than two settings that can disagree.
- */
 function cgConfig() {
   const key = String(process.env.COINGECKO_API_KEY || "").trim();
   const pro = String(process.env.COINGECKO_PLAN || "").trim().toLowerCase() === "pro";
@@ -208,33 +109,18 @@ function cgConfig() {
       };
 }
 
-/**
- * A CIRCUIT BREAKER, because retrying a 429 is what turns a slow hour into a
- * dead one.
- *
- * There was no 429 handling at all. Under a sustained rate limit every request
- * from every browser tab, plus the automation loop, kept hammering the endpoint
- * that was already refusing us — which is precisely how a temporary limit
- * becomes a permanent one. When CoinGecko says no, we stop asking until it is
- * plausibly worth asking again, and serve cache in the meantime.
- *
- * `Retry-After` is honoured when sent, because it is the upstream telling us the
- * answer; otherwise the wait doubles from 15s to a 5 minute ceiling. Any success
- * clears it, so recovery is immediate rather than waiting out the last backoff.
- */
 const MIN_BACKOFF_MS = 15 * 1000;
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
 let blockedUntil = 0;
 let backoffMs = 0;
 
-/** Refusals that mean "stop asking", as opposed to a one-off network blip. */
 function isRefusal(status) {
   return status === 429 || status === 401 || status === 403 || status === 451;
 }
 
 function noteFailure(err) {
   const status = err && err.response && err.response.status;
-  if (!isRefusal(status)) return; // a timeout or 5xx is worth retrying next tick
+  if (!isRefusal(status)) return;
   const headers = (err.response && err.response.headers) || {};
   const retryAfter = Number(headers["retry-after"]);
   const wait =
@@ -245,21 +131,7 @@ function noteFailure(err) {
   blockedUntil = Date.now() + wait;
 }
 
-/**
- * The last thing the upstream actually said, so a blank screen can be explained
- * instead of guessed at.
- *
- * Every price, coin logo and chart in this product comes from one provider, and
- * when it stops answering all three go blank at once with nothing on screen or
- * in the API saying why. Diagnosing that from the outside meant reading server
- * logs, which is not available on most hosts and is not something the owner
- * should need. This records the outcome of the most recent call so
- * `GET /api/status` can state the cause in one line.
- *
- * Deliberately holds no URL and no key — only a status code and the provider's
- * own message, both of which are safe to show.
- */
-let lastUpstream = null; // { at, ok, status, message }
+let lastUpstream = null;
 
 function noteUpstream(ok, err) {
   lastUpstream = {
@@ -270,10 +142,6 @@ function noteUpstream(ok, err) {
   };
 }
 
-/**
- * @returns {object} for the boot log, and for GET /api/status, which is how a
- * human finds out why the market screens are empty.
- */
 function cgStatus() {
   const { keyed } = cgConfig();
   const paused = Math.max(0, blockedUntil - Date.now());
@@ -284,10 +152,6 @@ function cgStatus() {
     cachedCoins: marketsCache.size,
     cachedCharts: chartCache.size,
     lastUpstream,
-    /**
-     * The whole diagnosis in one sentence, because the fields above still need
-     * somebody to know what they imply.
-     */
     diagnosis: (() => {
       if (lastUpstream && lastUpstream.ok) return "Upstream healthy.";
       if (!lastUpstream) return "No upstream call made yet since this process started.";
@@ -310,9 +174,6 @@ function cgStatus() {
 async function cgGet(path, params) {
   const paused = blockedUntil - Date.now();
   if (paused > 0) {
-    // Not an exception in the "something is wrong" sense — it is this module
-    // deliberately declining to make things worse. Flagged so logError can say
-    // so rather than reporting it as a fresh upstream failure every time.
     const err = new Error(`paused for ${Math.ceil(paused / 1000)}s after a rate limit`);
     err.cgPaused = true;
     throw err;
@@ -321,7 +182,7 @@ async function cgGet(path, params) {
   try {
     const { data } = await axios.get(`${base}${path}`, { params, headers, timeout: TIMEOUT });
     backoffMs = 0;
-    blockedUntil = 0; // a success means the limit has lifted; recover at once
+    blockedUntil = 0;
     noteUpstream(true, null);
     return data;
   } catch (err) {
@@ -331,7 +192,6 @@ async function cgGet(path, params) {
   }
 }
 
-// Map a raw /coins/markets row to a trimmed shape for the UI.
 function trimMarket(row) {
   return {
     id: row.id,
@@ -353,13 +213,6 @@ function trimMarket(row) {
   };
 }
 
-// ---- markets (also the single source for plain prices) --------------------
-
-/**
- * Fetch trimmed market data for the given coin ids. Serves fresh cache, refreshes
- * only stale ids in ONE batched upstream call, keeps stale cache on failure.
- * @returns {Promise<{ markets: Object.<string,object>, stale: boolean, updatedAt: number|null }>}
- */
 async function getMarketsMap(coinIds) {
   const ids = [...new Set((coinIds || []).filter(Boolean))];
   if (ids.length === 0) return { markets: {}, stale: false, updatedAt: null };
@@ -386,7 +239,7 @@ async function getMarketsMap(coinIds) {
           if (row && row.id) cacheSet(marketsCache, row.id, { data: trimMarket(row), ts }, MAX_MARKETS_ENTRIES);
         }
       } catch (err) {
-        logError("markets", err); // keep existing cache
+        logError("markets", err);
       }
     });
   }
@@ -404,16 +257,10 @@ async function getMarketsMap(coinIds) {
       updatedAt = updatedAt == null ? e.ts : Math.max(updatedAt, e.ts);
     }
   }
-  // stale = we could not fully refresh (some served entries are past TTL, or missing).
   const isStale = servedStale > 0 || served < ids.length;
   return { markets, stale: isStale, updatedAt };
 }
 
-/**
- * Adapter kept for existing callers (runPricePass, getPortfolio, approveAlert, chat).
- * Sourced from the SAME markets cache — one fetch path, never two.
- * @returns {Promise<Object.<string,{usd:number}>>}
- */
 async function getPrices(coinIds) {
   const { markets } = await getMarketsMap(coinIds);
   const out = {};
@@ -428,41 +275,15 @@ async function getPrice(coinId) {
   return prices[coinId] || null;
 }
 
-/**
- * Logo URLs for a set of coin ids.
- *
- * An adapter over the SAME markets cache, exactly like getPrices — NOT a second
- * cache and NOT a second upstream call. Every /coins/markets row already carries
- * an `image` field, so the moment a coin's price is in memory its logo is too,
- * and asking for one costs a Map read. Fetching artwork separately would double
- * our CoinGecko traffic to retrieve a value we were already given, and give us a
- * second thing to invalidate and a second way to get rate limited.
- *
- * `stale` is passed through for the caller's information, but it means far less
- * here than it does for a price. A coin's artwork does not move: an hour old
- * logo URL is still the right logo, whereas an hour old price is a wrong number
- * presented as a right one. So a caller may safely render a stale logo.
- *
- * @returns {Promise<{ logos: Object.<string,string>, stale: boolean, updatedAt: number|null }>}
- */
 async function getLogosMap(coinIds) {
   const { markets, stale, updatedAt } = await getMarketsMap(coinIds);
   const logos = {};
   for (const [id, m] of Object.entries(markets)) {
-    // Absent rather than present-and-empty. A caller iterating this map should
-    // only ever see ids it can actually draw; handing back "" or null would put
-    // an empty src on an <img> and render the browser's broken image glyph,
-    // which looks worse than the lettered disc it was supposed to replace.
     if (m && typeof m.image === "string" && m.image) logos[id] = m.image;
   }
   return { logos, stale, updatedAt };
 }
 
-// ---- chart ----------------------------------------------------------------
-
-/**
- * Historical series for one coin. @returns {{ prices:[[ts,price]], stale, updatedAt }}
- */
 async function getChart(coinId, days) {
   const key = `${coinId}:${days}`;
   const now = Date.now();
@@ -494,11 +315,6 @@ async function getChart(coinId, days) {
   return { prices: entry.data, stale: now - entry.ts > chartTtl(), updatedAt: entry.ts };
 }
 
-// ---- search ---------------------------------------------------------------
-
-/**
- * Coin search (so any coin can be watched). @returns {{ coins:[{id,symbol,name,thumb}], stale }}
- */
 async function searchCoins(q) {
   const key = (q || "").trim().toLowerCase();
   if (!key) return { coins: [], stale: false };
@@ -531,57 +347,13 @@ async function searchCoins(q) {
   return { coins: entry.data, stale: now - entry.ts > searchTtl() };
 }
 
-// ---- where a coin actually lives: platforms and contract addresses --------
+const PLATFORMS_TTL = 24 * 60 * 60 * 1000;
+const COIN_PLATFORMS_TTL = 6 * 60 * 60 * 1000;
+const COIN_NOT_FOUND_TTL = 10 * 60 * 1000;
 
-/**
- * WHAT MAKES "EVERY COIN" POSSIBLE, AND WHY IT LIVES HERE.
- *
- * Watching a coin only needs a price. TRADING one needs the contract address it
- * has on the chain the user selected, and there is no way to derive that: a
- * token's address on Base has nothing to do with its address on Arbitrum, and
- * guessing one would send real money to a contract nobody controls. CoinGecko
- * publishes that mapping, and it is already the only source this project trusts
- * for coin identity, so the two readers below sit in the same module as every
- * other upstream call: one transport, one breaker, one set of TTLs.
- *
- * NEITHER OF THESE IS PERMISSION TO TRADE. What comes back is a CLAIM about an
- * address. `tokenResolver.service.js` reads `symbol()` and `decimals()` off the
- * contract itself before that claim is allowed anywhere near a swap, and a
- * disagreement is refused rather than reconciled. See the note there about
- * decimals, which is the field that loses money when it is wrong.
- *
- * TTLs ARE LONG ON PURPOSE. A chain id never changes and a token's address
- * changes only when a project migrates, which is a once-in-years event, so these
- * are hours where a price is seconds. That matters because the free allowance is
- * small: resolving a token must not compete with the price poll for it.
- */
-const PLATFORMS_TTL = 24 * 60 * 60 * 1000; // a day; chain ids are permanent
-const COIN_PLATFORMS_TTL = 6 * 60 * 60 * 1000; // 6h; a token address barely moves
-// Short: a coin id that is wrong today is wrong tomorrow, but a coin listed
-// this morning must not be denied all afternoon.
-const COIN_NOT_FOUND_TTL = 10 * 60 * 1000; // 10 min
+let platformsCache = null;
+const coinPlatformsCache = new Map();
 
-let platformsCache = null; // { data, ts }
-const coinPlatformsCache = new Map(); // coinId -> { data, ts }
-
-/**
- * Every chain CoinGecko knows, keyed by its platform id.
- *
- * `chain_identifier` is the EVM chain id, and it is null for everything that is
- * not EVM (Solana, TON, Tron). That is how a caller tells the families apart
- * without a hand-written table that would drift. `native_coin_id` is the coin id
- * of the chain's own currency, which turns "buy ETH on Base" into "buy the
- * wrapped native the registry already carries" without a list of synonyms.
- *
- * `available` is the field that matters to a caller. An empty map is returned
- * both when this chain index has never been read AND when it has been read and
- * is genuinely empty, and those mean opposite things: the first is an outage,
- * the second would be a fact about the world. Without the flag a caller cannot
- * tell them apart, and the honest-looking message it writes ("that network is
- * not listed") blames the chain for a rate limit.
- *
- * @returns {Promise<{platforms:Object, byChainId:Object, stale:boolean, available:boolean}>}
- */
 async function getAssetPlatforms() {
   const now = Date.now();
   const fresh = platformsCache && now - platformsCache.ts <= PLATFORMS_TTL;
@@ -602,12 +374,8 @@ async function getAssetPlatforms() {
             name: row.name || row.id,
             nativeCoinId: row.native_coin_id || null,
           };
-          // First one wins: the list occasionally carries a second id for a
-          // renamed chain, and the canonical entry comes first.
           if (chainId != null && byChainId[chainId] === undefined) byChainId[chainId] = row.id;
         }
-        // Only replace the map on a real answer. An empty or partial response
-        // overwriting a good map would make every token unresolvable at once.
         if (Object.keys(platforms).length > 0) {
           platformsCache = { data: { platforms, byChainId }, ts: Date.now() };
         }
@@ -625,29 +393,6 @@ async function getAssetPlatforms() {
   };
 }
 
-/**
- * The contract addresses one coin has, per platform, with the decimals CoinGecko
- * believes each one uses.
- *
- * `detail_platforms` is read rather than the flat `platforms` map because only
- * the former carries `decimal_place`, and that field is the cross-check which
- * catches the resolution error that actually costs money. USDC is 6 decimals
- * nearly everywhere and 18 on BNB Chain; being wrong by twelve orders of
- * magnitude is not a rounding error, it is the whole balance.
- *
- * The heavy sections of the response are switched off. This call is about
- * addresses; market data comes from the markets cache.
- *
- * THREE OUTCOMES, NOT TWO. A coin the index has never heard of and a coin the
- * index could not be asked about are different facts, and collapsing them into
- * one null makes the caller write "could not be reached" over a plain 404 —
- * blaming an outage for a typo, and inviting a retry that will never succeed.
- * A 404 is therefore remembered as `{notFound:true}`, briefly, so a bad id
- * cannot hammer the upstream while a newly listed coin still appears soon.
- *
- * @returns {Promise<{coinId:string, symbol:string|null, name:string|null, platforms:Object, stale:boolean}|{notFound:true}|null>}
- *          null only when it could not be determined at all.
- */
 async function getCoinPlatforms(coinId) {
   const id = String(coinId || "").trim().toLowerCase();
   if (!id) return null;
@@ -673,9 +418,6 @@ async function getCoinPlatforms(coinId) {
         for (const [platformId, info] of Object.entries(detail)) {
           const address =
             info && typeof info.contract_address === "string" ? info.contract_address.trim() : "";
-          // An empty address is how CoinGecko represents a coin's OWN chain
-          // (bitcoin on bitcoin, ether on ethereum). It is not a contract and
-          // must never be offered as one.
           if (!address) continue;
           const decimals =
             Number.isInteger(info.decimal_place) && info.decimal_place >= 0 && info.decimal_place <= 36
@@ -698,8 +440,6 @@ async function getCoinPlatforms(coinId) {
           MAX_PLATFORMS_ENTRIES
         );
       } catch (err) {
-        // A 404 is an ANSWER: there is no such coin. Anything else is a failure
-        // to get an answer, and the two must not read the same downstream.
         if (err && err.response && err.response.status === 404) {
           cacheSet(coinPlatformsCache, id, { data: { notFound: true }, ts: Date.now() }, MAX_PLATFORMS_ENTRIES);
           return;
@@ -715,26 +455,9 @@ async function getCoinPlatforms(coinId) {
   return { ...entry.data, stale: Date.now() - entry.ts > COIN_PLATFORMS_TTL };
 }
 
-// ---- NGN rate for crypto receivables --------------------------------------
-const ngnCache = new Map(); // coinId -> { ngn, ts }
-const NGN_TTL = 5 * 60 * 1000; // 5 min — an invoice rate does not need to tick
+const ngnCache = new Map();
+const NGN_TTL = 5 * 60 * 1000;
 
-/**
- * Price of a coin in NGN. Used to snapshot the rate when an invoice payment
- * address is issued, so the token amount owed is unambiguous later.
- *
- * Same discipline as the rest of this module: cached, single-flighted, serves
- * stale on failure, and NEVER throws — the caller falls back to a configured
- * rate so address generation cannot hard-fail on a third-party outage.
- *
- * `fetchedAt` is the time the rate was actually RETRIEVED FROM COINGECKO, not the
- * time of this call. A cache hit can be up to NGN_TTL old, and a stale serve can
- * be far older, so returning `Date.now()` here would let the UI tell the user a
- * five minute old rate was fetched this second. The invoice screen displays this
- * age, so it has to be the truth.
- *
- * @returns {Promise<{ngn:number, stale:boolean, fetchedAt:number}|null>}
- */
 async function getNgnPrice(coinId = "usd-coin") {
   const now = Date.now();
   const hit = ngnCache.get(coinId);
@@ -754,7 +477,7 @@ async function getNgnPrice(coinId = "usd-coin") {
   });
 
   const entry = ngnCache.get(coinId);
-  if (!entry) return null; // caller uses its configured fallback
+  if (!entry) return null;
   return {
     ngn: entry.ngn,
     stale: Date.now() - entry.ts > NGN_TTL,

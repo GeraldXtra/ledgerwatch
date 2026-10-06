@@ -1,14 +1,6 @@
 import { Fragment } from "react";
 import { Link } from "react-router-dom";
 
-/**
- * The renderer for written pages: the guide, the privacy policy, the terms.
- *
- * Content is data, not JSX, so a page reads like a document while it is being
- * written and cannot smuggle markup in. The only inline formatting is a small
- * fixed set: **bold**, `code`, and [a link](/path). Anything else is text.
- */
-
 const INLINE = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
 
 export function rich(text) {
@@ -106,27 +98,11 @@ export function Block({ block }) {
     case "img":
       return (
         <figure className={block.phone ? "docs-figure phone" : "docs-figure"}>
-          {/* A captioned picture gets an empty alt: the caption already says
-              what it is, and repeating it reads twice on a screen reader. */}
           <img src={`/docs/${block.src}`} alt={block.alt || ""} loading="lazy" />
           {block.caption && <figcaption>{rich(block.caption)}</figcaption>}
         </figure>
       );
     default:
-      /**
-       * A BLOCK TYPE THIS RENDERER DOES NOT KNOW USED TO VANISH.
-       *
-       * `default: return null` is the canonical form of this project's
-       * documented failure mode, and these files are the guide, the privacy
-       * policy and the terms — a mistyped or newly invented type silently
-       * dropped a paragraph from a published legal document and nothing said so
-       * anywhere. Every current type is handled, so this is a guard rather than
-       * a fix for a live symptom.
-       *
-       * Logged always, so it is visible in a browser console on a deployed
-       * build, and shown on the page in development, where the writer who made
-       * the typo is the person looking.
-       */
       console.error(
         "[docs] a block type this renderer does not know was skipped, so its content is not on the page:",
         block && block.type

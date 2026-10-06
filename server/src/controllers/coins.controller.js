@@ -1,14 +1,9 @@
 const { getChart, searchCoins } = require("../services/coingecko.service");
 
 const ALLOWED_DAYS = new Set(["1", "7", "30", "90"]);
-// CoinGecko ids are lowercase letters, digits and hyphens. Anything else is not
-// a coin id and must not reach the upstream URL or the chart cache key.
 const COIN_ID_RE = /^[a-z0-9-]{1,64}$/;
-// A search term is a word or two. It becomes an upstream query and a cache key,
-// so it is bounded; a non-string value used to reach `.trim()` and answer 500.
 const MAX_QUERY_CHARS = 64;
 
-// GET /api/coins/search?q=sol  (cached 10 min; never crashes)
 async function search(req, res) {
   try {
     const q = String(req.query.q || "").trim().slice(0, MAX_QUERY_CHARS);
@@ -21,7 +16,6 @@ async function search(req, res) {
   }
 }
 
-// GET /api/coins/:id/chart?days=1|7|30|90  (cached 5 min; never crashes)
 async function chart(req, res) {
   try {
     const days = String(req.query.days || "7");

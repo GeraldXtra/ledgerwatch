@@ -8,13 +8,10 @@ async function findMyDebt(req) {
   return Debt.findOne({ _id: req.params.id, userId: req.user._id });
 }
 
-// Kept as a name local callers already use; the sum itself is the shared one
-// (LW-034), so there is one definition of "paid" in the product rather than nine.
 async function amountPaidFor(debtId) {
   return paidForDebt(debtId);
 }
 
-// POST /api/debts/:id/payments  { amount, method?, note?, paidAt? }
 async function record(req, res) {
   try {
     const debt = await findMyDebt(req);
@@ -32,28 +29,8 @@ async function record(req, res) {
     if (Number.isNaN(when.getTime())) {
       return res.status(400).json({ error: "paidAt is not a valid date" });
     }
-    // A payment note is a line, not a document; it is shown on receipts and
-    // statements. An object where a string was expected used to answer 500.
     const cleanNote = note == null ? undefined : String(note).trim().slice(0, 500);
 
-    /**
-     * IDEMPOTENCY FOR A MANUAL PAYMENT. REQUIRED, NOT OPTIONAL.
-     *
-     * The client mints one key per form and sends it with the submit. A
-     * double submit, a retry after a lost response, or a second tab replaying
-     * the request all carry the same key and hit the unique index on txHash,
-     * so the payment is recorded once. Scoped to the user so two accounts
-     * cannot collide, and prefixed so it can never look like a chain hash.
-     *
-     * A MISSING KEY IS NOW A 400. It used to fall through to `undefined`, and
-     * the payment was then written with no key and no protection at all — which
-     * is LW-016, the double-recorded payment that understates a balance and can
-     * flip a small invoice to fully paid, returning silently whenever the field
-     * was absent or malformed. Nothing logged it and the response looked
-     * identical, so a stale cached bundle or any future bug that dropped the
-     * field would have reintroduced the defect invisibly. A guard that applies
-     * only when the caller volunteers it is not a guard.
-     */
     if (typeof idempotencyKey !== "string" || !/^[A-Za-z0-9_-]{8,80}$/.test(idempotencyKey)) {
       return res.status(400).json({
         error:
@@ -89,47 +66,12 @@ async function record(req, res) {
     }
 
     debt.history.push({ event: "payment_received" });
-    const totalPaid = await recomputeDebtStatus(debt); // saves debt + cancels reminders at zero
+    const totalPaid = await recomputeDebtStatus(debt);
 
-    /**
-     * A bank payment changes what the CRYPTO address must still ask for.
-     *
-     * Without this the address kept quoting the amount it was issued with, so a
-     * debtor who paid half by transfer was still told to send the full token
-     * amount — and the reminder, which reads this field, showed the stale figure.
-     * Recomputed at the address's own snapshot rate, so the quote never moves
-     * with the market.
-     */
     const resync = await resyncActivePaymentAddress(debt._id);
 
-    /**
-     * ONE settlement event, both routes. Bank payments previously recorded
-     * silently: no receipt to the payer, no push to the owner, while the crypto
-     * route sent both. Same event, same three consequences, so they can never
-     * disagree about what happened.
-     */
-    /**
-     * THE KEY IS NOT A TRANSACTION REFERENCE, AND THE PAYER MUST NOT SEE IT.
-     *
-     * The receipt prints `payment.txHash` as a "Transaction:" line. That field
-     * holds a real chain hash for a crypto payment and, since idempotency was
-     * added, the synthetic key `manual:<userId>:<key>` for a bank one — so every
-     * bank receipt mailed the customer a line containing the owner's internal
-     * account id, dressed as a reference they might quote back. A bank payment
-     * has no transaction hash; the honest receipt is one with no such line.
-     */
     const forReceipt = { ...payment.toObject(), txHash: null };
 
-    /**
-     * THE OUTCOME IS READ, NOT DISCARDED (LW-028).
-     *
-     * This was `.catch(() => {})`, so a receipt that never went out — expired
-     * SMTP credentials, a bouncing address, a debounce — left no trace anywhere
-     * and the owner believed the customer had been receipted. The event reports
-     * `{emailed, reason}` precisely so somebody can know; throwing it away made
-     * the report pointless. Still non-fatal: the payment is recorded either way,
-     * and a failed receipt must never fail the payment.
-     */
     const settled = await onInvoiceSettled({
       debt,
       payment: forReceipt,
@@ -150,8 +92,6 @@ async function record(req, res) {
     return res.status(201).json({
       payment,
       debt: withDerived(debt, totalPaid),
-      // Returned so the UI can restate the crypto amount immediately rather than
-      // waiting for a refetch that might show the old figure.
       cryptoQuote: resync.updated ? resync : undefined,
     });
   } catch (err) {
@@ -160,7 +100,6 @@ async function record(req, res) {
   }
 }
 
-// GET /api/debts/:id/payments
 async function list(req, res) {
   try {
     const debt = await findMyDebt(req);
@@ -175,10 +114,6 @@ async function list(req, res) {
   }
 }
 
-// DELETE /api/debts/:id/payments/:paymentId
-// Deleting a payment RAISES the balance again, so the crypto address must ask
-// for more. Without the resync below it would keep quoting the lower figure and
-// the invoice could never be settled in full.
 async function remove(req, res) {
   try {
     const debt = await findMyDebt(req);
@@ -191,30 +126,6 @@ async function remove(req, res) {
     });
     if (!payment) return res.status(404).json({ error: "Payment not found" });
 
-    /**
-     * RELEASE THE ON-CHAIN TRANSFERS THIS PAYMENT WAS COVERING, BEFORE DELETING IT.
-     *
-     * A crypto Payment is the record that a set of confirmed transfers has been
-     * credited. Each of those transfers carries `settledPaymentId` pointing at
-     * this row. Deleting the row on its own left those stamps pointing at a
-     * Payment that no longer exists, and `settleIfDue` reads them as "already
-     * settled":
-     *
-     *     const unstamped   = confirmed.filter(o => !o.settledPaymentId)   // skips them
-     *     const settledUsdc = confirmed.filter(o =>  o.settledPaymentId)   // counts them
-     *     const unsettled   = totalUsdc - settledUsdc                      // 0
-     *     if (unsettled <= 0) return { outcome: "NOTHING_NEW" }            // forever
-     *
-     * So the invoice reopened, `resyncActivePaymentAddress` re-quoted it UPWARDS,
-     * and the customer was asked a second time for money that was sitting,
-     * confirmed, in the derived address — which the watcher would never credit
-     * again. Money already received, permanently uncreditable, and a customer
-     * chased for it.
-     *
-     * Clearing the stamps puts those transfers back into the unsettled pool, so
-     * the very next watch pass re-credits them correctly. The deletion becomes
-     * what a person means by it: undo the bookkeeping, not disown the money.
-     */
     const covered = [
       ...(Array.isArray(payment.txHashes) ? payment.txHashes : []),
       ...(payment.txHash ? [payment.txHash] : []),
@@ -230,21 +141,13 @@ async function remove(req, res) {
       for (const pa of addresses) {
         let released = 0;
         for (const o of pa.observed) {
-          // ONLY the stamps that name THIS payment. A transfer stamped by a
-          // different Payment is still legitimately covered by that row, which
-          // is not being deleted — releasing it would double-credit later.
           if (o.settledPaymentId && String(o.settledPaymentId) === String(payment._id)) {
             o.settledPaymentId = null;
             released++;
           }
         }
         if (released) {
-          // The naira this address is recorded as having settled goes with it,
-          // or the next settlement adds on top of a figure that includes the
-          // credit just removed.
           pa.settledNgn = Math.max(0, (pa.settledNgn || 0) - (payment.amount || 0));
-          // An address closed by this payment must be watched again. Which state
-          // it returns to depends on the clock, not on how it was closed.
           if (pa.status === "paid") {
             const stillOpen = pa.expiresAt && new Date(pa.expiresAt).getTime() > Date.now();
             pa.status = stillOpen ? "active" : "expired";
@@ -260,9 +163,7 @@ async function remove(req, res) {
     }
 
     await payment.deleteOne();
-    const totalPaid = await recomputeDebtStatus(debt); // may revert status
-    // Re-quote upward at the same snapshot rate. No notification here: nothing
-    // was paid, so telling the debtor a payment "arrived" would be false.
+    const totalPaid = await recomputeDebtStatus(debt);
     const resync = await resyncActivePaymentAddress(debt._id);
     return res.json({
       ok: true,
@@ -275,7 +176,6 @@ async function remove(req, res) {
   }
 }
 
-// GET /api/debts/:id/receipt?paymentId=  (latest payment if not specified)
 async function receipt(req, res) {
   try {
     const debt = await findMyDebt(req);

@@ -3,23 +3,12 @@ import http from "../../api/http";
 
 const POLL_MS = 10000;
 
-/**
- * Polls /api/markets every 10s WHILE the tab is visible, pausing when the page is
- * hidden (Page Visibility API) and resuming with an immediate fetch on focus. The
- * server cache absorbs the frequency, so many polls cost few upstream calls.
- *
- * Returns a { coinId -> market } map plus `stale`, `updatedAt` (server timestamp),
- * and `lastFetchedAt` (client clock, for the "updated Xs ago" indicator).
- *
- * @param {string[]} coinIds
- */
 export default function useMarkets(coinIds) {
   const [markets, setMarkets] = useState({});
   const [stale, setStale] = useState(false);
   const [updatedAt, setUpdatedAt] = useState(null);
   const [lastFetchedAt, setLastFetchedAt] = useState(null);
 
-  // Keep the latest ids in a ref so the interval callback is stable.
   const idsRef = useRef([]);
   idsRef.current = [...new Set((coinIds || []).filter(Boolean))].sort();
   const idsKey = idsRef.current.join(",");
@@ -41,7 +30,6 @@ export default function useMarkets(coinIds) {
       setUpdatedAt(data.updatedAt || null);
       setLastFetchedAt(Date.now());
     } catch {
-      // keep the last snapshot; the UI shows what it has and a delayed note
       setStale(true);
     }
   }, []);
@@ -66,14 +54,13 @@ export default function useMarkets(coinIds) {
 
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
-        fetchNow(); // immediate refresh on focus
+        fetchNow();
         start();
       } else {
         stop();
       }
     };
 
-    // Initial fetch + start polling if visible.
     if (document.visibilityState === "visible") {
       fetchNow();
       start();
@@ -84,7 +71,6 @@ export default function useMarkets(coinIds) {
       stop();
       document.removeEventListener("visibilitychange", onVisibility);
     };
-    // Re-run when the set of watched ids changes.
   }, [idsKey, fetchNow]);
 
   return { markets, stale, updatedAt, lastFetchedAt, refresh: fetchNow };

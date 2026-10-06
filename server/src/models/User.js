@@ -1,6 +1,5 @@
 const mongoose = require("mongoose");
 
-// bankDetails is embedded on the user and used inside reminder messages.
 const bankDetailsSchema = new mongoose.Schema(
   {
     accountName: { type: String },
@@ -10,9 +9,6 @@ const bankDetailsSchema = new mongoose.Schema(
   { _id: false }
 );
 
-// Automatic reminder delivery — opt-in, default OFF. When enabled, the automation
-// engine dispatches reminders through the configured channels instead of only
-// generating them.
 const autoSendSchema = new mongoose.Schema(
   {
     enabled: { type: Boolean, default: false },
@@ -22,20 +18,6 @@ const autoSendSchema = new mongoose.Schema(
   { _id: false }
 );
 
-/**
- * Email verification state.
- *
- * The code is stored HASHED, never in plain text. It is a short lived credential
- * that grants account access, so a leaked database dump must not hand out live
- * codes — the same reasoning that applies to `passwordHash` a line below.
- *
- * `attempts` exists because a six digit code is only a million guesses, which is
- * nothing to a script. Without a cap, an attacker who knows an email address can
- * brute force the code inside its own thirty minute window.
- *
- * `lastSentAt` throttles resends. Without it the resend endpoint is an open relay
- * for mailing anyone repeatedly, at the sender reputation of our own domain.
- */
 const emailVerificationSchema = new mongoose.Schema(
   {
     codeHash: { type: String, default: null },
@@ -50,87 +32,36 @@ const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
-  // Accounts created before verification existed are grandfathered as verified,
-  // handled at read time in the login path rather than by a migration.
   emailVerified: { type: Boolean, default: false },
   emailVerification: { type: emailVerificationSchema, default: () => ({}) },
-  /**
-   * Password reset codes. The same SHAPE as email verification, kept as a
-   * SEPARATE state on purpose: a reset code must never be able to confirm an
-   * email address, and a verification code must never be able to change a
-   * password. Sharing one field would give one credential two powers.
-   */
   passwordReset: { type: emailVerificationSchema, default: () => ({}) },
-  /**
-   * Sign in with Google. `googleId` is Google's stable subject id for the
-   * person, which does not change if they rename their account. Sparse, so the
-   * many password accounts with no Google id do not collide on null.
-   */
   googleId: { type: String, default: null, index: true, sparse: true },
   authProvider: { type: String, enum: ["password", "google"], default: "password" },
-  /**
-   * Bumped on every password change or reset. Sessions carry the version they
-   * were signed with and are refused once it differs, which is how changing a
-   * password signs the other devices out. See utils/token.js.
-   */
   tokenVersion: { type: Number, default: 0 },
   bankDetails: { type: bankDetailsSchema, default: {} },
   autoSend: { type: autoSendSchema, default: () => ({}) },
-  // Public wallet address only — private keys never touch the server (Phase 4).
   walletAddress: { type: String, default: null },
-  // Profile picture as a base64 data URL. Stored on the document so it needs no
-  // external object storage and survives redeploys; the client square-crops and
-  // resizes to ~512px first, and the server caps the DECODED size at 2MB.
   avatarUrl: { type: String, default: null },
-  // Shown on reminders and statements alongside the payout details.
   companyName: { type: String, default: "" },
-  // Per-category push opt-outs. Absent/true = send; explicit false = suppress.
   notifyPrefs: {
     marketAlerts: { type: Boolean, default: true },
     remindersDue: { type: Boolean, default: true },
     txUpdates: { type: Boolean, default: true },
   },
 
-  // Crypto payment rails for invoices.
   crypto: {
-    // Defaults ON. The flag previously defaulted to false and was enforced
-    // nowhere, so the model claimed the feature was off while it worked
-    // perfectly — a setting that describes nothing is worse than no setting.
-    // Now that it is genuinely enforced, off by default would silently disable a
-    // working feature on every existing account.
     enabled: { type: Boolean, default: true },
-    // Stamped the first time these settings are normalised or saved. The boot
-    // normalisation keys on this rather than on `enabled`, so a user who
-    // deliberately turns the feature off is never overridden on the next start.
     configuredAt: { type: Date, default: null },
-    // Per-chain confirmation depth, overriding the env/default table. Clamped on
-    // write — a shallow depth is a real reorg risk, not just a preference.
     confirmationOverrides: { type: Map, of: Number, default: undefined },
-    defaultChainId: { type: Number, default: 84532 }, // Base Sepolia
-    expiryHours: { type: Number, default: 72 }, // max 720 (30 days)
-    // Monotonic counter for the receivables derivation branch. ONLY ever moved
-    // by an atomic $inc — never read-then-written — so two concurrent address
-    // generations can never be handed the same index. A reused index would
-    // break payment attribution irrecoverably.
+    defaultChainId: { type: Number, default: 84532 },
+    expiryHours: { type: Number, default: 72 },
     nextDerivationIndex: { type: Number, default: 0 },
-    // Where swept funds go. Defaults to the user's own main wallet address.
     sweepDestination: { type: String, default: null },
     notifyOnDetected: { type: Boolean, default: true },
   },
 
-  /**
-   * Paper vs live trading. PAPER FOR EVERYONE BY DEFAULT — live mode spends real
-   * (testnet) funds through a DEX, so it is opted into deliberately, never
-   * arrived at by accident.
-   */
   tradingMode: { type: String, enum: ["paper", "live"], default: "paper" },
 
-  /**
-   * Spending caps for LIVE trading. Absent means the built-in defaults apply
-   * (permissive on testnet, materially stricter on mainnet) — there is no
-   * "unlimited" state, because a live trading path with no ceiling is one
-   * mistyped amount away from draining a wallet.
-   */
   tradingLimits: {
     perTrade: { type: Number, default: null },
     perDay: { type: Number, default: null },
@@ -139,41 +70,11 @@ const userSchema = new mongoose.Schema({
     maxPriceImpactPct: { type: Number, default: null },
   },
 
-  /**
-   * ERC-20s the user added by contract address, per chain. `decimals` is stored
-   * as READ FROM THE CONTRACT — never inferred from the symbol, because the same
-   * symbol carries different decimals on different chains (USDC is 6 on most, 18
-   * on BNB Chain) and getting it wrong misreads balances by 10^12.
-   *
-   * Stored server-side rather than in localStorage so the list survives a device
-   * change, matching how the wallet address itself is handled.
-   */
-  /**
-   * How far the inbound-transfer scan has read, per chain.
-   *
-   * Deliberately stored rather than derived from the newest recorded
-   * transaction: a wallet that has received NOTHING has no rows to derive from,
-   * so it would re-walk the whole lookback on every History load, forever. That
-   * is the normal state of a new wallet, and it cost nine seconds a load.
-   */
   walletHistoryCursors: {
     type: [{ _id: false, chainId: { type: Number, required: true }, block: { type: Number, required: true } }],
     default: [],
   },
 
-  /**
-   * OPTIONAL extra verification before the wallet reveals its recovery phrase or
-   * private key.
-   *
-   * Explicitly NOT a password recovery mechanism. This wallet is
-   * non-custodial: the server has never seen the wallet password and cannot
-   * reset it. Answering these questions proves nothing about who you are to the
-   * key — it only adds a second thing an attacker at an unlocked machine must
-   * also know. The password remains the primary and indispensable gate.
-   *
-   * Answers are bcrypt hashed, never stored or logged in plaintext, and the
-   * prompts are returned without them.
-   */
   walletSecurity: {
     enabled: { type: Boolean, default: false },
     questions: {
@@ -187,8 +88,6 @@ const userSchema = new mongoose.Schema({
       ],
       default: [],
     },
-    // Server-side throttle state. A client-side counter is decorative — anyone
-    // with devtools skips it — so the limit that matters lives here.
     failedAttempts: { type: Number, default: 0 },
     lockedUntil: { type: Date, default: null },
   },
@@ -206,22 +105,6 @@ const userSchema = new mongoose.Schema({
     default: [],
   },
 
-  /**
-   * Tokens that ARRIVED at the wallet which nobody told the wallet about.
-   *
-   * The inbound scan reads every ERC-20 Transfer addressed to the wallet, not
-   * only the registry's. A contract it has never seen is looked up on chain
-   * (symbol, name, decimals) and recorded here so the wallet can say "0.5 XYZ
-   * arrived, add it?" rather than silently holding a balance the owner cannot
-   * see. NOTHING IS ADDED AUTOMATICALLY: on a real network most unsolicited
-   * tokens are spam or phishing bait, so the owner decides, and an ignored
-   * token stays ignored.
-   *
-   * `symbol`/`name`/`decimals` are what the contract said about itself and
-   * nothing more; `impersonates` is set when that symbol matches a verified
-   * registry token on the same chain, which is the classic phishing shape.
-   * `address` is stored lowercase for matching; the client checksums it.
-   */
   discoveredTokens: {
     type: [
       {
@@ -231,12 +114,7 @@ const userSchema = new mongoose.Schema({
         symbol: { type: String, default: null },
         name: { type: String, default: null },
         decimals: { type: Number, default: null },
-        // symbol AND decimals were both read from the contract. A token that
-        // could not be read can be ignored but never added: its balance could
-        // not be rendered correctly.
         readable: { type: Boolean, default: false },
-        // A contract that did not answer is retried on later syncs, a few
-        // times, so a transient RPC failure is never latched as "not a token".
         lookupAttempts: { type: Number, default: 0 },
         lastLookupAt: { type: Date, default: null },
         impersonates: { type: String, default: null },
@@ -244,7 +122,6 @@ const userSchema = new mongoose.Schema({
         firstSeenBlock: { type: Number, default: null },
         firstTxHash: { type: String, default: null },
         firstFrom: { type: String, default: null },
-        // Decimal string, like WalletTx.value. Null when decimals were unreadable.
         firstAmount: { type: String, default: null },
         status: { type: String, enum: ["new", "added", "ignored"], default: "new" },
         decidedAt: { type: Date, default: null },

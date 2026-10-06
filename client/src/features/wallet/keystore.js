@@ -1,46 +1,16 @@
 import { ethers } from "ethers";
 import { getToken } from "../../api/http";
 
-/**
- * NON-CUSTODIAL KEY STORAGE — the security core of the wallet.
- *
- * The private key and mnemonic exist only transiently in memory during
- * generate / import / sign. The ONLY thing ever written to localStorage is the
- * ethers encrypted JSON keystore (Web3 Secret Storage v3: scrypt KDF, AES-128-CTR,
- * keccak256 MAC). The plaintext key is never persisted, never logged, and never
- * placed in any network request. The server only ever learns the PUBLIC address.
- *
- * SCOPED PER ACCOUNT. The keystore used to live under one global key, which meant
- * a wallet created on any account became the wallet of every account in the same
- * browser: a second account would skip the "create a wallet" screen entirely and
- * show somebody else's address, and only the original account's password could
- * open it. The storage key now carries the account id, so accounts are isolated.
- *
- * The id comes from the JWT the app already sends on every request, so it can
- * never drift out of step with whoever is actually logged in.
- */
-
 const BASE_KEY = "ledgerwatch.wallet.keystore";
 
-/**
- * The pre-scoping key. READ ONLY, and referenced nowhere except the explicit
- * one-time claim below. It is deliberately never auto-adopted — silently
- * adopting it for whichever account happens to log in first is the bug this
- * module was changed to fix.
- */
-// Not exported: it is referenced only by the claim and discard helpers below,
-// and an exported handle on the pre-scoping keystore is an invitation to read
-// somebody else's wallet from another module.
 const LEGACY_KEY = BASE_KEY;
 
-/** Account id from the bearer token's payload, or null when logged out. */
 function activeUserId() {
   const token = getToken();
   if (!token) return null;
   try {
     const payload = token.split(".")[1];
     if (!payload) return null;
-    // base64url -> base64 before decoding.
     const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
     const id = JSON.parse(json).id;
     return id ? String(id) : null;
@@ -49,12 +19,6 @@ function activeUserId() {
   }
 }
 
-/**
- * Storage key for the logged-in account, or null when there is no session.
- *
- * Returning null rather than falling back to BASE_KEY is deliberate: a
- * logged-out page must not be able to see, unlock, or overwrite any wallet.
- */
 function activeStorageKey() {
   const id = activeUserId();
   return id ? `${BASE_KEY}.${id}` : null;
@@ -73,7 +37,6 @@ export function getKeystoreJson() {
   return readKeystore();
 }
 
-/** The public address inside a keystore JSON, WITHOUT decrypting it. */
 function addressFromKeystore(json) {
   if (!json) return null;
   try {
@@ -84,7 +47,6 @@ function addressFromKeystore(json) {
   }
 }
 
-// Read the public address out of THIS ACCOUNT's stored keystore.
 export function getStoredAddress() {
   return addressFromKeystore(readKeystore());
 }
@@ -94,13 +56,6 @@ export function clearWallet() {
   if (key) localStorage.removeItem(key);
 }
 
-// ---- Legacy wallet recovery (explicit, one time) --------------------------
-
-/**
- * A wallet left in this browser from before accounts were separated, if any.
- * Surfaced so it can be CLAIMED on purpose rather than silently inherited.
- * @returns {{address:string}|null}
- */
 export function getLegacyWallet() {
   const json = localStorage.getItem(LEGACY_KEY);
   if (!json) return null;
@@ -108,10 +63,6 @@ export function getLegacyWallet() {
   return address ? { address } : null;
 }
 
-/**
- * Move the legacy keystore to the logged-in account and remove the legacy entry,
- * so no second account can claim the same wallet. Returns the address.
- */
 export function claimLegacyWallet() {
   const key = activeStorageKey();
   if (!key) throw new Error("You need to be signed in to claim this wallet.");
@@ -125,15 +76,10 @@ export function claimLegacyWallet() {
   return address;
 }
 
-/** Forget the legacy wallet without claiming it. */
 export function discardLegacyWallet() {
   localStorage.removeItem(LEGACY_KEY);
 }
 
-// ---- Create / import ------------------------------------------------------
-
-// Fresh wallet with a BIP-39 mnemonic. Returned in-memory only — the caller shows
-// the phrase once, then must call encryptAndStore to persist the ENCRYPTED form.
 export function createWallet() {
   const wallet = ethers.Wallet.createRandom();
   return {
@@ -155,13 +101,6 @@ export function importFromPrivateKey(pk) {
   return { wallet, address: wallet.address };
 }
 
-/**
- * Encrypt the wallet with the user's password (scrypt) and store ONLY the
- * ciphertext JSON, under the logged-in account's key. Returns the public address.
- * @param {ethers.Wallet|ethers.HDNodeWallet} wallet
- * @param {string} password
- * @param {(pct:number)=>void} [onProgress]
- */
 export async function encryptAndStore(wallet, password, onProgress) {
   const key = activeStorageKey();
   if (!key) throw new Error("You need to be signed in to save a wallet.");
@@ -170,42 +109,12 @@ export async function encryptAndStore(wallet, password, onProgress) {
   return wallet.address;
 }
 
-/**
- * Decrypt THIS ACCOUNT's keystore with the password and return a live Wallet. The
- * decrypted key lives only in the returned object for the duration of one signing
- * operation — the caller must not persist or transmit it.
- * @param {string} password
- * @param {(pct:number)=>void} [onProgress]
- * @returns {Promise<ethers.Wallet>}
- */
 export async function unlockWallet(password, onProgress) {
   const json = readKeystore();
   if (!json) throw new Error("No wallet on this device for this account");
   return ethers.Wallet.fromEncryptedJson(json, password, onProgress);
 }
 
-/**
- * Reveal the wallet's secret material for BACKUP.
- *
- * Goes through `unlockWallet` — the same and only decryption path the signing
- * flow uses. There is deliberately no second way to decrypt a keystore in this
- * codebase.
- *
- * NOTHING HERE TOUCHES THE NETWORK. The phrase and the private key are derived
- * in this tab, handed to the caller, and are expected to be discarded the moment
- * the reveal closes. They must never be logged, put in a request body, or
- * written to storage.
- *
- * A wallet imported from a private key has NO mnemonic — that is not a bug or a
- * missing feature, it is arithmetic: a bare key carries no seed to reconstruct.
- * `mnemonic` comes back null and the caller offers the key instead.
- *
- * Verified against ethers v6: `encrypt()` writes the phrase into the keystore's
- * `x-ethers.mnemonicCiphertext`, so a wallet created in this app round-trips to
- * a byte-identical phrase.
- *
- * @returns {Promise<{address:string, mnemonic:string|null, privateKey:string}>}
- */
 export async function revealSecrets(password, onProgress) {
   const wallet = await unlockWallet(password, onProgress);
   return {
@@ -215,13 +124,6 @@ export async function revealSecrets(password, onProgress) {
   };
 }
 
-/**
- * Import from an encrypted keystore JSON plus its password.
- *
- * The third accepted form alongside a phrase and a private key. Restoring the
- * keystore preserves the mnemonic when the original had one, so a wallet backed
- * up this way can still derive invoice addresses afterwards.
- */
 export async function importFromKeystore(json, password, onProgress) {
   const text = typeof json === "string" ? json.trim() : "";
   if (!text) throw new Error("Paste or upload the keystore JSON file.");
@@ -238,21 +140,15 @@ export async function importFromKeystore(json, password, onProgress) {
   return { wallet, address: wallet.address };
 }
 
-/**
- * Has this wallet's phrase ever been acknowledged as written down?
- *
- * Stored per account and per wallet address, so importing a different wallet
- * asks again rather than inheriting the previous one's answer.
- */
 const BACKUP_KEY = "ledgerwatch.wallet.backedUp";
 
 export function isBackedUp() {
   const address = getStoredAddress();
-  if (!address) return true; // no wallet, nothing to warn about
+  if (!address) return true;
   try {
     return localStorage.getItem(`${BACKUP_KEY}.${address.toLowerCase()}`) === "1";
   } catch {
-    return true; // storage unavailable, so do not nag about something unreadable
+    return true;
   }
 }
 
@@ -262,6 +158,5 @@ export function markBackedUp() {
   try {
     localStorage.setItem(`${BACKUP_KEY}.${address.toLowerCase()}`, "1");
   } catch {
-    /* storage unavailable — the reminder simply reappears, which is harmless */
   }
 }

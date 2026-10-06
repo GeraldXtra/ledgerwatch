@@ -5,19 +5,8 @@ import { getKeystoreJson, getStoredAddress, hasWallet, isBackedUp } from "../wal
 import { getSecurityQuestions, saveSecurityQuestions } from "../wallet/walletApi";
 import RevealSecretModal from "../wallet/RevealSecretModal";
 
-/**
- * WALLET BACKUP AND RECOVERY.
- *
- * Without this screen the wallet is a trap. The encrypted keystore lives in one
- * browser's localStorage; clear site data, switch machine or lose the laptop and
- * the funds are gone — not stolen, just unreachable, with the owner never having
- * been given the one thing that could have restored them.
- *
- * Everything here decrypts in the browser through the single `unlockWallet`
- * path. No secret material is sent anywhere.
- */
 export default function WalletBackupSection() {
-  const [reveal, setReveal] = useState(null); // "phrase" | "key" | null
+  const [reveal, setReveal] = useState(null);
   const [walletPresent] = useState(() => hasWallet());
   const [address] = useState(() => getStoredAddress());
   const [backedUp, setBackedUp] = useState(() => isBackedUp());
@@ -39,22 +28,6 @@ export default function WalletBackupSection() {
     );
   }
 
-  /**
-   * Download the encrypted keystore file.
-   *
-   * TWO THINGS WERE WRONG HERE, BOTH SILENT, ON A BACKUP PATH.
-   *
-   * The object URL was revoked in the same tick as the click. Chrome tolerates
-   * that; Firefox and Safari have historically not, and the download simply does
-   * not happen — with no error handling at all, the button did nothing visible
-   * and the owner walked away believing their backup was saved. That only
-   * surfaces on the day they need it. The URL is now released on the next turn
-   * of the event loop, once the browser has taken the blob, and the file stays a
-   * blob in this tab's memory for that instant rather than anywhere addressable.
-   *
-   * And `if (!json) return` meant a missing keystore did nothing whatsoever. It
-   * says so now.
-   */
   function downloadKeystore() {
     setDownloadError("");
     const json = getKeystoreJson();
@@ -167,12 +140,6 @@ export default function WalletBackupSection() {
   );
 }
 
-/**
- * OPTIONAL extra verification. Deliberately framed as an ADDITION, never a
- * recovery route: this wallet is non-custodial, so a forgotten password cannot
- * be reset by anyone, and pretending otherwise would be the cruellest possible
- * bug to ship.
- */
 function SecurityQuestions() {
   const [state, setState] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -185,17 +152,6 @@ function SecurityQuestions() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  /**
-   * A FAILED LOAD IS NOT AN ANSWER ABOUT THE OWNER'S SECURITY (LW-029).
-   *
-   * This substituted `{ enabled: false }` on any error, so one network blip told
-   * an owner who HAS configured extra verification, in a plain sentence, that
-   * their wallet password alone unlocks a reveal. That is both untrue about
-   * their own posture and — with the reveal dialog quietly skipping the same
-   * check when its fetch fails — the visible half of a control that did not run.
-   * The four states ARCHITECTURE §9.1 asks for are kept apart here: loading,
-   * ready, error, and the genuine "off".
-   */
   const [loadError, setLoadError] = useState("");
   const [reload, setReload] = useState(0);
 

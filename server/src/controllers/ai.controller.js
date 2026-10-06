@@ -16,37 +16,8 @@ const { supportedSymbols } = require("../services/coinMap");
 const { getPrices } = require("../services/coingecko.service");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-// A question for the agent is a sentence or two. Everything past this is paid
-// for per token at the provider and buys nothing; it was unbounded, and a
-// non-string body value reached `.trim()` and answered 500.
 const MAX_PROMPT_CHARS = 2000;
 
-/**
- * Deterministic, no-AI answer over the user's debts. Never crashes.
- * Summarizes top debtor, total outstanding, and the most overdue open debt.
- *
- * WHAT WAS WRONG WITH IT, AND WHY IT MATTERED (LW-011).
- *
- * It did three things, and all three understated or overstated what the owner
- * is actually owed:
- *
- *  1. It filtered on `status === "pending"`, so every PARTLY PAID invoice was
- *     dropped from the answer entirely. Those are precisely the ones somebody
- *     asks about.
- *  2. It summed `d.amount`, the GROSS invoice value, as though it were the
- *     balance. A one million naira invoice with nine hundred thousand already
- *     paid contributed either nothing (dropped by 1) or a million (if still
- *     pending) — never the hundred thousand actually outstanding. CLAUDE.md
- *     names this exact pattern: never treat a stored gross figure as a net one.
- *  3. It added figures in different currencies together and labelled the sum
- *     with whichever single invoice happened to be largest.
- *
- * The analytics page computed the same number correctly, so the two screens
- * gave irreconcilable answers to the same question and neither said why.
- *
- * `debts` here are the plain objects `attachTotals` produces, which carry
- * `balance` — the one figure that means "still owed".
- */
 function computeFallback(debts) {
   const open = debts.filter((d) => (d.balance || 0) > 0 && d.status !== "paid");
 
@@ -54,8 +25,6 @@ function computeFallback(debts) {
     return "You have no outstanding invoices. Everyone is settled up.";
   }
 
-  // Totalled PER CURRENCY. Adding naira to dollars produces a number that is
-  // not an amount of anything.
   const byCurrency = new Map();
   for (const d of open) {
     const cur = d.currency || "NGN";
@@ -97,7 +66,6 @@ function computeFallback(debts) {
   return lines.join(" ");
 }
 
-// POST /api/ai/receivables-query
 async function receivablesQuery(req, res) {
   try {
     const question = String((req.body && req.body.question) || "").slice(0, MAX_PROMPT_CHARS);
@@ -106,18 +74,8 @@ async function receivablesQuery(req, res) {
     }
 
     const raw = await Debt.find({ userId: req.user._id });
-    /**
-     * THE BALANCE, NOT JUST THE INVOICE VALUE.
-     *
-     * `Debt` stores the gross amount and a status; what is still owed is derived
-     * at read time and lives nowhere on the document. The summary handed to the
-     * model carried `amount` and `status` and nothing else, so the model was
-     * being asked what the owner is owed while being shown only what the owner
-     * once invoiced. It could not answer correctly, and it answered anyway.
-     */
     const debts = await attachTotals(req.user._id, raw);
 
-    // Compact summary for the AI (avoid leaking internal fields).
     const summary = debts.map((d) => ({
       debtorName: d.debtorName,
       amount: d.amount,
@@ -141,7 +99,6 @@ async function receivablesQuery(req, res) {
   }
 }
 
-// Execute a list of watch intents; returns { created, notes }.
 async function executeWatchIntents(userId, intents, mode = "paper") {
   const created = [];
   const notes = [];
@@ -160,10 +117,6 @@ async function executeWatchIntents(userId, intents, mode = "paper") {
   return { created, notes };
 }
 
-// POST /api/ai/chat  body: { message }
-// Market agent: parses "watch ..." commands into intents the backend executes,
-// and answers portfolio questions. Falls back to a basic parser + computed
-// summary with NO AI. Never crashes.
 async function chat(req, res) {
   try {
     const message = String((req.body && req.body.message) || "").slice(0, MAX_PROMPT_CHARS);
@@ -171,7 +124,6 @@ async function chat(req, res) {
       return res.status(400).json({ error: "message is required" });
     }
 
-    // Build context from the user's real data.
     const [watches, portfolio] = await Promise.all([
       Watch.find({ userId: req.user._id, active: true, mode: req.user.tradingMode === "live" ? "live" : "paper" }),
       getPortfolio(req.user._id, req.user.tradingMode === "live" ? "live" : "paper"),
@@ -191,7 +143,6 @@ async function chat(req, res) {
       supportedSymbols: supportedSymbols(),
     };
 
-    // Try the AI agent first.
     const aiResult = await marketChat(message, context);
     if (aiResult && typeof aiResult === "object") {
       const { created, notes } = await executeWatchIntents(
@@ -209,7 +160,6 @@ async function chat(req, res) {
       return res.json({ reply: reply.trim(), createdWatches: created, source: "ai" });
     }
 
-    // No-AI fallback.
     const intents = parseWatchCommand(message);
     if (intents.length) {
       const { created, notes } = await executeWatchIntents(req.user._id, intents, req.user.tradingMode === "live" ? "live" : "paper");
@@ -221,7 +171,6 @@ async function chat(req, res) {
       return res.json({ reply, createdWatches: created, source: "computed" });
     }
 
-    // Otherwise treat it as a portfolio/status question.
     const answer = await buildPortfolioSummaryText(req.user._id);
     return res.json({ reply: answer, createdWatches: [], source: "computed" });
   } catch (err) {

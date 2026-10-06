@@ -1,7 +1,6 @@
 const Alert = require("../models/Alert");
 const { approveAlert, actOnAlert } = require("../services/market.service");
 
-// GET /api/alerts  (my pending alerts, newest first)
 async function list(req, res) {
   try {
     const mode = req.user.tradingMode === "live" ? "live" : "paper";
@@ -17,7 +16,6 @@ async function list(req, res) {
   }
 }
 
-// GET /api/alerts/history  (approved + dismissed, newest first)
 async function history(req, res) {
   try {
     const mode = req.user.tradingMode === "live" ? "live" : "paper";
@@ -35,14 +33,13 @@ async function history(req, res) {
   }
 }
 
-// PATCH /api/alerts/:id/approve  -> SimTrade + Portfolio update (section 2a)
 async function approve(req, res) {
   try {
     const alert = await Alert.findOne({ _id: req.params.id, userId: req.user._id });
     if (!alert) return res.status(404).json({ error: "Alert not found" });
 
     const result = await approveAlert(req.user._id, alert);
-    return res.json(result); // { alert, trade, portfolio }
+    return res.json(result);
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error("approve alert error:", err.message);
@@ -50,35 +47,11 @@ async function approve(req, res) {
   }
 }
 
-// PATCH /api/alerts/:id/dismiss
-/**
- * POST /api/alerts/:id/executed  { side, txHash, chainId, qty?, value?, price? }
- *
- * CLOSE A LIVE ALERT THE BROWSER HAS ALREADY ACTED ON.
- *
- * `actOnAlert` is the paper path: it moves cash and holdings in a simulated book
- * and writes a SimTrade. A live trade does none of that — the swap happens on
- * chain, from the user's own wallet, and the server's only record of it is the
- * WalletTx row the browser posts. So there was nothing that ever moved a live
- * alert off `pending`.
- *
- * That mattered far more than it looks. `runPricePass` will not raise a second
- * alert while one is still pending on the same watch (the guard that stopped
- * 1,163 stacked alerts). A live alert that never resolves therefore blocks its
- * watch permanently: Market Watch alerted once per watch and then went silent,
- * for exactly the users who had opted into real money.
- *
- * This records the decision and the transaction, and nothing else. It does not
- * touch Portfolio or SimTrade — the live book is the chain, and inventing rows
- * in a simulated ledger to describe a real trade is what LW-075 was about.
- */
 async function executed(req, res) {
   try {
     const alert = await Alert.findOne({ _id: req.params.id, userId: req.user._id });
     if (!alert) return res.status(404).json({ error: "Alert not found" });
 
-    // Same terminal-state guard as `act` and `dismiss` (LW-024). A resolved
-    // alert is an audit record and must not be rewritten.
     if (alert.status !== "pending") {
       return res.status(409).json({ error: `Alert is already ${alert.status}` });
     }
@@ -120,9 +93,6 @@ async function dismiss(req, res) {
     const alert = await Alert.findOne({ _id: req.params.id, userId: req.user._id });
     if (!alert) return res.status(404).json({ error: "Alert not found" });
 
-    // The same guard `act` has (LW-024). This legacy route still overwrote an
-    // approved alert's `userAction` with "dismiss" while `executedQty` stayed
-    // filled in: a trade that happened, recorded as declined.
     if (alert.status !== "pending") {
       return res.status(409).json({ error: `Alert is already ${alert.status}` });
     }
@@ -138,12 +108,6 @@ async function dismiss(req, res) {
   }
 }
 
-/**
- * POST /api/alerts/:id/act   { action: "buy"|"sell"|"dismiss", amount, denom }
- *
- * The user picks BOTH the side and the amount. The agent's suggestion is only a
- * recommendation, so acting against it is allowed and is recorded as such.
- */
 async function act(req, res) {
   try {
     const { action, amount, denom } = req.body || {};
@@ -166,7 +130,7 @@ async function act(req, res) {
     }
 
     const result = await actOnAlert(req.user._id, alert, { action, amount, denom });
-    return res.json(result); // { alert, trade, portfolio }
+    return res.json(result);
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error("act on alert error:", err.message);

@@ -1,43 +1,5 @@
-/**
- * The strength gate on the one password that cannot be reset.
- *
- * WHY THIS EXISTS
- *
- * Every other password in this product is recoverable: forget the account
- * password and a code arrives by email. The wallet password is not. It is the
- * key-encryption key for a Web3 Secret Storage keystore held in localStorage,
- * and the server has never seen it. Lose it and the funds are gone; guess it and
- * the funds are yours.
- *
- * The threat is OFFLINE. `docs/SECURITY.md` B1 lists "offline brute force of an
- * exfiltrated keystore" as a live risk, because the ciphertext sits in
- * localStorage where any injected script, any malicious extension, or anyone
- * with the unlocked device can read it. Once it is copied there is no rate
- * limit, no lockout and no server involved — only the cost of the KDF and the
- * size of the search space. scrypt at ethers' defaults makes each guess
- * expensive; it does not make a short password safe, it only sets the price.
- *
- * The gate was `password.length < 8` and nothing else. `docs/SECURITY.md` 4.1
- * B1 states the requirement plainly: "MUST raise the password minimum above 8
- * and gate on strength". This is that.
- *
- * WHY LENGTH IS WEIGHTED OVER CHARACTER CLASSES
- *
- * Complexity rules push people toward `Passw0rd!`, which is short and sits in
- * every cracking dictionary. Length is what actually buys search space, so the
- * floor is 12 and the advice asks for words rather than symbols. The class
- * checks below are a nudge on top of that floor, never a substitute for it.
- */
-
-/** The floor. Below this nothing else about the password can rescue it. */
 export const MIN_WALLET_PASSWORD = 12;
 
-/**
- * Passwords that appear at the top of every leaked-credential list, plus the
- * ones this product invites by name. Not a real dictionary — a real one belongs
- * on a server and this check runs offline in the browser — but it catches the
- * handful somebody types when they are in a hurry to get to the wallet.
- */
 const OBVIOUS = [
   "password",
   "passw0rd",
@@ -56,7 +18,6 @@ const OBVIOUS = [
   "demo1234",
 ];
 
-/** Characters typed in a straight line. `qwertyui` and `abcdefgh` are not entropy. */
 const RUNS = [
   "abcdefghijklmnopqrstuvwxyz",
   "qwertyuiop",
@@ -77,7 +38,6 @@ function hasStraightRun(lower, len = 6) {
   return false;
 }
 
-/** One character, or one short unit, repeated to reach the length. */
 function isRepetitive(value) {
   if (/^(.)\1+$/.test(value)) return true;
   for (let unit = 2; unit <= 4; unit++) {
@@ -88,15 +48,6 @@ function isRepetitive(value) {
   return false;
 }
 
-/**
- * Assess a candidate wallet password.
- *
- * @param {string} password
- * @param {{email?:string, name?:string}} [context] the account's own details,
- *   which are the first thing anybody with the keystore would try.
- * @returns {{ok:boolean, score:0|1|2|3|4, label:string, reason:string}}
- *   `reason` is empty when `ok` is true. It is written to be shown verbatim.
- */
 export function assessWalletPassword(password, context = {}) {
   const value = String(password || "");
   const lower = value.toLowerCase();
@@ -146,15 +97,6 @@ export function assessWalletPassword(password, context = {}) {
     };
   }
 
-  /**
-   * The account's own details are the first personalised guess anyone makes.
-   *
-   * Split into WORDS, not compared whole: "Adaeze Okonkwo" never appears in a
-   * password, but "okonkwo" does, and a surname is precisely what somebody
-   * reaches for. The email local part is split on its separators for the same
-   * reason. Four characters is the floor — below that the token is too common to
-   * blocklist without refusing innocent passwords.
-   */
   const ownTokens = [
     ...String(context.email || "").split("@")[0].toLowerCase().split(/[^a-z0-9]+/i),
     ...String(context.name || "").toLowerCase().split(/[^a-z0-9]+/i),
@@ -173,7 +115,6 @@ export function assessWalletPassword(password, context = {}) {
     }
   }
 
-  // Past the floor. Everything below only grades how much room is left.
   const classes =
     (/[a-z]/.test(value) ? 1 : 0) +
     (/[A-Z]/.test(value) ? 1 : 0) +

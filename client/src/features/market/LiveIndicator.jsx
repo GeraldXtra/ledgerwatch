@@ -1,13 +1,8 @@
 import { useEffect, useState } from "react";
 
-/**
- * "Updated Xs ago" with a small pulsing dot. When `stale`, shows a quiet
- * "Prices delayed" note instead. `lastFetchedAt` is a client timestamp (ms).
- */
 export default function LiveIndicator({ lastFetchedAt, stale }) {
   const [, force] = useState(0);
 
-  // Re-render every 5s so "Xs ago" stays current.
   useEffect(() => {
     const t = setInterval(() => force((n) => n + 1), 5000);
     return () => clearInterval(t);

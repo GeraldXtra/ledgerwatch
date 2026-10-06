@@ -15,7 +15,6 @@ const payments = require("../controllers/payments.controller");
 
 const router = express.Router();
 
-// All receivables routes require auth and are scoped to req.user.
 router.use(requireAuth);
 
 router.post("/", create);
@@ -29,7 +28,6 @@ router.get("/:id/reminders", listReminders);
 router.post("/:id/remind", remind);
 router.post("/:id/send", send);
 
-// Partial payments + receipts (nested under a debt).
 router.post("/:id/payments", payments.record);
 router.get("/:id/payments", payments.list);
 router.delete("/:id/payments/:paymentId", payments.remove);

@@ -5,14 +5,6 @@ import PublicShell from "../components/PublicShell";
 import { Blocks, slugify } from "../docs/Blocks";
 import { GUIDE, GROUPS } from "../docs/guide";
 
-/**
- * THE USER GUIDE
- *
- * Public, so somebody deciding whether to sign up can read how the product
- * works before they do, and reachable from the Help icon inside the app. A
- * sidebar of every page grouped by section, a readable column, and previous
- * and next links at the foot. On a phone the sidebar becomes a select.
- */
 export default function DocsPage() {
   const { slug } = useParams();
   const { hash } = useLocation();
@@ -29,14 +21,6 @@ export default function DocsPage() {
   useEffect(() => {
     if (!page) return;
     document.title = `${page.title} · LedgerWatch guide`;
-    // A link such as /docs/settings#payout-details lands on that heading.
-    // The router does not scroll to a hash by itself, and headings carry ids
-    // made from their text, so this does it. Anything else starts at the top.
-    //
-    // Pictures above the heading load lazily and have no reserved height, so
-    // a single scroll lands correctly and is then pushed down as they arrive.
-    // The scroll is repeated for a moment, and stops the instant the reader
-    // scrolls for themselves.
     const target = hash ? document.getElementById(hash.slice(1)) : null;
     if (!target) {
       window.scrollTo(0, 0);

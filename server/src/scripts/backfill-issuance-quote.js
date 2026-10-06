@@ -1,38 +1,3 @@
-/**
- * Back-fill `PaymentAddress.quote` for rows issued before it existed. (LW-005.)
- *
- * WHAT THIS CAN AND CANNOT RECOVER
- *
- * Until now a payment address stored ONE set of figures, and
- * `resyncActivePaymentAddress` overwrote them after every partial settlement and
- * every edit to the invoice. So for any address that has been resynced, the
- * issuance quote is gone. It was not archived anywhere; it was assigned over.
- *
- * This script therefore does two different things depending on the row, and it
- * is careful to say which:
- *
- *   NEVER RESYNCED  — the current figures ARE the issuance figures. The quote is
- *                     exact, and `reconstructed` is false.
- *   RESYNCED        — the current figures are what is still owed, not what was
- *                     asked. The best available reconstruction is the invoice's
- *                     ORIGINAL amount converted at the address's own stored
- *                     rate, which is what the quote would have been if the
- *                     address was issued before any payment landed. That is a
- *                     reasonable guess and it is NOT evidence, so
- *                     `reconstructed` is true and anything settling a dispute
- *                     must check that flag.
- *
- * Telling the two apart: an address that has settled nothing and whose
- * `invoiceBalanceNgn` still equals the invoice's full amount has not been
- * rewritten. Anything else has, or may have.
- *
- * Dry run by default. Idempotent — a row that already has `quote.issuedAt` is
- * skipped, so re-running after a partial run is safe.
- *
- *   node src/scripts/backfill-issuance-quote.js            # report only
- *   node src/scripts/backfill-issuance-quote.js --apply    # write
- */
-
 require("dotenv").config();
 const mongoose = require("mongoose");
 const connectDB = require("../config/db");
@@ -41,7 +6,6 @@ const Debt = require("../models/Debt");
 
 const APPLY = process.argv.includes("--apply");
 
-/** Two decimal places, rounded up — the same rule `usdcForNgn` uses. */
 function usdcForNgn(ngn, rate) {
   if (!(rate > 0)) return null;
   return Math.ceil((ngn / rate) * 100) / 100;
@@ -69,15 +33,11 @@ async function main() {
     const debt = await Debt.findById(pa.debtId).select("amount").lean();
 
     if (!pa.ngnPerUsd || !pa.rateTimestamp) {
-      // Without the rate there is nothing to reconstruct FROM. Left alone rather
-      // than filled with a guess that would look like a record.
       console.log(`  SKIP  ${pa.address}  no stored rate`);
       skipped++;
       continue;
     }
 
-    // Untouched by resync: nothing settled AND the stored balance still matches
-    // the invoice's full amount.
     const settledNothing = !pa.settledNgn || pa.settledNgn === 0;
     const balanceIntact =
       debt && Math.abs((pa.invoiceBalanceNgn || 0) - (debt.amount || 0)) < 0.005;
@@ -88,7 +48,6 @@ async function main() {
       quotedNgn = pa.invoiceBalanceNgn;
       exact++;
     } else if (debt) {
-      // The invoice's ORIGINAL amount at this address's own rate. See the header.
       quotedNgn = debt.amount;
       reconstructed++;
     } else {
@@ -118,7 +77,6 @@ async function main() {
         ngnPerUsd: pa.ngnPerUsd,
         rateTimestamp: pa.rateTimestamp,
         rateIsFallback: Boolean(pa.rateIsFallback),
-        // The row's own creation time is the best issuance timestamp available.
         issuedAt: pa.createdAt || pa.rateTimestamp,
         reconstructed: !isExact,
       };
@@ -139,11 +97,6 @@ async function main() {
   await mongoose.disconnect();
 }
 
-/**
- * ONLY WHEN RUN DIRECTLY. A migration that runs on `require` is a migration that
- * runs whenever anything sweeps this directory — which happened once during the
- * audit that produced this script.
- */
 if (require.main === module) {
   main()
     .then(() => process.exit(0))

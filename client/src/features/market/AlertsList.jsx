@@ -1,7 +1,4 @@
 import { BellOff, TrendingDown, TrendingUp, X } from "lucide-react";
-// The adaptive price formatter, not `usd`. `usd` caps at two decimals, so a
-// coin worth a hundred thousandth of a dollar — PEPE, SHIB and most of the long
-// tail the resolver made tradeable — printed as "$0" on the alert card.
 import { price as fmtPrice } from "./format";
 import { Button, Card, EmptyState, StatusPill } from "../../components/ui";
 
@@ -25,8 +22,6 @@ export default function AlertsList({ alerts, onTrade, onDismiss, busyId }) {
               <div className="row space-between">
                 <div className="row">
                   <span className="coin-chip">{a.symbol}</span>
-                  {/* The suggestion is a recommendation, labelled as such — the
-                      user is free to take the opposite side. */}
                   <span className="muted small">Agent suggests</span>
                   <StatusPill status={a.suggestion} />
                 </div>

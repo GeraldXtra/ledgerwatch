@@ -1,27 +1,3 @@
-/**
- * Replace the stale global unique index on PushSubscription.endpoint with
- * {endpoint, userId}.
- *
- * WHY THIS EXISTS
- *
- * `endpoint_1` was unique across the whole collection, so a browser's push
- * channel could belong to exactly one account. The controller, since the LW-009
- * fix, upserts on {endpoint, userId}. The two contradicted each other: a second
- * account signing in on the same browser — a shared computer, or the demo
- * account alongside a real one — matched no row of its own, tried to insert, and
- * was rejected by the index. The caller turned that into a 500 reading "Failed
- * to subscribe", so the owner was told notifications had failed with no reason
- * and no way to fix it, since a service worker registration keeps the same
- * endpoint for the life of the installation.
- *
- * Mongoose does not drop an index that has left the schema, so this has to be
- * run against every existing deployment.
- *
- * Idempotent. Safe to run repeatedly; the second run reports nothing to do.
- *
- *   node src/scripts/migrate-push-endpoint-index.js            (dry run, default)
- *   node src/scripts/migrate-push-endpoint-index.js --apply
- */
 require("dotenv").config();
 const mongoose = require("mongoose");
 
@@ -30,14 +6,6 @@ const COLLECTION = "pushsubscriptions";
 const STALE = "endpoint_1";
 const WANTED = "endpoint_1_userId_1";
 
-/**
- * ONLY WHEN RUN DIRECTLY.
- *
- * This body used to execute on `require`, so anything that loaded the scripts
- * directory — a test sweep, a tooling pass, an editor's module graph — connected
- * to Mongo and started a migration. Guarded on being the process entry point,
- * which is what `node src/scripts/<name>.js` gives and a require never does.
- */
 if (require.main === module) {
   (async () => {
     const uri = process.env.MONGO_URI;
@@ -64,8 +32,6 @@ if (require.main === module) {
     const stale = idx.find((i) => i.name === STALE);
     const wanted = idx.find((i) => i.name === WANTED);
 
-    // The replacement is created first, so the collection is never left without a
-    // uniqueness guard on the pair.
     if (!wanted) {
       console.log(`\n    ${WANTED} is missing and must be created.`);
       if (APPLY) {

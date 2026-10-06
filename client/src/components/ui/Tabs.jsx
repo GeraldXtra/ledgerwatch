@@ -1,6 +1,3 @@
-/**
- * Segmented control (auth login/register toggle). `options`: [{ id, label }].
- */
 export function Segmented({ options, value, onChange }) {
   return (
     <div className="seg" role="tablist">

@@ -4,10 +4,6 @@ import { conditionText, price as fmtPrice } from "./format";
 import { Button, Card, EmptyState } from "../../components/ui";
 import WatchEditRow from "./WatchEditRow";
 
-/**
- * Active watches with editable conditions (PATCH, no delete/recreate) and remove.
- * `onEdit(watch, {type,value})` and `onRemove(watch)` are provided by the parent.
- */
 export default function WatchList({ watches, onEdit, onRemove }) {
   const [editingId, setEditingId] = useState(null);
 

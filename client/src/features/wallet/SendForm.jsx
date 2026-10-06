@@ -9,59 +9,27 @@ import { NATIVE_TRANSFER_GAS, preflightGas } from "./gas";
 import GasNotice from "./GasNotice";
 import NetworkScopeNotice from "./NetworkScopeNotice";
 
-/**
- * Send flow with a hard human-in-the-loop gate:
- *   form → estimate gas → REVIEW summary → password → sign LOCALLY → broadcast.
- * The key is decrypted only for the signing call and is discarded immediately. The
- * agent can pre-fill this form but never signs — only the user's password does.
- */
 export default function SendForm({ address, chain, tokens: tokenList, onSent, onConfirmed }) {
   const toast = useToast();
-  const [step, setStep] = useState("form"); // form → review
+  const [step, setStep] = useState("form");
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
-  const [asset, setAsset] = useState("native"); // "native" | token address
-  const [estimate, setEstimate] = useState(null); // { gasLimit, feeEth }
-  const [gasPlan, setGasPlan] = useState(null); // preflightGas result
+  const [asset, setAsset] = useState("native");
+  const [estimate, setEstimate] = useState(null);
+  const [gasPlan, setGasPlan] = useState(null);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  /**
-   * EVERY TOKEN THE WALLET SHOWS, NOT JUST THE REGISTRY ONES.
-   *
-   * This read `chain.tokens` alone while the wallet's balance list is the
-   * registry PLUS the owner's own imports, so a token you imported appeared with
-   * a real balance and then was simply missing from this dropdown — the app
-   * displaying money it refused to move, and refusing by silent absence rather
-   * than for a stated reason (LW-038). The caller passes the same list it read
-   * the balances from; `chain.tokens` remains the fallback so a caller that
-   * passes nothing behaves as before.
-   */
   const tokens = tokenList || chain.tokens || [];
   const selectedToken = asset === "native" ? null : tokens.find((t) => t.address === asset);
   const symbol = selectedToken ? selectedToken.symbol : chain.nativeSymbol;
   const decimals = selectedToken ? selectedToken.decimals : chain.decimals;
 
-  /**
-   * Sending to your own address is ALWAYS a no-op that costs a fee — the funds
-   * leave and come straight back on the same network. It is also the exact
-   * signature of someone trying to move assets to another chain, because the
-   * address is identical everywhere so it looks like the natural way to do it.
-   *
-   * This is caught BEFORE gas estimation, so the mistake costs nothing at all.
-   */
   const isSelfSend = Boolean(
     to && address && ethers.isAddress(to) && to.toLowerCase() === address.toLowerCase()
   );
 
-  /**
-   * A recipient that is a CONTRACT THIS APP KNOWS is never a person. Sending
-   * tokens to a token's own contract, or to the exchange router, is one of the
-   * commonest ways money is destroyed: the transfer succeeds, the balance
-   * leaves, and no key on earth can move it again. The registry lists exactly
-   * these addresses, so the mistake can be refused before it costs a fee.
-   */
   const knownContract = (() => {
     if (!to || !ethers.isAddress(to)) return null;
     const lower = to.toLowerCase();
@@ -77,9 +45,6 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
     e.preventDefault();
     setError("");
     if (!ethers.isAddress(to)) return setError("Enter a valid recipient address.");
-    // Blocked outright rather than warned-and-allowed: there is no legitimate
-    // reason to pay a fee to send funds to yourself on the same chain, so a
-    // "proceed anyway" option would only ever help someone make the mistake.
     if (isSelfSend) return setStep("self");
     if (knownContract) {
       return setError(
@@ -98,10 +63,6 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
     try {
       const provider = getProvider(chain.chainId);
 
-      // Build the exact transaction, then ask whether it can be paid for BEFORE
-      // showing the confirm step. Previously the fee was estimated and displayed
-      // but never checked against the balance, so a zero-gas wallet only found
-      // out at signing time, after typing a password.
       const tx = selectedToken
         ? {
             to: selectedToken.address,
@@ -113,7 +74,6 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
         provider,
         from: address,
         tx,
-        // A native send has to cover the amount AND the fee out of one balance.
         valueWei: selectedToken ? 0n : value,
         fallbackGas: selectedToken ? undefined : NATIVE_TRANSFER_GAS,
       });
@@ -138,7 +98,6 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
     setBusy(true);
     try {
       const provider = getProvider(chain.chainId);
-      // Decrypt on demand; the plaintext key lives only for this signing call.
       const unlocked = await unlockWallet(password);
       const signer = unlocked.connect(provider);
 
@@ -151,7 +110,6 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
         txResp = await signer.sendTransaction({ to, value });
       }
 
-      // Record PUBLIC data only.
       const recorded = await recordTx({
         chainId: chain.chainId,
         hash: txResp.hash,
@@ -162,17 +120,10 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
         tokenAddress: selectedToken ? selectedToken.address : null,
         direction: "out",
       }).catch((err) => {
-        // Carried, not swallowed. The success toast below used to say "Track it
-        // in history" — and with no row written there was no history to track it
-        // in, and the reconciliation the comment relies on only ever discovers
-        // INBOUND transfers, never an outbound send.
         console.error("[send] the transfer is on chain but was not recorded:", err && err.message);
         return null;
       });
 
-      // Settle the status in the background — a testnet confirmation takes 10-30s and
-      // must never block the UI. WalletPage also reconciles stragglers on load, so a
-      // tx that confirms after a reload still resolves.
       if (recorded && recorded._id) {
         txResp
           .wait()
@@ -183,13 +134,9 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
           .catch(() => {});
       }
 
-      // NAMES THE CHAIN. "Sent 80 USDC" alone is what let a same-chain transfer
-      // read as a completed cross-chain move; the network is the one fact that
-      // makes the outcome unambiguous.
       if (recorded && recorded._id) {
         toast(`Sent ${amount} ${symbol} on ${chain.name}. Track it in history.`, { type: "success" });
       } else {
-        // Honest about both halves: the money moved, the record did not.
         toast(
           `Sent ${amount} ${symbol} on ${chain.name}, but it could not be saved to your ` +
             `history. It is on the network — check the explorer for ${String(txResp.hash).slice(0, 10)}…`,
@@ -212,11 +159,6 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
     return msg;
   }
 
-  /**
-   * The blocked self-send. Deliberately explains rather than just refusing —
-   * someone who lands here is almost certainly trying to bridge, and "invalid
-   * recipient" would teach them nothing and leave them to try again.
-   */
   if (step === "self") {
     return (
       <div className="stack">
@@ -266,9 +208,6 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
           </p>
         </div>
 
-        {/* The network leads the summary and is emphasised: it is the field
-            most likely to be assumed rather than read, and the only one whose
-            misreading cannot be undone after signing. */}
         <div className="review-chain-banner">
           <Network size={15} />
           <span>
@@ -286,9 +225,6 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
 
         <GasNotice plan={gasPlan} chain={chain} />
 
-        {/* The password field is withheld entirely when the fee cannot be paid.
-            Offering it would invite the user to type a password for a
-            transaction that is guaranteed to fail. */}
         {gasPlan && gasPlan.ok && (
           <Field label="Wallet password">
             <Input
@@ -308,10 +244,6 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
             Back
           </Button>
           <Button variant="primary" type="submit" disabled={busy || !gasPlan || !gasPlan.ok}>
-            {/* Three different refusals, three different labels. A reverted
-                transaction used to reach this button reading "Sign & send"
-                behind an ordinary fee, and "Not enough ETH" would be a lie for
-                it: topping up gas changes nothing. */}
             {busy
               ? "Signing…"
               : !gasPlan || gasPlan.ok
@@ -343,8 +275,6 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
         <Input value={to} onChange={(e) => setTo(e.target.value)} placeholder="0x…" required />
       </Field>
 
-      {/* Caught at typing time as well as at submit, so the explanation arrives
-          before the user commits to the idea rather than after. */}
       {isSelfSend && (
         <p className="inline-warn">
           That is your own address. Sending to yourself stays on {chain.name} and moves nothing

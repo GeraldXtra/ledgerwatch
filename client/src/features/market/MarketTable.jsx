@@ -13,11 +13,6 @@ const SORTS = {
     (a.price_change_percentage_24h || 0) - (b.price_change_percentage_24h || 0),
 };
 
-/**
- * Live watched-coin table: logo, name/symbol, live (animated) price, 24h change,
- * inline 7d sparkline. Sortable by name / price / 24h change. Clicking a row opens
- * the coin detail modal. `rows` = [{ ...market, watchCount }].
- */
 export default function MarketTable({ rows, onSelect, live }) {
   const [sort, setSort] = useState("change");
   const [dir, setDir] = useState("desc");
@@ -117,9 +112,6 @@ export default function MarketTable({ rows, onSelect, live }) {
                       </div>
                     </td>
                     <td data-label="Price" align="right" className="ta-right num">
-                      {/* An unreadable price says so. It used to be dropped from
-                          the table entirely, which read as "you follow no coins"
-                          rather than "the feed is down". */}
                       {m.priceUnavailable ? (
                         <span className="muted small" title="The price feed did not answer for this coin. Your watch is still active.">
                           Unavailable

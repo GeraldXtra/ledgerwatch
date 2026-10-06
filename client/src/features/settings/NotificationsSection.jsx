@@ -50,15 +50,6 @@ export default function NotificationsSection() {
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
 
-  /**
-   * The push state had NO failure handling at all: the rejection went nowhere,
-   * `push` stayed null, and the render falls through to the "Enable
-   * notifications" button for a null — so somebody who already has notifications
-   * on was shown the enable button, and the per-category toggles (which only
-   * appear when the state says subscribed) vanished. A failed load stating a
-   * definite fact about the world is the LW-029 pattern; it now says it could
-   * not look, and offers to look again.
-   */
   const refresh = () =>
     getPushState()
       .then((state) => {
@@ -78,16 +69,6 @@ export default function NotificationsSection() {
 
   const toggleSend = (k) => (e) => setAutoSend((a) => ({ ...a, [k]: e.target.checked }));
 
-  /**
-   * OPTIMISTIC, WITH THE ROLLBACK THAT MAKES IT HONEST.
-   *
-   * The checkbox was flipped first and left flipped when the save failed, so
-   * somebody who unticked "Market alerts" during a network blip saw it unticked,
-   * believed it was off, and kept receiving market alerts — a control showing a
-   * state it does not have. ARCHITECTURE §9.2 allows optimistic state and makes
-   * rollback on failure mandatory; this is the smallest possible version of the
-   * project's stated failure mode.
-   */
   async function savePrefs(next) {
     const previous = prefs;
     setPrefs(next);
@@ -123,9 +104,6 @@ export default function NotificationsSection() {
     setMsg("");
     try {
       const res = await enablePush();
-      // Every branch says something specific. This used to have no catch at all,
-      // so a throw anywhere in enablePush left the button silently doing nothing
-      // and made a broken pipeline look like an unresponsive click.
       setMsg(
         res.ok
           ? "Notifications enabled on this device. Send a test below to confirm."
@@ -155,14 +133,6 @@ export default function NotificationsSection() {
     setBusy(true);
     setMsg("");
     try {
-      /**
-       * READ THE ANSWER. `disablePush` was changed to report each half of the
-       * work honestly ({ok, reason, detail}) instead of always returning ok —
-       * but this call discarded it, so the screen could still say notifications
-       * were off while the subscription survived on the server and reminders
-       * kept arriving. Reporting a failure nobody renders is the same silence,
-       * one level up.
-       */
       const off = await disablePush();
       if (off && off.ok === false) {
         toast(
@@ -201,13 +171,9 @@ export default function NotificationsSection() {
         </p>
       </div>
 
-      {/* ---- Device notifications ---- */}
       <div className="settings-section">
         <div className="overline">On this device</div>
 
-        {/* The permission value, stated plainly. Without it "nothing happens when
-            I press enable" is indistinguishable from "the browser blocked this
-            months ago", and the API cannot re-prompt once denied. */}
         {push && push.supported && (
           <div className="row space-between perm-row">
             <span className="muted small">Browser permission</span>
@@ -319,7 +285,6 @@ export default function NotificationsSection() {
         </p>
       </div>
 
-      {/* ---- Automatic reminder sending (unchanged behaviour) ---- */}
       <form className="settings-section stack" onSubmit={saveSending}>
         <div>
           <div className="overline">Automatic reminders</div>
@@ -365,9 +330,6 @@ export default function NotificationsSection() {
           </span>
         </label>
 
-        {/* Said plainly, because a reminder silently sitting in a spam folder
-            looks identical to one that was never sent, and the user would
-            reasonably blame the app rather than their DNS. */}
         {autoSend.enabled && autoSend.email && (
           <p className="muted small settings-note">
             <strong>About spam folders.</strong> Reminders sent from a personal Gmail address

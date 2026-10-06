@@ -67,31 +67,9 @@ function Receivables() {
   const wanted = params.get("view");
   const tab = VIEWS.includes(wanted) ? wanted : "overview";
 
-  /**
-   * The analytics live here rather than inside the overview panel, because the
-   * folio at the top of the page states them and the folio belongs to the page.
-   *
-   * This is the change that retired the row of four boxed KPI cards. The same
-   * request, the same numbers, stated once at the top in the figures rail
-   * instead of twice: once in a box and once in a chart caption.
-   */
   const [analytics, setAnalytics] = useState(null);
   const [analyticsError, setAnalyticsError] = useState("");
 
-  /**
-   * WHY THIS IS KEYED RATHER THAN FETCHED ONCE.
-   *
-   * The effect below had an empty dependency array, so the four figures were
-   * read at mount and never again. Recording a payment in the tab underneath
-   * left "Outstanding" and "Collected" showing the figures from before it, and
-   * switching tabs did not help either — only a full page reload corrected
-   * them. The intent quoted above was that these numbers could never disagree
-   * between two places, and they were instead disagreeing with the invoice list
-   * on the same screen, immediately after the action that changed them.
-   *
-   * `analyticsKey` is bumped by the ledger below whenever it changes something
-   * that moves money, and by a tab change, so the rail restates itself.
-   */
   const [analyticsKey, setAnalyticsKey] = useState(0);
   const refreshAnalytics = useCallback(() => setAnalyticsKey((k) => k + 1), []);
 
@@ -116,8 +94,6 @@ function Receivables() {
 
   const overdue = analytics?.countByStatus?.overdue || 0;
 
-  // Nothing is stated until it is known. An empty figures rail is honest; a rail
-  // of zeroes while the request is still in flight is a wrong number.
   const figures = analytics
     ? [
         {
@@ -173,7 +149,6 @@ function Receivables() {
   );
 }
 
-// ToastProvider wraps the tab so Receivables and its children can raise toasts.
 export default function ReceivablesPage() {
   return (
     <ToastProvider>

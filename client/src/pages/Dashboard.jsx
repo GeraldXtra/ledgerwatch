@@ -52,11 +52,6 @@ function viewOf(sectionId, search) {
   return views.find((v) => v.id === wanted) || views[0];
 }
 
-/**
- * The single foreground push bridge for the whole app. It lives in the shell
- * because the service worker suppresses the OS notification whenever a window
- * is focused and has no idea which route the user is on.
- */
 function PushBridge() {
   const toast = useToast();
 

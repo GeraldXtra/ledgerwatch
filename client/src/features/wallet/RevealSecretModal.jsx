@@ -4,40 +4,13 @@ import { Button, Field, Input, Modal } from "../../components/ui";
 import { revealSecrets, markBackedUp } from "./keystore";
 import { verifySecurityAnswers, getSecurityQuestions } from "./walletApi";
 
-/**
- * REVEAL THE WALLET'S SECRET MATERIAL, FOR BACKUP.
- *
- * Without this the wallet is a trap: the encrypted keystore sits in one browser
- * and the owner has no way to get their phrase out, so clearing site data or
- * changing machine loses the funds permanently even though nothing was stolen.
- *
- * ---------------------------------------------------------------------------
- * THE RULES THIS COMPONENT FOLLOWS
- * ---------------------------------------------------------------------------
- * 1. Decryption happens HERE, in the browser, through `revealSecrets` — which
- *    calls the same `unlockWallet` the signing path uses. There is no second
- *    decryption path in this codebase and this does not add one.
- * 2. The phrase and key NEVER reach the server: not in a body, not in a query,
- *    not in a log, not in an error message.
- * 3. Secret text is NOT PUT IN THE DOM until the user explicitly asks to see it.
- *    A CSS blur is a visual effect, not a protection — the characters would
- *    still be in the page, readable by an extension or a screen reader, and
- *    present in a screenshot taken by a screen-sharing tool. So the value stays
- *    in a ref until revealed and is stripped from state on hide.
- * 4. It clears itself: 60 seconds after revealing, on close, and on unmount.
- */
-
 const AUTO_HIDE_MS = 60000;
 
 export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
-  // step: warn -> auth -> shown
   const [step, setStep] = useState("warn");
   const [password, setPassword] = useState("");
   const [answers, setAnswers] = useState({});
   const [questions, setQuestions] = useState(null);
-  // Why the extra-verification check could not be made, when it could not, plus
-  // the owner's explicit decision to go on without it. Both are needed: a null
-  // `questions` alone cannot tell "none configured" from "could not ask".
   const [questionsError, setQuestionsError] = useState("");
   const [skipQuestions, setSkipQuestions] = useState(false);
   const [retryQuestions, setRetryQuestions] = useState(0);
@@ -46,16 +19,10 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
   const [copied, setCopied] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
 
-  /**
-   * The decrypted material lives in a ref, NOT in state, so it is never part of
-   * a render until `visible` is deliberately set. `visible` holds the same value
-   * only for as long as it is on screen.
-   */
   const secretRef = useRef(null);
   const [visible, setVisible] = useState(null);
   const [hasMnemonic, setHasMnemonic] = useState(true);
 
-  /** Wipe every copy. Called on hide, on close, on unmount and on the timer. */
   const wipe = useCallback(() => {
     secretRef.current = null;
     setVisible(null);
@@ -73,25 +40,8 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
     onClose();
   }, [onClose, wipe]);
 
-  // Clear on unmount — navigating away must not leave a phrase in memory.
   useEffect(() => () => wipe(), [wipe]);
 
-  /**
-   * Whether this account added the optional extra questions.
-   *
-   * A FAILED CHECK IS NOT "NO QUESTIONS". This recorded `null` on any error,
-   * which is the same value as "this account configured none", so the dialog
-   * went straight to password-only — silently. A server outage, a dropped
-   * connection, or anybody with local access blocking one request removed the
-   * layer the owner had switched on, on the path that hands over the recovery
-   * phrase for a wallet holding real mainnet funds, and nothing on screen said
-   * the check had not run.
-   *
-   * It still does not hard-block: this wallet is non-custodial, and a server
-   * that is down must not be able to lock an owner out of their own backup. But
-   * the failure is now stated, retryable, and skipping it costs a deliberate
-   * click, so what happens is at least the owner's decision.
-   */
   useEffect(() => {
     if (!open) return;
     setQuestionsError("");
@@ -110,13 +60,11 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
       });
   }, [open, retryQuestions]);
 
-  /** Auto-hide countdown. */
   useEffect(() => {
     if (!visible) return undefined;
     setSecondsLeft(Math.round(AUTO_HIDE_MS / 1000));
     const tick = setInterval(() => setSecondsLeft((s) => (s > 0 ? s - 1 : 0)), 1000);
     const hide = setTimeout(() => {
-      // Back to the concealed state, not closed: the user may still be writing.
       setVisible(null);
       setSecondsLeft(0);
     }, AUTO_HIDE_MS);
@@ -138,9 +86,6 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
 
     setBusy(true);
     try {
-      // The OPTIONAL extra layer, when the user turned it on. Checked server
-      // side, where a rate limit is actually enforceable. The answers travel;
-      // the secret never does.
       if (questions && questions.length) {
         const ok = await verifySecurityAnswers(
           questions.map((q, i) => ({ id: q.id, answer: answers[i] || "" }))
@@ -151,15 +96,9 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
         }
       }
 
-      /**
-       * scrypt runs here. It takes seconds ON PURPOSE — that cost is the real
-       * brute-force protection on this screen, far more than any counter the UI
-       * could keep, since anything client-side is bypassable with devtools.
-       */
       const secrets = await revealSecrets(password);
 
       if (mode === "phrase" && !secrets.mnemonic) {
-        // Not a failure to fix — arithmetic. A key carries no seed.
         setHasMnemonic(false);
         secretRef.current = secrets.privateKey;
       } else {
@@ -167,7 +106,6 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
         secretRef.current = mode === "phrase" ? secrets.mnemonic : secrets.privateKey;
       }
       setStep("shown");
-      // Getting this far means they can recover the wallet, so stop nagging.
       markBackedUp();
     } catch (err) {
       const msg = (err && (err.shortMessage || err.message)) || "";
@@ -198,8 +136,6 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
   const title = isPhrase ? "Secret recovery phrase" : "Private key";
 
   return (
-    // `label` (not `title`) — Modal takes { onClose, label, size }, and it is
-    // what names the dialog for assistive technology.
     <Modal label={title} onClose={closeAll}>
       <div className="row space-between">
         <h3 className="section-title row">
@@ -287,9 +223,6 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
             </>
           )}
 
-          {/* The extra layer could not be checked. Said out loud, because the
-              alternative — quietly falling through to password-only — is a
-              security control the owner configured failing open with no trace. */}
           {questionsError && (
             <div className="against-note">
               <TriangleAlert size={15} />
@@ -355,9 +288,6 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
           )}
 
           {!visible ? (
-            /* Concealed. The secret is NOT in the DOM at this point — only in a
-               ref, so a screen share, an extension or a screenshot catches
-               nothing. Revealing is a deliberate act. */
             <button type="button" className="reveal-cover" onClick={() => setVisible(secretRef.current)}>
               <Eye size={22} />
               <span className="reveal-cover-title">Tap to reveal</span>

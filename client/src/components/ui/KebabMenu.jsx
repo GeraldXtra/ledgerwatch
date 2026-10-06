@@ -7,13 +7,6 @@ const MENU_WIDTH = 190;
 const MENU_ITEM_HEIGHT = 36;
 const GAP = 6;
 
-/**
- * Row-action dropdown. `items`: [{ label, icon, danger?, onSelect }].
- * Positioned `fixed` (escapes table overflow clipping, flips up near the
- * viewport edge). Implements the ARIA menu-button keyboard pattern: focus
- * moves to the first item on open, ArrowUp/ArrowDown cycle, Esc/Tab close,
- * and focus returns to the trigger.
- */
 export default function KebabMenu({ items, label = "Row actions" }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -38,7 +31,6 @@ export default function KebabMenu({ items, label = "Row actions" }) {
     setOpen((o) => !o);
   }
 
-  // Focus the first item when the menu opens.
   useLayoutEffect(() => {
     if (open && menuRef.current) {
       const first = menuRef.current.querySelector("button");
@@ -58,8 +50,6 @@ export default function KebabMenu({ items, label = "Row actions" }) {
     }
 
     function onDown(e) {
-      // The menu is portaled to <body>, so it's outside wrapRef — treat clicks
-      // inside either the trigger wrap OR the menu as "inside".
       const inWrap = wrapRef.current && wrapRef.current.contains(e.target);
       const inMenu = menuRef.current && menuRef.current.contains(e.target);
       if (!inWrap && !inMenu) close(false);
@@ -86,7 +76,6 @@ export default function KebabMenu({ items, label = "Row actions" }) {
         next.focus();
       }
     }
-    // reposition/close on scroll & resize so the fixed menu never drifts
     function onScroll() {
       close(false);
     }

@@ -6,32 +6,8 @@ import TokenLogo from "../../components/TokenLogo";
 import CoinDetailModal from "../market/CoinDetailModal";
 import { coinIdForSymbol, stableUsdPrice, isVerifiedRow } from "./usdValue";
 
-/**
- * What opens when a wallet row is clicked.
- *
- * For any token the price feed knows, this is the same coin detail the market
- * screen shows: chart with timeframes, market cap, volume, the day's range, and
- * the position, with the quantity taken from the chain rather than a simulated
- * book. It is deliberately the SAME component, so a coin cannot be described
- * two different ways on two screens.
- *
- * For a token the feed does not list, usually one the owner added by contract
- * address, there is no chart to show, so this renders what is actually known:
- * the network, the balance read from the chain, its value if a price exists,
- * and the contract. It says plainly that there is no market data rather than
- * showing an empty chart frame.
- */
 export default function HoldingDetail({ balance, chain, price, onRemove, onClose }) {
   const symbol = balance.symbol;
-  /**
-   * An unverified contract is not identified by its ticker here either.
-   *
-   * Looking a symbol up in the coin map is what opened the full market screen —
-   * chart, market cap, the day's range — for a token that merely CALLS itself
-   * USDC, which is about as strong an endorsement as this app can give. A token
-   * the owner imported or accepted from the discovery list gets the plain
-   * "no market data" panel and its contract address instead.
-   */
   const verified = isVerifiedRow(balance);
   const coinId = verified ? coinIdForSymbol(symbol) : null;
   const [market, setMarket] = useState(null);
@@ -41,8 +17,6 @@ export default function HoldingDetail({ balance, chain, price, onRemove, onClose
     if (!coinId) return undefined;
     let active = true;
     (async () => {
-      // Same retry shape as the chart: the server fills its cache on demand, so
-      // the first answer for a coin can be empty while that fill is in flight.
       for (let attempt = 0; attempt <= 3; attempt++) {
         try {
           const { data } = await http.get("/api/markets", { params: { ids: coinId } });
@@ -94,8 +68,6 @@ export default function HoldingDetail({ balance, chain, price, onRemove, onClose
     <Modal label={`${symbol} details`} onClose={onClose}>
       <div className="row space-between coin-detail-head">
         <div className="row">
-          {/* Keyed on the contract for an unverified token, so a borrowed
-              ticker cannot pull the genuine coin's artwork in here. */}
           <TokenLogo
             symbol={verified ? symbol : balance.address || symbol}
             size={34}

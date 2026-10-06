@@ -4,9 +4,6 @@ const { listChains, getChain } = require("../config/chains");
 const { sendToChain, rpcCallTyped } = require("../services/rpc.service");
 const { sanitizeText } = require("../services/walletHistory.service");
 
-// Strict allowlist: read methods + raw-tx broadcast + receipt polling. Notably it
-// does NOT (and cannot) include any signing method — the server never holds a key.
-// Anything not on this list is rejected before it ever reaches the upstream RPC.
 const ALLOWED_METHODS = new Set([
   "eth_chainId",
   "net_version",
@@ -28,7 +25,6 @@ const ALLOWED_METHODS = new Set([
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
-// GET /api/wallet/chains  -> enabled chains (rpc stripped) + mainnet flag.
 async function chains(req, res) {
   return res.json({
     chains: listChains(),
@@ -36,10 +32,6 @@ async function chains(req, res) {
   });
 }
 
-// POST /api/wallet/rpc/:chainId  -> JSON-RPC proxy with a strict method allowlist.
-// Body is a standard JSON-RPC request (single object or a batch array), so the
-// client can point ethers.JsonRpcProvider straight at this URL. The upstream RPC
-// URL (which may carry the Alchemy key) never reaches the browser.
 const MAX_BATCH = 24;
 
 async function rpc(req, res) {
@@ -51,13 +43,6 @@ async function rpc(req, res) {
     const items = Array.isArray(body) ? body : [body];
     if (items.length === 0) return res.status(400).json({ error: "Empty request" });
 
-    /**
-     * BOUNDED. The only ceiling on a batch used to be the global 3 MB body
-     * limit, which is roughly fifty thousand calls in one request against the
-     * operator's upstream key, from any registered account, occupying a single
-     * concurrency slot. ethers is configured with batchMaxCount 1 on this
-     * client, so anything past a couple of dozen is not a wallet talking.
-     */
     if (items.length > MAX_BATCH) {
       return res.status(413).json({ error: `At most ${MAX_BATCH} calls per request` });
     }
@@ -70,23 +55,9 @@ async function rpc(req, res) {
       }
     }
 
-    // Walks the chain's verified endpoint list, with a timeout, and forwards the
-    // first real answer. See rpc.service.js for what does and does not warrant
-    // trying the next endpoint — notably, a JSON-RPC error inside a 200 is the
-    // chain's genuine answer and is forwarded untouched.
     const upstream = await sendToChain(chain, body);
 
     if (!upstream.ok) {
-      /**
-       * Report WHY. The previous version logged `err.message`, which for any
-       * undici transport failure is the fixed string "fetch failed" — the same
-       * five characters whether DNS failed, the host refused the connection, TLS
-       * broke or the request timed out. That message could not distinguish the
-       * two real causes here (Alchemy returning 403 for networks not enabled on
-       * the app, and a dead public endpoint), so it named neither.
-       *
-       * Hosts only, never URLs: the Alchemy key lives in the path.
-       */
       const detail = upstream.attempts.map((a) => `${a.host} -> ${a.reason}`).join(" | ");
       console.error(
         `wallet rpc proxy: ${chain.name} failed on all ${upstream.total} endpoint(s): ${detail}`
@@ -95,8 +66,6 @@ async function rpc(req, res) {
       const first = upstream.attempts[0] || {};
       return res.status(502).json({
         error: "RPC upstream failed",
-        // Surfaced so the wallet can say "Base Sepolia RPC unreachable (403)"
-        // rather than showing an empty balance with no explanation.
         chain: chain.name,
         reason: first.reason || "unknown",
         code: first.code || null,
@@ -108,13 +77,11 @@ async function rpc(req, res) {
     res.set("Content-Type", "application/json");
     return res.send(upstream.text);
   } catch (err) {
-    // Anything not already handled above — a bug here, not an upstream fault.
     console.error("wallet rpc proxy error:", err.message, err.cause ? `cause=${err.cause.code || err.cause.message}` : "");
     return res.status(502).json({ error: "RPC upstream failed", reason: err.message });
   }
 }
 
-// POST /api/wallet/address  { address }  -> persist the PUBLIC address only.
 async function setAddress(req, res) {
   try {
     const address = (req.body && req.body.address) || "";
@@ -133,8 +100,6 @@ async function setAddress(req, res) {
   }
 }
 
-// DELETE /api/wallet/address -> forget the public address (client also clears the
-// encrypted keystore from its own localStorage).
 async function clearAddress(req, res) {
   try {
     await User.findByIdAndUpdate(req.user._id, { walletAddress: null });
@@ -145,18 +110,11 @@ async function clearAddress(req, res) {
   }
 }
 
-// GET /api/wallet/txs?chainId=  -> locally recorded history, newest first.
 async function listTxs(req, res) {
   try {
     const query = { userId: req.user._id };
     if (req.query.chainId) query.chainId = Number(req.query.chainId);
 
-    /**
-     * Pick up anything that ARRIVED without the app sending it, before listing.
-     * Without this, History only ever showed outgoing transactions the app
-     * itself initiated, so a wallet that had genuinely received funds looked
-     * empty. Never throws: a failed sync should still return the known rows.
-     */
     if (req.query.chainId && req.user.walletAddress) {
       const { syncInboundTransfers } = require("../services/walletHistory.service");
       await syncInboundTransfers({
@@ -174,7 +132,6 @@ async function listTxs(req, res) {
   }
 }
 
-// POST /api/wallet/txs  -> record a broadcast tx (public data only).
 async function recordTx(req, res) {
   try {
     const {
@@ -193,10 +150,6 @@ async function recordTx(req, res) {
     if (tokenAddress && !ADDRESS_RE.test(tokenAddress)) {
       return res.status(400).json({ error: "Invalid token address" });
     }
-    // Amounts are decimal strings and symbols are tickers. These are stored
-    // and rendered in History and summed by the daily cap, so they are shaped
-    // here rather than trusted: a symbol is at most 24 characters and an
-    // amount is digits with one optional point.
     const AMOUNT_RE = /^\d{1,60}(\.\d{1,36})?$/;
     for (const [label, v] of [["value", value], ["amountOut", amountOut], ["minAmountOut", minAmountOut]]) {
       if (v != null && !AMOUNT_RE.test(String(v))) {
@@ -218,25 +171,12 @@ async function recordTx(req, res) {
       tokenAddress: tokenAddress || null,
       direction: direction === "in" ? "in" : "out",
       status: "pending",
-      // Swap metadata. Absent for ordinary transfers, which keep behaving exactly
-      // as before.
       kind: ["swap", "approval"].includes(kind) ? kind : "transfer",
       tokenOut: tokenOut || null,
       tokenOutSymbol: tokenOutSymbol || null,
       amountOut: amountOut != null ? String(amountOut) : null,
       minAmountOut: minAmountOut != null ? String(minAmountOut) : null,
       feeTier: feeTier != null ? Number(feeTier) : null,
-      /**
-       * The swap's route, e.g. "USDC > WETH > PEPE (500/3000)".
-       *
-       * Put through the same sanitiser the token discovery path uses rather
-       * than stored as given: it is built from token symbols, and a symbol is
-       * whatever a contract chose to call itself, which is a string an attacker
-       * controls. Control characters, zero-width and bidi marks are stripped and
-       * the length is capped, so a symbol made of forty invisible characters
-       * cannot dress a row up as something else. React escapes the markup on
-       * render; this is about the row still reading as what it is.
-       */
       route: sanitizeText(route, 120),
       priceImpactPct: priceImpactPct != null ? Number(priceImpactPct) : null,
       side: ["buy", "sell"].includes(side) ? side : null,
@@ -244,8 +184,6 @@ async function recordTx(req, res) {
     });
     return res.status(201).json({ tx });
   } catch (err) {
-    // The unique index on `hash` makes a repeat harmless rather than a duplicate
-    // row: return the existing record so the caller carries on normally.
     if (err.code === 11000) {
       const existing = await WalletTx.findOne({ hash: req.body.hash, userId: req.user._id });
       if (existing) return res.status(200).json({ tx: existing });
@@ -256,7 +194,6 @@ async function recordTx(req, res) {
   }
 }
 
-// PATCH /api/wallet/txs/:id  { status } -> update a recorded tx's status.
 async function updateTxStatus(req, res) {
   try {
     const status = req.body && req.body.status;
@@ -267,39 +204,10 @@ async function updateTxStatus(req, res) {
     const tx = await WalletTx.findOne({ _id: req.params.id, userId: req.user._id });
     if (!tx) return res.status(404).json({ error: "Transaction not found" });
 
-    /**
-     * A SWAP CANNOT BE MARKED FAILED ON THE BROWSER'S WORD.
-     *
-     * The daily live-trading cap is the sum of this account's swaps in the last
-     * twenty four hours, and `spend24h` below excludes anything whose status is
-     * `failed`. This endpoint accepted `failed` on any of the caller's own rows
-     * and wrote it with nothing checked, so the party being capped could erase
-     * its own spend from the measurement: broadcast a swap, mark it failed,
-     * spend the allowance again. The cap was set, measured and reported by the
-     * browser it exists to restrain.
-     *
-     * The chain is the only authority on whether a transaction failed, and this
-     * server can already ask it. A receipt saying `status: 0x0` is a failure and
-     * is accepted. A receipt saying `0x1` is a SUCCESS, whatever the caller
-     * believes, and is recorded as confirmed instead. No receipt means not
-     * mined, which is not a failure yet — the row stays as it is and continues
-     * to count against the cap, which is the conservative direction: the worst
-     * case is that a genuinely dropped swap holds part of an allowance for
-     * twenty four hours, against the alternative of an unbounded live spend.
-     *
-     * Transfers and approvals are untouched by this: they do not enter the cap,
-     * and the wallet's own history display is the only thing that reads them.
-     */
     if (tx.kind === "swap" && status === "failed" && tx.status !== "failed") {
       const chain = getChain(tx.chainId);
       if (!chain) return res.status(400).json({ error: "Unknown or disabled chain" });
 
-      /**
-       * `rpcCallTyped`, NOT `rpcCall` — this is the exact distinction LW-006
-       * was closed to make. For a receipt read, a plain null means either "the
-       * transaction is not mined" or "no endpoint answered", and those two must
-       * lead to different outcomes here.
-       */
       const read = await rpcCallTyped(chain, "eth_getTransactionReceipt", [tx.hash]);
       if (!read.ok) {
         console.warn(`[wallet] could not verify swap ${tx.hash} on ${chain.name}: ${read.reason}`);
@@ -339,20 +247,6 @@ async function updateTxStatus(req, res) {
   }
 }
 
-/**
- * GET /api/wallet/spend  -> { spent24h, currency: "USD", swaps }
- *
- * The dollar value of every live swap this account signed in the last twenty
- * four hours, across every chain. This is the figure the daily trading cap is
- * measured against. It used to be hardcoded to zero on the client, which made
- * the daily cap arithmetic reduce to the per trade cap and the daily limit
- * did not exist. A per session counter in browser memory reset on reload, so
- * it did not exist either.
- *
- * Counted from WalletTx, which every swap writes on broadcast, so a reload, a
- * second tab or a second device all see the same number. The cash leg is the
- * input on a buy and the output on a sell; whichever side the dollar is on.
- */
 const CASH_RE = /^(USDC|USDT|USD₮0|USDT0|USDt)$/i;
 
 async function spend24h(req, res) {
@@ -372,24 +266,6 @@ async function spend24h(req, res) {
     for (const t of rows) {
       if (t.side === "buy" && CASH_RE.test(t.symbol || "")) spent += Number(t.value) || 0;
       else if (t.side === "sell" && CASH_RE.test(t.tokenOutSymbol || "")) spent += Number(t.amountOut) || 0;
-      /**
-       * COUNTED, EVEN THOUGH IT CANNOT BE VALUED.
-       *
-       * `spent` only grows when one leg of the swap is a dollar stablecoin,
-       * which is how a swap gets a dollar value without a price lookup. A swap
-       * paid for in wrapped ether, or between two long-tail tokens, has no
-       * dollar leg and contributed exactly nothing — so the daily cap simply did
-       * not see it, and the answer said so in no way at all.
-       *
-       * A figure that silently omits trades is worse than one that admits it
-       * omits them: this is the number the swap modal refuses to plan without,
-       * and a caller reading `spent24h` alone has no way to know it is partial.
-       * The count travels with it so the UI can say "plus N trades we could not
-       * price in dollars" rather than implying the day is clear. Pricing them
-       * properly needs a per-chain USD quote at execution time, recorded on the
-       * row when the swap is written; that is a change to how swaps are
-       * recorded, not to how they are summed.
-       */
       else unpriced += 1;
     }
     return res.json({
@@ -405,11 +281,6 @@ async function spend24h(req, res) {
   }
 }
 
-/**
- * Discovered tokens for one chain, shaped for the wallet. The address is
- * stored lowercase for matching; the explorer link is built here so the
- * client never has to know an explorer URL.
- */
 function shapeDiscovered(list, chain) {
   return (list || [])
     .filter((d) => d.chainId === chain.chainId)
@@ -434,15 +305,6 @@ function shapeDiscovered(list, chain) {
     .sort((a, b) => new Date(b.firstSeenAt) - new Date(a.firstSeenAt));
 }
 
-/**
- * GET /api/wallet/discovered?chainId=  -> { tokens, sync }
- *
- * Runs the inbound scan first, so opening the wallet is what notices a token
- * that arrived while it was closed. The scan never throws; when it fails the
- * known list is still returned and `sync.failed` says so, because "nothing
- * new" and "could not look" are different facts and the wallet shows them
- * differently.
- */
 async function discovered(req, res) {
   try {
     const chain = getChain(req.query.chainId);
@@ -469,15 +331,6 @@ async function discovered(req, res) {
   }
 }
 
-/**
- * POST /api/wallet/discovered/:chainId/:address  { action: add | ignore | restore }
- *
- * The owner's decision about a token that arrived uninvited. `add` puts it in
- * the custom token list with the decimals READ FROM ITS CONTRACT, which is the
- * only reason a token that could not be read is refused here: a balance shown
- * with guessed decimals is a wrong number, and this wallet does not show
- * those. `ignore` keeps it off every list until `restore`.
- */
 async function discoveredAct(req, res) {
   try {
     const chain = getChain(req.params.chainId);
@@ -522,8 +375,6 @@ async function discoveredAct(req, res) {
     } else if (action === "ignore") {
       entry.status = "ignored";
     } else {
-      // restore: back to undecided. If it had been added, the custom token
-      // stays; removing it is the existing remove-token action's job.
       entry.status = entry.status === "added" ? "added" : "new";
     }
     entry.decidedAt = new Date();
@@ -540,16 +391,6 @@ async function discoveredAct(req, res) {
 }
 
 module.exports = {
-  /**
-   * Exported for ONE reason: so a test can assert it contains no signing method.
-   *
-   * ARCHITECTURE.md invariant 4 and SECURITY.md 4.1 item 9 both say this list is
-   * "asserted by a CI test". Until now there was no CI and no test, so the only
-   * thing standing between an added `eth_sign` and a server that signs on behalf
-   * of a user was that nobody had done it. See `__tests__/invariants.test.js`.
-   *
-   * It is read-only to the rest of the app — no handler imports it.
-   */
   ALLOWED_METHODS,
   spend24h,
   chains,

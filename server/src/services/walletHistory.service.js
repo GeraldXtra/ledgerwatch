@@ -1,77 +1,15 @@
 const WalletTx = require("../models/WalletTx");
 const User = require("../models/User");
 const { getChain, tokensFor } = require("../config/chains");
-// Held as the module object, not destructured: the chain is this service's
-// one external seam, and the regression test for LW-025 replaces `rpcCall`
-// on it. Node's CommonJS loader is outside vitest's module mocking.
 const rpcService = require("./rpc.service");
-
-/**
- * INBOUND TRANSFER DISCOVERY, AND NEW TOKEN DETECTION.
- *
- * `WalletTx` rows have only ever come from `recordTx`, which the app calls when
- * IT sends something. So money arriving from anywhere else — an exchange, a
- * client paying you, a swap's output — produced no record at all, and History
- * looked empty on a wallet that had genuinely received funds.
- *
- * This reads Transfer logs addressed TO the wallet and upserts them. The unique
- * index on `hash` makes it idempotent, so it can run on every load without
- * duplicating anything.
- *
- * WHAT CHANGED, AND WHY.
- *
- * 1. ONE QUERY PER WINDOW, NOT ONE PER TOKEN. The previous version asked for
- *    Transfer logs filtered to each registry contract in turn, which meant it
- *    could only ever see tokens it already knew about. A token nobody told the
- *    wallet about could arrive, sit there with a real balance, and never be
- *    shown anywhere. The filter is now on the recipient topic alone, so every
- *    ERC-20 transfer to this wallet is visible, and it is also fewer requests.
- *
- * 2. UNKNOWN CONTRACTS ARE LOOKED UP AND RECORDED, NEVER AUTO-ADDED. On a
- *    real network most unsolicited tokens are spam or phishing bait, so the
- *    contract is read (symbol, name, decimals), recorded on the user as a
- *    discovery, and the wallet asks the owner what to do. A symbol that copies
- *    a verified registry token on the same chain is flagged as impersonation.
- *
- * 3. THE CURSOR ONLY ADVANCES OVER BLOCKS THAT WERE ACTUALLY READ (LW-025).
- *    It used to be set to `head` unconditionally, so a failed log query left a
- *    window permanently unread with nothing to say so. Now a resume walks
- *    forward from the saved cursor and commits each window as it succeeds;
- *    the first window that fails stops the walk and the cursor stays there.
- *    A first-time lookback commits only if every window succeeded, and is
- *    otherwise retried whole on the next load.
- *
- * 4. A LONG GAP CATCHES UP RATHER THAN BEING SKIPPED (LW-025). A resume used
- *    to read at most four windows back from head and then jump the cursor to
- *    head anyway, so anything older than that was lost forever. It now reads
- *    forward from the cursor, several windows per load, and leaves the cursor
- *    at the last block read, so a wallet that was not opened for a week is
- *    caught up over a few loads instead of skipping the week.
- *
- * Server-side because `eth_getLogs` is deliberately absent from the browser
- * facing RPC allowlist, exactly as the payment watcher does it.
- *
- * KNOWN LIMITS, on purpose. Native coin arrivals (ETH, BNB, MATIC…) emit no
- * Transfer log and cannot be discovered this way; the balance itself is the
- * record. Two token transfers in one transaction share a hash and the unique
- * index keeps the first; the second is visible on the explorer.
- */
 
 const TRANSFER_TOPIC =
   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
-// ERC-20 selectors, read with eth_call. decimals() is the one that matters:
-// getting it wrong misreads every balance by a power of ten.
 const SEL_SYMBOL = "0x95d89b41";
 const SEL_NAME = "0x06fdde03";
 const SEL_DECIMALS = "0x313ce567";
 
-/**
- * Blocks per eth_getLogs query. The registry's MEASURED `logSpan` wins; the
- * env var is a CAP for an operator who needs to go narrower on a node that is
- * misbehaving, never a way to exceed what was measured. Same precedence as the
- * payment watcher, because the two must agree about what a chain can serve.
- */
 const MAX_BLOCK_SPAN = 1500;
 
 function spanFor(chain) {
@@ -81,44 +19,21 @@ function spanFor(chain) {
   return Number.isFinite(cap) && cap > 0 ? Math.min(base, cap) : base;
 }
 
-// How far back a FIRST scan reaches. Bounded on purpose: a full-history walk
-// would be thousands of queries for a wallet that is usually days old.
 const LOOKBACK_WINDOWS = Number(process.env.WALLET_HISTORY_WINDOWS || 4);
 
-// How many windows a RESUME may read in one load. Enough to catch up a day on
-// a slow chain in a couple of loads without turning one History open into a
-// long stall; the cursor carries the rest to the next load.
 const MAX_RESUME_WINDOWS = Number(process.env.WALLET_HISTORY_RESUME_WINDOWS || 8);
 
-// A little overlap on resume, so a transfer mined at the boundary while the
-// previous sync was mid-flight cannot fall between the two runs.
 const RESUME_OVERLAP = 50;
 
-// Contract lookups per sync, so an airdrop of a hundred spam tokens costs a
-// few calls now and a few more next time rather than a hundred at once. The
-// rest are recorded unread and looked up on later loads.
 const MAX_LOOKUPS_PER_SYNC = 10;
-// Retries for a contract that would not answer. Past this it is shown as
-// "did not answer as a standard token" rather than "still checking".
 const MAX_LOOKUP_ATTEMPTS = 4;
-// Discovery rows per chain per user. A wallet that has been spammed past this
-// keeps the first sixty and logs the rest; nothing about real money depends on
-// this list, it is a recommendation surface.
 const MAX_DISCOVERED_PER_CHAIN = 60;
 
-// Symbols that are worth calling out when an unverified contract claims them.
-// The chain's own registry symbols are added at run time.
 const WELL_KNOWN = new Set([
   "ETH", "WETH", "BTC", "WBTC", "USDC", "USDT", "DAI", "BNB", "WBNB", "MATIC", "POL",
   "AVAX", "WAVAX", "ARB", "OP", "LINK", "UNI", "SOL", "XRP", "DOGE",
 ]);
 
-/**
- * Delegated to the shared rpc service: endpoint fallback and a request timeout,
- * decided in one place rather than re-implemented here. The previous local copy
- * logged `err.message`, which for a transport failure is always the bare string
- * "fetch failed" and names nothing.
- */
 async function rpc(chain, method, params) {
   return rpcService.rpcCall(chain, method, params);
 }
@@ -127,7 +42,6 @@ function addressTopic(address) {
   return "0x" + address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 }
 
-/** Raw token units -> decimal string, without going through a float. */
 function unitsToDecimalString(raw, decimals) {
   const v = BigInt(raw || 0);
   const d = BigInt(decimals);
@@ -137,12 +51,6 @@ function unitsToDecimalString(raw, decimals) {
   return frac ? `${whole}.${frac}` : String(whole);
 }
 
-/**
- * Decode an ABI `string` return. Two shapes exist in the wild: the standard
- * dynamic string (offset word, length word, bytes) and a bare bytes32 that a
- * few old contracts (MKR is the famous one) return instead. Anything that does
- * not fit either is null, never a guess.
- */
 function decodeAbiString(hex) {
   if (typeof hex !== "string" || !hex.startsWith("0x") || hex === "0x") return null;
   const h = hex.slice(2);
@@ -164,22 +72,12 @@ function decodeAbiString(hex) {
   } catch {
     return null;
   }
-  // A "string" longer than this is not a token name, it is a payload.
   if (!Number.isFinite(len) || len < 0 || len > 4096) return null;
   const data = h.slice(offset + 64, offset + 64 + len);
   if (data.length < len) return null;
   return Buffer.from(data, "hex").toString("utf8");
 }
 
-/**
- * What the contract said, made safe to show. Control characters and anything
- * outside printable text are dropped, whitespace collapsed, length capped.
- * React escapes markup on render; this is about not rendering a symbol that is
- * forty zero-width characters followed by "USDC".
- */
-// C0 and C1 controls, zero-width and bidi marks, the byte order mark. Built
-// from character codes so no editor or tool can turn the escapes into the raw
-// bytes they name, which is exactly what happened to the first version.
 const CONTROL_CHARS = new RegExp(
   "[" +
     String.fromCharCode(0) + "-" + String.fromCharCode(31) +
@@ -195,7 +93,6 @@ const CONTROL_CHARS = new RegExp(
 function sanitizeText(value, max) {
   if (value == null) return null;
   const cleaned = String(value)
-    // C0 and C1 controls, zero-width and bidi marks, the byte order mark.
     .replace(CONTROL_CHARS, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -203,11 +100,6 @@ function sanitizeText(value, max) {
   return cleaned.length > max ? cleaned.slice(0, max) : cleaned;
 }
 
-/**
- * Read symbol, name and decimals from a contract. `readable` is true only when
- * BOTH symbol and decimals came back sane; a token without those two cannot be
- * shown with a correct balance and must not be addable.
- */
 async function readTokenMeta(chain, contract) {
   const call = (data) => rpc(chain, "eth_call", [{ to: contract, data }, "latest"]);
   const [symRaw, nameRaw, decRaw] = await Promise.all([
@@ -230,20 +122,7 @@ async function readTokenMeta(chain, contract) {
     name,
     decimals,
     readable: Boolean(symbol) && decimals != null,
-    /**
-     * At least one of the reads that MATTER came back with nothing.
-     *
-     * Additive, and separate from `transport` below on purpose. `transport`
-     * means none of the three answered, which is unambiguously a dead node.
-     * When one answers and another does not, the contract is not necessarily
-     * bad — a single call failed at the endpoint. Reporting that as "this is
-     * not a token" blames a real contract for a node's bad minute, and callers
-     * that cache a refusal then keep the blame. `name` is excluded because a
-     * token without one is unusual but not unusable.
-     */
     anyMissing: symRaw === null || decRaw === null,
-    // Distinguish "the node did not answer" from "the contract answered with
-    // nothing": the former is worth retrying, the latter is not a token.
     transport: symRaw === null && nameRaw === null && decRaw === null,
   };
 }
@@ -261,12 +140,6 @@ function impersonationOf(symbol, chain) {
   return null;
 }
 
-/**
- * One sync at a time per wallet per chain. The wallet page and the History
- * tab can both ask for a sync within the same second; the second caller
- * shares the first's promise rather than running the same log queries again
- * and racing it on the cursor.
- */
 const inflight = new Map();
 
 async function syncInboundTransfers(args) {
@@ -279,16 +152,6 @@ async function syncInboundTransfers(args) {
 
 const EMPTY = { scanned: 0, added: 0, queries: 0, fromBlock: 0, discovered: 0, failed: false, limited: false };
 
-/**
- * Find and record inbound token transfers to `address` on one chain, and note
- * any token contract the wallet has not seen before.
- *
- * INCREMENTAL. The first sync for a wallet walks a bounded lookback; every later
- * one resumes from the stored cursor, so it reads only new blocks.
- *
- * @returns {Promise<{scanned:number, added:number, queries:number, fromBlock:number, discovered:number, failed:boolean, limited:boolean}>}
- *   `limited` means the node refused the unfiltered query and only known tokens were read.
- */
 async function doSync({ userId, chainId, address }) {
   const chain = getChain(chainId);
   if (!chain || !address) return { ...EMPTY };
@@ -298,13 +161,6 @@ async function doSync({ userId, chainId, address }) {
   const head = parseInt(headHex, 16);
   if (!Number.isFinite(head)) return { ...EMPTY, failed: true };
 
-  /**
-   * Resume point, read from a STORED cursor rather than derived from the newest
-   * recorded row. A wallet that has received nothing has no rows to derive from,
-   * so a derived cursor would leave it re-walking the entire lookback on every
-   * single History load — nine seconds, forever, for the most common case there
-   * is.
-   */
   const owner = await User.findById(userId)
     .select("walletHistoryCursors customTokens discoveredTokens")
     .lean();
@@ -313,7 +169,6 @@ async function doSync({ userId, chainId, address }) {
   const saved = (owner.walletHistoryCursors || []).find((c) => c.chainId === chain.chainId);
   const span = spanFor(chain);
 
-  // Everything this wallet already knows how to display, keyed by contract.
   const known = new Map();
   for (const t of tokensFor(chain)) known.set(String(t.address).toLowerCase(), { ...t, custom: false });
   for (const t of owner.customTokens || []) {
@@ -324,9 +179,6 @@ async function doSync({ userId, chainId, address }) {
     if (d.chainId === chain.chainId) discovered.set(String(d.address).toLowerCase(), d);
   }
 
-  // ---- plan the windows ----------------------------------------------------
-  // First sync: newest first, a bounded number back from head. Resume: oldest
-  // first from the cursor, so the cursor can be committed window by window.
   const windows = [];
   if (!saved) {
     for (let w = 0; w < LOOKBACK_WINDOWS; w++) {
@@ -349,34 +201,19 @@ async function doSync({ userId, chainId, address }) {
   let queries = 0;
   let lowest = head;
   let failed = false;
-  // True when a window could only be read for the known tokens (see below).
   let limited = false;
-  // Highest block known to have been read contiguously from the resume point.
   let readTo = saved ? saved.block : null;
-  // Unknown contracts seen this sync: contract -> the earliest transfer.
   const unknown = new Map();
 
   for (const w of windows) {
     queries++;
     const range = { fromBlock: "0x" + w.from.toString(16), toBlock: "0x" + w.to.toString(16) };
-    // Typed, so a node that ANSWERED with an error can be told from a node
-    // that could not be reached: only the former is worth a second query.
     const first = await rpcService.rpcCallTyped(chain, "eth_getLogs", [
       { topics: [TRANSFER_TOPIC, null, addressTopic(address)], ...range },
     ]);
     let logs = first && first.ok ? first.result : null;
     const refused = Boolean(first && !first.ok && /^rpc error/i.test(String(first.reason || "")));
 
-    /**
-     * FALL BACK TO THE KNOWN CONTRACTS (LW-084). Some public nodes refuse a
-     * log query with no address filter ("please specify an address"), and
-     * that is exactly the query that finds tokens nobody told the wallet
-     * about. The same node answers for a list of addresses, so the window
-     * is read for every token the wallet already knows, and only the
-     * discovery of UNKNOWN tokens is marked as limited on this chain. That
-     * is a limit of the node, not a failure of the read: the cursor moves,
-     * arrivals of known tokens are recorded, and the wallet does not warn.
-     */
     if (!Array.isArray(logs) && refused && known.size) {
       queries++;
       const fallback = await rpc(chain, "eth_getLogs", [
@@ -389,12 +226,6 @@ async function doSync({ userId, chainId, address }) {
     }
 
     if (!Array.isArray(logs)) {
-      /**
-       * STOP, and say so. The old code `continue`d and then wrote the cursor
-       * at head, which quietly declared these blocks read. A window that was
-       * not read is not read; the cursor stays below it and the next load
-       * tries again from here.
-       */
       failed = true;
       console.warn(
         `[walletHistory] ${chain.name}: log query ${w.from}-${w.to} failed; cursor held at ${
@@ -409,8 +240,6 @@ async function doSync({ userId, chainId, address }) {
     if (saved) readTo = w.to;
 
     for (const log of logs) {
-      // ERC-20 Transfer has three topics (event, from, to). ERC-721 shares the
-      // signature but indexes tokenId as a fourth topic; it is not a balance.
       if (!log || log.removed || !Array.isArray(log.topics) || log.topics.length !== 3) continue;
       const contract = String(log.address || "").toLowerCase();
       if (!/^0x[0-9a-f]{40}$/.test(contract)) continue;
@@ -423,8 +252,6 @@ async function doSync({ userId, chainId, address }) {
 
       const seen = discovered.get(contract);
       if (seen) {
-        // Already on the list. A token the owner ignored stays out of History
-        // too; one still being decided on is recorded when it can be rendered.
         if (seen.status !== "ignored" && seen.readable && seen.decimals != null) {
           added += await recordTransfer({ userId, chain, address, log, symbol: seen.symbol, decimals: seen.decimals, contract });
         }
@@ -439,11 +266,9 @@ async function doSync({ userId, chainId, address }) {
     }
   }
 
-  // ---- discovery ----------------------------------------------------------
   let discoveredCount = 0;
   let lookups = 0;
 
-  // Retry contracts recorded earlier that would not answer, a few at a time.
   const retryable = [...discovered.values()].filter(
     (d) => !d.readable && d.status === "new" && (d.lookupAttempts || 0) < MAX_LOOKUP_ATTEMPTS
   );
@@ -453,8 +278,6 @@ async function doSync({ userId, chainId, address }) {
     const meta = await readTokenMeta(chain, d.address);
     const set = {
       "discoveredTokens.$.lastLookupAt": new Date(),
-      // A node that did not answer at all is not an attempt against the
-      // contract; only an answer that was not a token counts toward the cap.
       "discoveredTokens.$.lookupAttempts": (d.lookupAttempts || 0) + (meta.transport ? 0 : 1),
     };
     if (meta.readable) {
@@ -464,7 +287,6 @@ async function doSync({ userId, chainId, address }) {
       set["discoveredTokens.$.readable"] = true;
       set["discoveredTokens.$.impersonates"] = impersonationOf(meta.symbol, chain);
     } else if (meta.symbol || meta.name) {
-      // Partial answers are still worth showing while the rest is retried.
       if (meta.symbol) set["discoveredTokens.$.symbol"] = meta.symbol;
       if (meta.name) set["discoveredTokens.$.name"] = meta.name;
     }
@@ -516,9 +338,6 @@ async function doSync({ userId, chainId, address }) {
     };
 
     try {
-      // Guarded push: a concurrent sync on another device cannot record the
-      // same contract twice, because the filter refuses a user document that
-      // already carries it.
       const r = await User.updateOne(
         {
           _id: userId,
@@ -541,9 +360,6 @@ async function doSync({ userId, chainId, address }) {
     }
   }
 
-  // ---- commit the cursor ---------------------------------------------------
-  // "I have read up to here" is the useful fact, not "I found something here",
-  // and it is only true for blocks that were actually read.
   let commit = null;
   if (!saved) {
     if (!failed && windows.length) commit = head;
@@ -564,7 +380,6 @@ async function doSync({ userId, chainId, address }) {
         );
       }
     } catch (err) {
-      // A cursor that fails to save only costs a repeated scan next time.
       console.error("[walletHistory] cursor save failed:", err.message);
     }
   }
@@ -580,18 +395,8 @@ function safeUnits(dataHex, decimals) {
   }
 }
 
-/** Upsert one inbound transfer as a WalletTx row. Returns 1 if a row was added. */
 async function recordTransfer({ userId, chain, address, log, symbol, decimals, contract }) {
   try {
-    // Already-known transactions (including ones the app sent itself) are
-    // left exactly as they are.
-    //
-    // SCOPED TO THIS USER. Without the userId the check asked whether the hash
-    // existed ANYWHERE, so one account's row suppressed another's: a transaction
-    // that paid two LedgerWatch wallets — a batch payout, or simply one user
-    // paying another through the app — recorded history for whichever synced
-    // first and silently nothing for the second. The unique index behind it is
-    // now {hash, userId} for the same reason.
     const existing = await WalletTx.findOne({ hash: log.transactionHash, userId })
       .select("_id")
       .lean();
@@ -610,16 +415,12 @@ async function recordTransfer({ userId, chain, address, log, symbol, decimals, c
       symbol,
       tokenAddress: contract,
       direction: "in",
-      // Received, so it is already on chain and already final enough to show.
-      // The reconciliation loop leaves confirmed rows alone.
       status: "confirmed",
       kind: "transfer",
       blockNumber: parseInt(log.blockNumber, 16),
     });
     return 1;
   } catch (err) {
-    // A concurrent sync inserting the same hash is fine — the unique index is
-    // doing its job.
     if (err.code !== 11000) console.error("[walletHistory] insert failed:", err.message);
     return 0;
   }
@@ -627,14 +428,7 @@ async function recordTransfer({ userId, chain, address, log, symbol, decimals, c
 
 module.exports = {
   syncInboundTransfers,
-  // Exported for tests and for the discovery endpoint's metadata retry.
   readTokenMeta,
-  /**
-   * Exported so the token resolver runs the SAME impersonation check this file
-   * already runs on arrival. It lived here and the resolver did not call it,
-   * which meant a contract copying a verified token's symbol was flagged when
-   * it turned up uninvited and not when somebody was about to buy it.
-   */
   impersonationOf,
   decodeAbiString,
   sanitizeText,

@@ -1,5 +1,3 @@
-// Hardcoded symbol -> CoinGecko id map (section 4b). Users type "BTC"; CoinGecko
-// needs "bitcoin". Unsupported symbols are reported clearly, never failed silently.
 const SYMBOL_TO_ID = {
   BTC: "bitcoin",
   ETH: "ethereum",
@@ -18,15 +16,11 @@ const SYMBOL_TO_ID = {
   LINK: "chainlink",
 };
 
-// Reverse map for turning a coinId back into a display symbol.
 const ID_TO_SYMBOL = Object.entries(SYMBOL_TO_ID).reduce((acc, [sym, id]) => {
   acc[id] = sym;
   return acc;
 }, {});
 
-/**
- * Resolve a user-entered symbol to { symbol, coinId }, or null if unsupported.
- */
 function resolveSymbol(input) {
   if (!input || typeof input !== "string") return null;
   const symbol = input.trim().toUpperCase();

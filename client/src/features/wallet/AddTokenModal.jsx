@@ -4,14 +4,6 @@ import { Check, Search, ShieldAlert, TriangleAlert, X } from "lucide-react";
 import { Button, Field, Input, Modal } from "../../components/ui";
 import { getProvider, ERC20_ABI } from "./provider";
 
-/**
- * Add any ERC-20 by contract address.
- *
- * DECIMALS ARE READ FROM THE CONTRACT, NEVER GUESSED. Assuming 6 because a token
- * is called USDC would misread BNB Chain's USDC — which uses 18 — by a factor of
- * 10^12. The same reasoning applies to the symbol: what the contract says is what
- * is shown, because anyone can deploy a contract calling itself anything.
- */
 export default function AddTokenModal({ chain, address, existing = [], onClose, onAdd }) {
   const [input, setInput] = useState("");
   const [found, setFound] = useState(null);
@@ -35,8 +27,6 @@ export default function AddTokenModal({ chain, address, existing = [], onClose, 
     try {
       const provider = getProvider(chain.chainId);
 
-      // Nothing deployed here at all is the most common paste error — a wallet
-      // address, or the right token on the wrong network.
       const code = await provider.getCode(addr);
       if (!code || code === "0x") {
         setError(
@@ -52,7 +42,6 @@ export default function AddTokenModal({ chain, address, existing = [], onClose, 
       try {
         balance = await c.balanceOf(address);
       } catch {
-        /* balance is a nicety; the token can still be added */
       }
 
       setFound({

@@ -6,38 +6,6 @@ const mongoose = require("mongoose");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// ---- payment totals + derived fields --------------------------------------
-
-/**
- * THE ONE PLACE "how much has been paid against this debt" IS COMPUTED. (LW-034.)
- *
- * There were NINE independent copies of this aggregation across the server —
- * in two controllers, four services and the Payment model — each spelling out
- * `Payment.aggregate([{ $match: { debtId } }, { $group: { $sum: "$amount" } }])`
- * by hand. Nine copies of a money calculation is nine chances for one of them
- * to drift: to forget a currency, to filter on `status`, to miss a new payment
- * method, or simply to be updated while the other eight are not. This codebase
- * has already been bitten by exactly that shape — `settlement.service` once read
- * `debt.amountPaid`, a field that does not exist, and every prior payment was
- * silently ignored.
- *
- * `paidForDebt` (single) and `paidByDebt` (batched) are now the only two, and
- * every other site calls one of them. If the definition of "paid" ever has to
- * change — a refund method, a currency split, a void flag — it changes here and
- * nowhere else.
- */
-
-/**
- * How much has been paid against ONE debt.
- *
- * Deliberately not scoped by userId: every caller has already loaded the Debt
- * through a userId-scoped query, so re-scoping here would be a second filter
- * that adds nothing and reads as though it were load-bearing. The `debtId` is
- * the authority.
- *
- * @param {import("mongoose").Types.ObjectId|string} debtId
- * @returns {Promise<number>} total paid, in the invoice's currency
- */
 async function paidForDebt(debtId) {
   const rows = await Payment.aggregate([
     { $match: { debtId: toObjectId(debtId) } },
@@ -46,16 +14,11 @@ async function paidForDebt(debtId) {
   return rows.length ? rows[0].paid : 0;
 }
 
-/** `debtId` may arrive as a string from a route param or as an ObjectId. */
 function toObjectId(value) {
   if (value && typeof value === "object") return value;
   return new mongoose.Types.ObjectId(String(value));
 }
 
-/**
- * Sum of payments per debtId for a set of debts (one grouped query).
- * @returns {Promise<Map<string, number>>} debtId -> amountPaid
- */
 async function paidByDebt(userId, debtIds) {
   if (!debtIds.length) return new Map();
   const rows = await Payment.aggregate([
@@ -67,11 +30,6 @@ async function paidByDebt(userId, debtIds) {
   return map;
 }
 
-/**
- * Derived status for display. Stored status is pending|partially_paid|paid;
- * "overdue" is derived (balance>0 && dueDate<now). Respects a stored "paid" flag
- * so a written-off debt still reads paid.
- */
 function displayStatus(debt, balance) {
   if (debt.status === "paid" || balance <= 0) return "paid";
   if (new Date(debt.dueDate).getTime() < Date.now()) return "overdue";
@@ -79,9 +37,6 @@ function displayStatus(debt, balance) {
   return "pending";
 }
 
-/**
- * Attach amountPaid / balance / displayStatus to a plain debt object.
- */
 function withDerived(debt, amountPaid) {
   const obj = typeof debt.toObject === "function" ? debt.toObject() : { ...debt };
   const paid = amountPaid || 0;
@@ -92,41 +47,12 @@ function withDerived(debt, amountPaid) {
   return obj;
 }
 
-/**
- * Attach derived fields to an array of debt docs using one aggregation.
- */
 async function attachTotals(userId, debts) {
   const ids = debts.map((d) => d._id);
   const map = await paidByDebt(userId, ids);
   return debts.map((d) => withDerived(d, map.get(String(d._id)) || 0));
 }
 
-/**
- * Recompute a debt's stored status after a payment change, and cancel scheduled
- * reminders when it reaches zero. Mutates + saves the debt. Returns amountPaid.
- */
-/**
- * THE LARGEST NAIRA SHORTFALL THAT STILL COUNTS AS PAID IN FULL.
- *
- * ONE definition, because there were three and they were all the same mistake.
- * `recomputeDebtStatus` here, `resyncActivePaymentAddress` in
- * paymentAddress.service and `settleIfDue` in paymentWatch.service each wrote
- * their own `amount * 0.005`, and capping one of them changed nothing because
- * the next one closed the invoice anyway. A regression test caught exactly that
- * sequence, twice.
- *
- * The intent was always to absorb rounding dust. A PERCENTAGE is not dust: it
- * scales with the invoice, and these are naira invoices that run to nine
- * figures.
- *
- *     invoice NGN      10,000  ->  forgives NGN 50      (unchanged, under the cap)
- *     invoice NGN     100,000  ->  forgives NGN 100     (was NGN 500)
- *     invoice NGN 326,480,000  ->  forgives NGN 100     (was NGN 1,632,400)
- *
- * That last line is the one that mattered. It marked the invoice paid, stopped
- * the reminders, and added over a million naira nobody had sent to the owner's
- * collected figure. Harmless while every chain was a testnet; not harmless now.
- */
 function toleratedShortfallNgn(invoiceAmountNgn) {
   const TOLERANCE = Number(process.env.USDC_SETTLEMENT_TOLERANCE || 0.005);
   const MAX_DUST_NGN = Number(process.env.SETTLEMENT_MAX_DUST_NGN || 100);
@@ -137,31 +63,6 @@ async function recomputeDebtStatus(debt) {
   const amountPaid = await paidForDebt(debt._id);
   const balance = (debt.amount || 0) - amountPaid;
 
-  /**
-   * SETTLED WHEN THE SHORTFALL IS DUST, AND DUST IS AN ABSOLUTE AMOUNT.
-   *
-   * The intent has always been the one in the sentence below: an exact
-   * `balance <= 0` left invoices open over a few kobo of rounding, the money had
-   * effectively arrived, the payer had done nothing wrong, and chasing somebody
-   * for two kobo is worse than absorbing it.
-   *
-   * But it was written as a bare 0.5 percent of the invoice, and a percentage is
-   * not dust. It scales:
-   *
-   *     invoice NGN      10,000  ->  closes while short NGN 50
-   *     invoice NGN     100,000  ->  closes while short NGN 500
-   *     invoice NGN 326,480,000  ->  closes while short NGN 1,632,400
-   *
-   * THIS is the tolerance that actually decides the invoice is paid, stops the
-   * reminders and feeds the collected figure, so on a large mainnet invoice it
-   * would have recorded over a million naira as received that nobody sent. The
-   * crypto watcher had the same flaw and capping only that one did not help,
-   * because this line closed the debt anyway. A regression test caught exactly
-   * that.
-   *
-   * So the tolerated shortfall is the SMALLER of the percentage and a genuinely
-   * dust sized absolute amount. Small invoices are unaffected.
-   */
   const settled = balance <= toleratedShortfallNgn(debt.amount);
 
   const wasPaid = debt.status === "paid";
@@ -175,9 +76,6 @@ async function recomputeDebtStatus(debt) {
   }
   await debt.save();
 
-  // Settling cancels any scheduled reminders (same as manual mark-paid). Uses
-  // `settled`, NOT `balance <= 0`: an invoice cleared within tolerance would
-  // otherwise be marked paid and still chase the debtor for the dust.
   if (settled && !wasPaid) {
     await Reminder.updateMany(
       { debtId: debt._id, userId: debt.userId, status: "scheduled" },
@@ -187,37 +85,19 @@ async function recomputeDebtStatus(debt) {
   return amountPaid;
 }
 
-// ---- debtor grouping + reliability ----------------------------------------
-
-// Group key: normalized international phone if valid, else name:<lowercased>.
 function debtorKey(debt) {
   const norm = normalizePhone(debt.debtorPhone);
   if (norm.valid) return norm.intl;
   return `name:${(debt.debtorName || "").trim().toLowerCase()}`;
 }
 
-/**
- * When a debt is fully settled, the date it reached zero (last payment) — else null.
- */
 function settledDate(debt, payments) {
   const paid = payments.reduce((s, p) => s + p.amount, 0);
-  /**
-   * LW-032. This compared exactly while `recomputeDebtStatus` forgives the
-   * tolerated dust, so an invoice marked paid over a few kobo of rounding had
-   * no settled date: the debtor got no on-time credit in the reliability
-   * score and the invoice was left out of the average days to payment. Two
-   * functions in one file disagreed about whether the same invoice was paid.
-   * Same rule, one definition.
-   */
   if (paid < (debt.amount || 0) - toleratedShortfallNgn(debt.amount)) return null;
   const dates = payments.map((p) => new Date(p.paidAt).getTime());
   return dates.length ? new Date(Math.max(...dates)) : null;
 }
 
-/**
- * Reliability score 0-100 from on-time rate (50%), completion rate (30%),
- * lateness factor (20%). Band: Excellent/Good/Fair/Risky, or New (no completed debts).
- */
 function reliabilityScore({ debts, paymentsByDebt }) {
   let paidCount = 0;
   let onTime = 0;
@@ -263,9 +143,6 @@ function reliabilityScore({ debts, paymentsByDebt }) {
   return { score, band, onTimeRate, completionRate, avgLatenessDays };
 }
 
-/**
- * Build grouped debtor summaries for a user.
- */
 async function debtorGroups(userId) {
   const debts = await Debt.find({ userId }).sort({ createdAt: -1 });
   const ids = debts.map((d) => d._id);
@@ -335,9 +212,6 @@ async function debtorGroups(userId) {
   return out;
 }
 
-/**
- * Full debtor profile: stats + debts (with derived) + chronological timeline.
- */
 async function debtorProfile(userId, key) {
   const allDebts = await Debt.find({ userId }).sort({ createdAt: 1 });
   const debts = allDebts.filter((d) => debtorKey(d) === key);
@@ -357,7 +231,6 @@ async function debtorProfile(userId, key) {
     withDerived(d, (paymentsByDebt.get(String(d._id)) || []).reduce((s, p) => s + p.amount, 0))
   );
 
-  // Timeline (chronological, all event types).
   const timeline = [];
   for (const d of debts) {
     timeline.push({ type: "debt_created", at: d.createdAt, debtId: d._id, amount: d.amount, note: d.note });
@@ -378,8 +251,6 @@ async function debtorProfile(userId, key) {
 
   return { debtor: summary, debts: derivedDebts, timeline };
 }
-
-// ---- analytics ------------------------------------------------------------
 
 function monthKey(date) {
   const d = new Date(date);
@@ -438,7 +309,6 @@ async function analytics(userId) {
     }
   }
 
-  // Collected this month (payments made this calendar month).
   const collectedThisMonth = payments
     .filter((p) => {
       const at = new Date(p.paidAt);
@@ -446,7 +316,6 @@ async function analytics(userId) {
     })
     .reduce((s, p) => s + p.amount, 0);
 
-  // 6-month series: owed = debts created that month; collected = payments made that month.
   const months = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -474,7 +343,6 @@ async function analytics(userId) {
 }
 
 module.exports = {
-  // THE canonical payment sums. See the note above paidForDebt (LW-034).
   paidForDebt,
   attachTotals,
   withDerived,

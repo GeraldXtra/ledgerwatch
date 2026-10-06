@@ -5,25 +5,11 @@ const Portfolio = require("../models/Portfolio");
 const signToken = require("../utils/token");
 const google = require("../services/googleAuth.service");
 
-/**
- * Sends the browser back to the sign in page with the outcome in the URL
- * FRAGMENT, never the query string. A fragment is not sent to any server and
- * does not land in access logs or a proxy's history, which matters because on
- * success it carries a session token.
- */
 function bounce(res, params) {
   const hash = new URLSearchParams(params).toString();
   return res.redirect(`${google.clientBase()}/login#${hash}`);
 }
 
-/**
- * GET /api/auth/google?n=<browser nonce>  Start the redirect flow.
- *
- * The nonce is minted by the sign in page and comes back to it beside the
- * token, so a token from a link somebody else built is refused there. See
- * googleAuth.service.js. A start without a nonce still works for an older
- * page, and the page then refuses the token, which is the safe direction.
- */
 async function googleStart(req, res) {
   if (!google.googleConfigured()) {
     return bounce(res, { error: "Sign in with Google is not switched on for this server." });
@@ -37,19 +23,6 @@ async function googleStart(req, res) {
   return res.redirect(google.authorizationUrl(google.NONCE_RE.test(n) ? n : ""));
 }
 
-/**
- * GET /api/auth/google/callback  Google returns here with a code.
- *
- * Finds the account by Google id, then by email, and creates one if neither
- * exists. An account created this way has a random password it does not know,
- * because a password is required by the schema and a blank one would be a
- * password anyone could type. The person can set a real one later through the
- * reset flow, at which point both ways in work.
- *
- * An existing password account with the same verified email is LINKED rather
- * than duplicated: Google has verified the mailbox, which is the same proof the
- * six digit code establishes, so the two are the same person.
- */
 async function googleCallback(req, res) {
   try {
     const { code, state, error } = req.query || {};
@@ -87,45 +60,15 @@ async function googleCallback(req, res) {
         });
         await Portfolio.create({ userId: user._id });
       } catch (err) {
-        // Two callbacks for a brand new address at once: the unique index wins,
-        // and the loser simply signs into the account the winner created.
         if (err && err.code === 11000) user = await User.findOne({ email });
         else throw err;
       }
     } else {
       let changed = false;
 
-      /**
-       * ACCOUNT PRE-HIJACKING, AND WHY LINKING IS NOT ALWAYS SAFE.
-       *
-       * `register` creates a User row before the address is verified — it
-       * deliberately issues no session until the emailed code is entered, which
-       * is correct. But the row exists, with a password the registrant chose.
-       *
-       * So anybody could register victim@example.com, set their own password,
-       * and wait. When the real owner later signed in with Google, this branch
-       * found that row BY EMAIL, linked it, stamped `emailVerified = true`, and
-       * handed them a session — inside the attacker's account. The attacker's
-       * password still worked and any session they held stayed valid, because
-       * `tokenVersion` was untouched. Shared access to the victim's debtors,
-       * bank details and wallet address, indefinitely.
-       *
-       * Google has told us `email_verified === true`, so the person in front of
-       * us owns the address and the unverified row does not. This is therefore a
-       * TAKEOVER, not a link: the password that was never proven is discarded,
-       * and every session issued under it is invalidated. The rightful owner can
-       * set a new password through the normal reset flow, which sends a code to
-       * the address they have just proved they control.
-       *
-       * An already-verified account is a different case: whoever holds it proved
-       * this address themselves at registration, so linking is safe and their
-       * other sessions are left alone.
-       */
       if (!user.emailVerified && !user.googleId) {
         user.passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
         user.tokenVersion = (Number(user.tokenVersion) || 0) + 1;
-        // The emailVerification challenge that row was carrying is spent: the
-        // address has been proven by a stronger route.
         user.emailVerification = undefined;
         changed = true;
         console.warn(
@@ -146,8 +89,6 @@ async function googleCallback(req, res) {
     }
 
     if (!user) return bounce(res, { error: "Could not sign you in. Please try again." });
-    // The nonce goes back beside the token so the page can prove this flow
-    // began in this browser before it stores anything.
     return bounce(res, { token: signToken(user._id, user.tokenVersion), n: verified.nonce });
   } catch (err) {
     console.error("google callback error:", err.message);

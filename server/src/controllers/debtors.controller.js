@@ -5,7 +5,6 @@ const {
   debtorKey,
 } = require("../services/receivables.service");
 
-// GET /api/debtors  (grouped debtor summaries with reliability score)
 async function list(req, res) {
   try {
     const debtors = await debtorGroups(req.user._id);
@@ -16,16 +15,13 @@ async function list(req, res) {
   }
 }
 
-// GET /api/debtors/lookup?phone=  (for the Add-Debt inline reliability warning)
 async function lookup(req, res) {
   try {
-    // Coerced: `?phone[]=x` arrives as an array and `.trim` is not a function.
     const phone = String(req.query.phone || "").trim().slice(0, 40);
     const name = String(req.query.name || "").trim().slice(0, 120);
     if (!phone && !name) return res.json({ debtor: null });
 
     const groups = await debtorGroups(req.user._id);
-    // Match by normalized phone via a synthetic debt, else by name.
     const key = debtorKey({ debtorPhone: phone, debtorName: name });
     const match = groups.find((g) => g.key === key) || null;
     return res.json({ debtor: match });
@@ -35,24 +31,10 @@ async function lookup(req, res) {
   }
 }
 
-/**
- * EXPRESS HAS ALREADY DECODED `req.params`. DO NOT DECODE IT AGAIN.
- *
- * The client encodes the debtor key once, Express decodes it once, and both
- * handlers below then decoded it a second time. For most names that is a no-op,
- * which is why it survived. For a name carrying a percent sign — "Kemi 100%
- * Pure Water", "50% Discount Stores", ordinary Nigerian business names — the
- * second decode threw a URIError, the catch turned it into a 500 "Failed to
- * load debtor", and the Profile and Statement buttons for that customer simply
- * never worked, indistinguishable from a database outage. A name containing a
- * sequence like %20 was worse: it decoded silently into a DIFFERENT name and the
- * customer was reported as not found.
- */
 function paramKey(req) {
   return String(req.params.key || "");
 }
 
-// GET /api/debtors/:key  (full profile: debts + timeline)
 async function profile(req, res) {
   try {
     const key = paramKey(req);
@@ -65,7 +47,6 @@ async function profile(req, res) {
   }
 }
 
-// GET /api/debtors/:key/statement  (all debts + payments for one debtor)
 async function statement(req, res) {
   try {
     const key = paramKey(req);

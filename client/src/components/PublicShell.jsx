@@ -4,21 +4,9 @@ import { Menu } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import LogoMark from "./LogoMark";
 
-/**
- * The frame around every public page that is not the front page: the guide,
- * the privacy policy, the terms, and the contact form.
- *
- * One white bar with the brand and three links, the page, and a plain footer.
- * Somebody who is signed in gets a single button back into the app instead of
- * the sign in pair, so the guide can be read from inside the product without
- * feeling like leaving it.
- */
 export default function PublicShell({ children, wide = false }) {
   const { user } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
-  // The two text links hide on a phone, where the bar only has room for the
-  // brand and one button; both are in the footer and the guide has its own
-  // page picker.
   const linkCls = ({ isActive }) =>
     isActive ? "site-nav-link hide-sm active" : "site-nav-link hide-sm";
 

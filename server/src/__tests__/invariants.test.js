@@ -1,16 +1,3 @@
-/**
- * INVARIANTS — the assertions four documents already claim exist.
- *
- * ARCHITECTURE.md section 13 lists twenty invariants and says of two of them that
- * they are "asserted in CI". SECURITY.md 4.1 repeats one as a MUST. Neither
- * assertion existed: there was no CI and no test. This file is that assertion.
- *
- * Everything here is a property of the SOURCE, not of a request. These tests
- * touch no database and no network. They exist to fail loudly the moment somebody
- * makes a change that reads as reasonable in isolation and breaks a guarantee the
- * product depends on — which is this codebase's documented failure mode.
- */
-
 const fs = require("fs");
 const path = require("path");
 
@@ -19,13 +6,6 @@ const REPO = path.resolve(__dirname, "../../..");
 describe("invariant 4 — the RPC proxy allowlist contains no signing method", () => {
   const { ALLOWED_METHODS } = require("../controllers/wallet.controller");
 
-  /**
-   * The blast radius of getting this wrong is total. The server holds no key, so
-   * it cannot sign today — but the proxy is an authenticated relay to twelve
-   * chains, and a signing method on this list would turn a compromised upstream
-   * or a malicious method name into a path nobody reviews. The list is meant to
-   * be read methods plus one broadcast of an ALREADY-signed transaction.
-   */
   const FORBIDDEN = [
     "eth_sign",
     "eth_signTransaction",
@@ -62,9 +42,6 @@ describe("invariant 4 — the RPC proxy allowlist contains no signing method", (
   });
 
   it("allows eth_sendRawTransaction, and ONLY that as a write", () => {
-    // A raw transaction is public by construction: it is already signed, so
-    // relaying it discloses nothing the mempool will not have in a second.
-    // SECURITY.md B3 records this as the one permitted write.
     expect(ALLOWED_METHODS.has("eth_sendRawTransaction")).toBe(true);
 
     const writes = [...ALLOWED_METHODS].filter((m) => /^eth_send/.test(m));
@@ -72,31 +49,11 @@ describe("invariant 4 — the RPC proxy allowlist contains no signing method", (
   });
 
   it("has not grown beyond the reviewed surface without this test being updated", () => {
-    // Not a style rule. The list is small on purpose, and every addition is a
-    // decision about what an authenticated caller may make the server do. If you
-    // are adding one, add it here too and say why in the commit.
     expect(ALLOWED_METHODS.size).toBeLessThanOrEqual(20);
   });
 });
 
 describe("derivation parity — the server and the browser must agree exactly", () => {
-  /**
-   * THE MOST EXPENSIVE POSSIBLE DIVERGENCE.
-   *
-   * Invoice addresses are derived in the browser at m/44'/60'/0'/2/<index>, and
-   * the server watches the address that comes back. If the two files ever drift,
-   * the server watches an address the user's wallet cannot sign for: money
-   * arrives somewhere nobody controls, and no error is raised anywhere, because
-   * both halves are individually correct.
-   *
-   * config/derivation.js says in its own header "Keep this file in step with
-   * client/src/features/wallet/derivation.js — the two must agree exactly".
-   * ARCHITECTURE.md section 5.5 asks for a test. This is it.
-   *
-   * It reads the client file as TEXT rather than importing it: the client is ESM
-   * and this suite is CommonJS, and a text comparison also catches a change to
-   * the literal that an import of a re-exported constant would not.
-   */
   const server = require("../config/derivation");
   const clientPath = path.join(REPO, "client/src/features/wallet/derivation.js");
   const clientSrc = fs.readFileSync(clientPath, "utf8");
@@ -106,10 +63,6 @@ describe("derivation parity — the server and the browser must agree exactly", 
   });
 
   it("declares the same receivables branch on both sides", () => {
-    // The branch literal contains apostrophes (m/44'/60'/0'/2) inside double
-    // quotes, so the closing delimiter has to be matched by backreference — a
-    // plain [^"'] class stops at the first hardened-path marker and silently
-    // compares "m/44" instead.
     const match = clientSrc.match(
       /RECEIVABLES_BRANCH\s*=\s*(["'`])((?:(?!\1).)*)\1/
     );
@@ -118,15 +71,10 @@ describe("derivation parity — the server and the browser must agree exactly", 
   });
 
   it("the branch is the one the whole product was built around", () => {
-    // Spelled out rather than compared to itself, so that changing BOTH files
-    // still fails. A silent, agreed-upon change of branch strands every address
-    // ever issued under the old one.
     expect(server.RECEIVABLES_BRANCH).toBe("m/44'/60'/0'/2");
   });
 
   it("builds the same full path for the same index", () => {
-    // The client's function is one line and this mirrors it exactly. If the
-    // client's shape changes, the regex below stops matching and this fails.
     expect(clientSrc).toMatch(
       /return\s*`\$\{RECEIVABLES_BRANCH\}\/\$\{index\}`/
     );
@@ -148,11 +96,6 @@ describe("derivation parity — the server and the browser must agree exactly", 
 });
 
 describe("invariant 19 — no secret material in the repository", () => {
-  /**
-   * CI runs gitleaks over the whole history. This is the cheap local half: the
-   * paths that leaked before, asserted as untracked, so `npm test` says something
-   * about it too.
-   */
   const { execSync } = require("child_process");
 
   function tracked(pattern) {
@@ -164,7 +107,6 @@ describe("invariant 19 — no secret material in the repository", () => {
       });
       return out.trim().split("\n").filter(Boolean);
     } catch {
-      // Not a git checkout (a tarball, a container). Nothing to assert.
       return null;
     }
   }

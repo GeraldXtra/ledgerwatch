@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2, Receipt as ReceiptIcon } from "lucide-react";
 
-/** A key the server can use to record this payment exactly once. */
 function newIdempotencyKey() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID().replace(/-/g, "");
@@ -15,30 +14,12 @@ import ProgressBar from "./ProgressBar";
 import RecordPaymentForm from "./RecordPaymentForm";
 import ReceiptCard from "./ReceiptCard";
 
-/**
- * Payment panel for one debt: progress bar (paid vs outstanding), payment history,
- * a "Record payment" form, and a receipt for the latest payment. `debt` carries the
- * derived amountPaid/balance. `onChange(updatedDebt)` bubbles status changes up.
- */
 export default function PaymentPanel({ debt, onChange }) {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [receipt, setReceipt] = useState(null);
-  /**
-   * "WE COULD NOT ASK" IS NOT "THERE IS NONE" (LW-029).
-   *
-   * A failed history load used to `setPayments([])`, and an empty list renders
-   * the friendly "No payments yet" panel. Those are two different claims about
-   * the world. The owner opens an invoice while the connection is down, with the
-   * customer on the phone querying their balance, and the screen tells them that
-   * customer has never paid anything. The list is now left ALONE on a failure
-   * and the failure is stated, so nothing is ever asserted about money that was
-   * not actually read back.
-   */
   const [loadError, setLoadError] = useState("");
-  // Failures from removing a payment and from fetching the receipt. Both changed
-  // or reported what is owed and both used to fail in silence.
   const [actionError, setActionError] = useState("");
   const [receiptError, setReceiptError] = useState("");
 
@@ -68,13 +49,6 @@ export default function PaymentPanel({ debt, onChange }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debt._id]);
 
-  /**
-   * ONE KEY PER PENDING PAYMENT. Minted on the first submit and kept until the
-   * server confirms, so a double tap, a retry after a lost response, or a
-   * second click while the first is in flight all carry the same key and the
-   * server records the payment once. Cleared on success so the next payment
-   * gets its own.
-   */
   const pendingKey = useRef(null);
 
   async function record(payload) {
@@ -97,11 +71,6 @@ export default function PaymentPanel({ debt, onChange }) {
     try {
       ({ data } = await http.delete(`/api/debts/${debt._id}/payments/${p._id}`));
     } catch (err) {
-      // This had no catch at all. A failed delete produced an unhandled
-      // rejection in a console nobody watches, the row stayed on screen, and
-      // the owner pressed the button again believing the first press did
-      // nothing. Removing a payment changes what is owed, so a silent failure
-      // leaves them acting on a balance they think they corrected.
       setActionError(
         err?.response?.data?.error ||
           "The payment could not be removed, so the balance is unchanged. Try again."
@@ -118,9 +87,6 @@ export default function PaymentPanel({ debt, onChange }) {
       setReceipt(data.receipt);
       setReceiptError("");
     } catch (err) {
-      // The payment itself is recorded by this point — only the receipt failed
-      // to arrive. Said out loud rather than leaving the panel to look as though
-      // no receipt exists for a payment that was just taken.
       setReceipt(null);
       setReceiptError(
         err?.response?.data?.error ||
@@ -165,9 +131,6 @@ export default function PaymentPanel({ debt, onChange }) {
       {loading ? (
         <SkeletonLines count={2} />
       ) : payments.length === 0 && !loadError ? (
-        /* Guarded on `loadError`: "No payments yet" is a claim about this
-           invoice, and it may only be made when the history was actually read
-           back. When it was not, the message above says so instead. */
         <EmptyState
           icon={<ReceiptIcon size={20} />}
           title="No payments yet"
