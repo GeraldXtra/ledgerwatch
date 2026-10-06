@@ -1981,12 +1981,6 @@ button.chip:hover {
   color: var(--accent-600);
 }
 
-.topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 .auth-card {
   width: 100%;
   max-width: 440px;
