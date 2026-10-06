@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button, Card, SkeletonLines, ToastProvider, useToast } from "../../components/ui";
+import { DetailPane } from "../../components/ui/Modal";
 import { useAuth } from "../../context/AuthContext";
 import { getProvider, ERC20_ABI, rpcErrorReason } from "./provider";
 import { fetchUsdPrices, totalUsd, coinIdForSymbol, stableUsdPrice, isVerifiedRow } from "./usdValue";
@@ -1175,7 +1176,7 @@ function WalletInner() {
 
       {/* The drawer. Kept below the frame so the wallet stays a wallet. */}
       {!isBitcoin && panel && (
-        <div className="mm-drawer">
+        <DetailPane key={panel} onBack={() => setPanel(null)}>
           <Card
             title={
               panel === "send" ? "Send" : panel === "receive" ? "Receive" : "Collected on invoices"
@@ -1234,7 +1235,7 @@ function WalletInner() {
               />
             )}
           </Card>
-        </div>
+        </DetailPane>
       )}
 
       {/* The "EVM only" note that stood here was false: Bitcoin lives in this

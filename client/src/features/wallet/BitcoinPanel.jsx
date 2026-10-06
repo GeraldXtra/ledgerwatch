@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import http from "../../api/http";
 import { Button, Card, Field, Input, SkeletonLines } from "../../components/ui";
+import { DetailPane } from "../../components/ui/Modal";
 import TokenLogo from "../../components/TokenLogo";
 import { unlockWallet } from "./keystore";
 import {
@@ -1027,7 +1028,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       )}
 
       {panel === "receive" && (
-        <div className="mm-drawer" style={{ padding: "0 16px 16px" }}>
+        <DetailPane onBack={() => setPanel(null)}>
           <Card title="Receive Bitcoin">
             <p className="muted small" style={{ marginTop: 0 }}>
               Send only Bitcoin to this address, on {isMainnet ? "the Bitcoin network" : "Bitcoin testnet"}.
@@ -1037,11 +1038,18 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
               {address}
             </code>
           </Card>
-        </div>
+        </DetailPane>
       )}
 
       {panel === "send" && (
-        <div className="mm-drawer" style={{ padding: "0 16px 16px" }}>
+        <DetailPane
+          onBack={() => {
+            setPanel(null);
+            setStep("form");
+            setPlan(null);
+            setSendPassword("");
+          }}
+        >
           <Card
             title={step === "review" ? "Review before signing" : "Send Bitcoin"}
             action={
@@ -1227,7 +1235,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
               </form>
             )}
           </Card>
-        </div>
+        </DetailPane>
       )}
     </>
   );
