@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   BellRing,
+  ChevronRight,
   Coins,
   KeyRound,
   Landmark,
@@ -9,6 +10,7 @@ import {
   User as UserIcon,
 } from "lucide-react";
 import { PageHeader, ToastProvider } from "../components/ui";
+import { DetailPane } from "../components/ui/Modal";
 import ProfileSection from "../features/settings/ProfileSection";
 import PayoutSection from "../features/settings/PayoutSection";
 import CryptoSection from "../features/settings/CryptoSection";
@@ -41,17 +43,20 @@ function SettingsInner() {
     const wanted = new URLSearchParams(window.location.search).get("section");
     return SECTIONS.some((s) => s.id === wanted) ? wanted : "profile";
   });
+  const [picked, setPicked] = useState(() =>
+    SECTIONS.some((s) => s.id === new URLSearchParams(window.location.search).get("section"))
+  );
   const Section = (SECTIONS.find((s) => s.id === active) || SECTIONS[0]).Component;
 
   return (
     <>
-      <PageHeader
-        eyebrow="Account"
-        title="Settings"
-        support="Your profile, how you get paid, and how LedgerWatch reaches your clients."
-      />
+      <div className="ws-view settings-view">
+        <PageHeader
+          eyebrow="Account"
+          title="Settings"
+          support="Your profile, how you get paid, and how LedgerWatch reaches your clients."
+        />
 
-      <div className="settings-layout">
         <nav className="settings-nav" aria-label="Settings sections">
           {SECTIONS.map((s) => (
             <button
@@ -59,18 +64,24 @@ function SettingsInner() {
               type="button"
               className={active === s.id ? "nav-item active" : "nav-item"}
               aria-current={active === s.id ? "page" : undefined}
-              onClick={() => setActive(s.id)}
+              onClick={() => {
+                setActive(s.id);
+                setPicked(true);
+              }}
             >
-              {s.icon}
-              {s.label}
+              <span className="nav-item-icon">{s.icon}</span>
+              <span className="nav-item-label">{s.label}</span>
+              <ChevronRight size={16} className="nav-item-chev" aria-hidden="true" />
             </button>
           ))}
         </nav>
+      </div>
 
+      <DetailPane screen={picked ? "screen" : "none"} onBack={() => setPicked(false)}>
         <div key={active} className="settings-panel">
           <Section />
         </div>
-      </div>
+      </DetailPane>
     </>
   );
 }
