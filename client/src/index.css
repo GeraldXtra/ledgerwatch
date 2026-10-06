@@ -36,6 +36,16 @@
   --r-lg: 18px;
   --font: "Lexend", system-ui, -apple-system, "Segoe UI", sans-serif;
   --maxw: 1180px;
+  --tint-1-bg: #DDF3E6;
+  --tint-1-ink: #11683E;
+  --tint-2-bg: #FFE6D5;
+  --tint-2-ink: #9A3B00;
+  --tint-3-bg: #FFF1C2;
+  --tint-3-ink: #7A5600;
+  --tint-4-bg: #FFE1E6;
+  --tint-4-ink: #A61E4D;
+  --tint-5-bg: #E3EDDC;
+  --tint-5-ink: #3F5A2B;
   color-scheme: light;
 
   --navy-950: var(--ink);
@@ -151,6 +161,16 @@
     --age-5: #F2796F;
     --overlay: rgba(0, 0, 0, 0.55);
     --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    --tint-1-bg: #1E3A2B;
+    --tint-1-ink: #8FDCB0;
+    --tint-2-bg: #3A2618;
+    --tint-2-ink: #FFB98A;
+    --tint-3-bg: #3A3115;
+    --tint-3-ink: #FFD76E;
+    --tint-4-bg: #3A1C25;
+    --tint-4-ink: #FF9DB8;
+    --tint-5-bg: #26331F;
+    --tint-5-ink: #B5D69C;
     color-scheme: dark;
   }
 }
@@ -186,32 +206,39 @@
   --age-5: #F2796F;
   --overlay: rgba(0, 0, 0, 0.55);
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --tint-1-bg: #1E3A2B;
+  --tint-1-ink: #8FDCB0;
+  --tint-2-bg: #3A2618;
+  --tint-2-ink: #FFB98A;
+  --tint-3-bg: #3A3115;
+  --tint-3-ink: #FFD76E;
+  --tint-4-bg: #3A1C25;
+  --tint-4-ink: #FF9DB8;
+  --tint-5-bg: #26331F;
+  --tint-5-ink: #B5D69C;
   color-scheme: dark;
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
 html {
+  -webkit-text-size-adjust: 100%;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  scroll-behavior: smooth;
 }
-
-/* anchor targets clear the sticky landing nav */
-#features,
-#how {
-  scroll-margin-top: 72px;
-}
-
 
 body {
   margin: 0;
-  background: var(--canvas);
-  color: var(--body);
-  font-size: 14px;
-  font-weight: 450;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 400;
   line-height: 1.55;
 }
 
@@ -219,42 +246,87 @@ h1,
 h2,
 h3,
 h4 {
+  margin: 0;
   color: var(--ink);
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+p {
   margin: 0;
 }
 
-::selection {
-  background: var(--accent-100);
+a {
+  color: var(--accent-ink);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+img {
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
 
 .section-title {
-  font-size: 18.5px;
-  font-weight: 640;
-  letter-spacing: -0.36px;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
 }
 
 .card-title {
-  font-size: 15px;
-  font-weight: 640;
-  letter-spacing: -0.2px;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
   color: var(--ink);
 }
 
 .overline {
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--muted);
 }
 
 .overline.accent {
-  color: var(--accent-600);
+  color: var(--accent-ink);
 }
 
 .num {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums slashed-zero;
 }
 
 .muted {
@@ -262,27 +334,26 @@ h4 {
 }
 
 .faint {
-  color: var(--faint);
+  color: var(--muted);
 }
 
 .small {
-  font-size: 13px;
+  font-size: 13.5px;
 }
 
 .caption {
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 12.5px;
 }
 
 .error-text {
-  color: var(--neg-text);
-  font-size: 13px;
+  margin: 0;
+  color: var(--due);
+  font-size: 13.5px;
 }
 
 .mono-strong {
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ink);
-  letter-spacing: 0.01em;
 }
 
 .ta-right {
@@ -290,71 +361,40 @@ h4 {
 }
 
 .value-pos {
-  color: var(--pos-text);
+  color: var(--money);
 }
 
 .value-neg {
-  color: var(--neg-text);
+  color: var(--due);
 }
 
-/* ---------------- layout utils ---------------- */
+.value-warn {
+  color: var(--warn);
+}
+
 .stack > * + * {
-  margin-top: var(--gap);
+  margin-top: 16px;
 }
 
 .stack-tight > * + * {
-  margin-top: var(--gap-tight);
+  margin-top: 12px;
 }
-
 
 .stack-sm > * + * {
   margin-top: 8px;
-}
-
-/* icon tile — anchors KPI cards and card headers */
-.icon-tile {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  background: var(--accent-50);
-  color: var(--accent-600);
-  flex: none;
-}
-
-.icon-tile.neutral {
-  background: var(--well);
-  color: var(--muted);
-}
-
-.icon-tile.neg {
-  background: var(--neg-bg);
-  color: var(--neg-text);
-}
-
-.icon-tile.pos {
-  background: var(--pos-bg);
-  color: var(--pos-text);
 }
 
 .row {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .row.wrap {
   flex-wrap: wrap;
 }
 
-/*
- * `.row.tight` and `.table.compact` are USED in the interface and were defined
- * nowhere, which is LW-077 again: the markup asks for a denser variant, the rule
- * is absent, the default renders, and it reads as a spacing choice rather than a
- * missing rule. Neither is a new idea — both were already being asked for.
- */
 .row.tight {
   gap: 4px;
 }
@@ -365,53 +405,1529 @@ h4 {
 
 .grow {
   flex: 1;
-}
-
-.grid2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px 18px;
+  min-width: 0;
 }
 
 .mt {
   margin-top: 12px;
 }
 
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
 .split-7-5 {
   display: grid;
   grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-  gap: 24px;
+  gap: 16px;
   align-items: start;
 }
 
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel);
+  overflow: hidden;
 }
 
-
-.sidebar {
-  background: var(--card);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  padding: 20px 12px 16px;
+.icon-tile {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  flex: none;
 }
 
+.icon-tile.neutral {
+  background: var(--soft);
+  color: var(--muted);
+}
+
+.icon-tile.pos {
+  background: var(--money-soft);
+  color: var(--money-ink);
+}
+
+.icon-tile.neg {
+  background: var(--due-soft);
+  color: var(--due);
+}
+
+.center-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: var(--bg);
+}
 
 .wordmark {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -0.32px;
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
   color: var(--ink);
 }
 
-.wordmark .tick {
-  color: var(--accent-600);
+.wordmark .tick,
+.wordmark em {
+  color: inherit;
+  font-style: normal;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 14.5px;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn:hover {
+  background: var(--soft);
+  border-color: var(--line-strong);
+}
+
+.btn svg {
+  flex: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.btn-ghost:hover {
+  background: var(--soft);
+  border-color: transparent;
+}
+
+.btn-danger {
+  color: var(--due);
+}
+
+.btn-danger:hover {
+  background: var(--due-soft);
+  border-color: var(--due-soft);
+}
+
+.btn-sm {
+  height: 34px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+.btn-lg {
+  height: 46px;
+  padding: 0 20px;
+  font-size: 15.5px;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.btn-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.btn-icon:hover {
+  color: var(--ink);
+}
+
+.btn-icon.btn-sm {
+  width: 30px;
+  height: 30px;
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary:disabled:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  flex: none;
+  animation: spin 0.8s linear infinite;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.linklike {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.linklike:hover {
+  text-decoration-thickness: 2px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  align-content: start;
+}
+
+.field-label {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.field-hint {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.field-error {
+  font-size: 13px;
+  color: var(--due);
+}
+
+.input,
+.select,
+textarea.input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 15px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+textarea.input {
+  height: auto;
+  min-height: 120px;
+  padding: 10px 12px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.select {
+  cursor: pointer;
+}
+
+.input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.input:focus,
+.select:focus,
+textarea.input:focus {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.input:disabled,
+.select:disabled {
+  background: var(--soft);
+  color: var(--muted);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--ink);
+  flex: none;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 18px 20px 20px;
+  min-width: 0;
+}
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 14px;
+  flex-wrap: wrap;
+  margin: 0 -20px 16px;
+  padding: 0 20px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.card-head.plain {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.card-head-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.card-eyebrow {
+  margin-bottom: 2px;
+  font-size: 12.5px;
+}
+
+.card-sub {
+  margin-top: 3px;
+  max-width: 62ch;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.card.hero {
+  position: relative;
+}
+
+.well {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--soft);
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.stat-card {
+  padding: 12px 16px;
+  border-left: 1px solid var(--line);
+  min-width: 0;
+}
+
+.stat-card:first-child {
+  border-left: 0;
+}
+
+.stat-top {
+  display: none;
+}
+
+.stat-body {
+  display: grid;
+  gap: 2px;
+}
+
+.stat-body .overline {
+  font-size: 12.5px;
+}
+
+.stat-value {
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums slashed-zero;
+  overflow-wrap: anywhere;
+}
+
+.stat-value.value-pos {
+  color: var(--money);
+}
+
+.stat-value.value-neg {
+  color: var(--due);
+}
+
+.stat-hint {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.delta-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 14px;
+  flex-wrap: wrap;
+}
+
+.page-head h1 {
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.page-head-desc {
+  margin-top: 3px;
+  max-width: 56ch;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.page-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.stat-cell {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 18px 20px;
+  border-left: 1px solid var(--line);
+  min-width: 0;
+}
+
+.stat-cell:first-child {
+  border-left: 0;
+}
+
+.stat-cell.mark {
+  background: var(--accent-soft);
+}
+
+.stat-cell.mark .stat-cell-value {
+  color: var(--accent-ink);
+}
+
+.stat-cell-label {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.stat-cell-value {
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums slashed-zero;
+  overflow-wrap: anywhere;
+}
+
+.stat-cell-value.pos {
+  color: var(--money);
+}
+
+.stat-cell-value.neg {
+  color: var(--due);
+}
+
+.stat-cell-note {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+}
+
+.table th {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.table tbody tr:hover {
+  background: var(--soft);
+}
+
+.table.compact td {
+  padding: 8px 10px;
+}
+
+.table .ta-right,
+.table th.ta-right {
+  text-align: right;
+}
+
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.th-sort:hover {
+  color: var(--ink);
+}
+
+.th-sort.right {
+  flex-direction: row;
+}
+
+.clickable-row {
+  cursor: pointer;
+}
+
+.row-selected,
+.table tbody tr.row-selected:hover {
+  background: var(--sel);
+}
+
+.check-col {
+  width: 40px;
+}
+
+.cell-lead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.lead-name {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.lead-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 8px 3px 7px;
+  border-radius: 6px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  flex: none;
+}
+
+.pill.paid,
+.pill.approved,
+.pill.buy,
+.pill.sent,
+.pill.confirmed {
+  background: var(--money-soft);
+  color: var(--money-ink);
+}
+
+.pill.overdue,
+.pill.sell,
+.pill.failed {
+  background: var(--due-soft);
+  color: var(--due);
+}
+
+.pill.partially_paid,
+.pill.partially,
+.pill.partial {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.pill.paid .pill-dot,
+.pill.approved .pill-dot,
+.pill.buy .pill-dot,
+.pill.sent .pill-dot,
+.pill.confirmed .pill-dot,
+.pill.overdue .pill-dot,
+.pill.sell .pill-dot,
+.pill.failed .pill-dot {
+  background: currentColor;
+}
+
+.pill.partially_paid .pill-dot,
+.pill.partially .pill-dot,
+.pill.partial .pill-dot {
+  box-shadow: inset 2px 0 0 0 currentColor;
+}
+
+.pulse {
+  animation: settle 0.6s ease-out;
+}
+
+@keyframes settle {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+button.chip:hover {
+  border-color: var(--accent);
+}
+
+.chip.active,
+.chip[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.coin-chip {
+  display: inline-grid;
+  place-items: center;
+  min-width: 42px;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--soft);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.lw-label {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background: var(--soft);
+  max-width: 100%;
+}
+
+.seg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.seg-btn:hover {
+  color: var(--ink);
+}
+
+.seg-btn.active {
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+.seg-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.kebab-wrap {
+  display: inline-flex;
+}
+
+.kebab-menu {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.kebab-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink);
+  font-size: 14px;
+  text-align: left;
+}
+
+.kebab-item svg {
+  color: var(--muted);
+}
+
+.kebab-item:hover,
+.kebab-item:focus-visible {
+  background: var(--soft);
+}
+
+.kebab-item.danger,
+.kebab-item.danger svg {
+  color: var(--due);
+}
+
+.skeleton {
+  display: block;
+  border-radius: var(--r-sm);
+  background: var(--line);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.sk-line {
+  height: 10px;
+  border-radius: 2px;
+}
+
+.sk-block {
+  width: 100%;
+  border-radius: var(--r);
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 28px 16px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r);
+  background: var(--bg);
+  text-align: center;
+}
+
+.empty-icon-disc {
+  display: none;
+}
+
+.empty-title {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.empty-hint {
+  max-width: 48ch;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.empty .btn {
+  margin-top: 12px;
+}
+
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--soft);
+  color: var(--ink);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex: none;
+  user-select: none;
+}
+
+.avatar-lg {
+  width: 46px;
+  height: 46px;
+  font-size: 13.5px;
+}
+
+.avatar-img {
+  object-fit: cover;
+  background: var(--soft);
+}
+
+.avatar-t0 {
+  background: var(--tint-1-bg);
+  color: var(--tint-1-ink);
+}
+
+.avatar-t1 {
+  background: var(--tint-2-bg);
+  color: var(--tint-2-ink);
+}
+
+.avatar-t2 {
+  background: var(--tint-3-bg);
+  color: var(--tint-3-ink);
+}
+
+.avatar-t3 {
+  background: var(--tint-4-bg);
+  color: var(--tint-4-ink);
+}
+
+.avatar-t4 {
+  background: var(--tint-5-bg);
+  color: var(--tint-5-ink);
+}
+
+.site-footer {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13.5px;
+}
+
+.site-footer-inner {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 20px 24px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 24px;
+  flex-wrap: wrap;
+}
+
+.site-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+
+.site-footer-links a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.site-footer-links a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.toast-stack {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 80;
+  display: grid;
+  gap: 8px;
+  max-width: 420px;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 10px 12px 14px;
+  border-radius: var(--r);
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 14px;
+  line-height: 1.45;
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+}
+
+.toast-icon {
+  display: inline-flex;
+  margin-top: 2px;
+  color: var(--accent);
+  flex: none;
+}
+
+.toast-error .toast-icon {
+  color: var(--due-soft);
+}
+
+.toast-msg {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast-close {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: -4px 0 -4px 4px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  opacity: 0.8;
+  flex: none;
+}
+
+.toast-close:hover {
+  opacity: 1;
+}
+
+.ws-sheet {
+  min-width: 0;
+  padding: 22px 22px 28px;
+  outline: none;
+}
+
+.ws-sheet-dialog > .row.space-between:first-child,
+.ws-sheet-dialog > .coin-detail-head:first-child {
+  align-items: flex-start;
+}
+
+.ws-solo {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.ws-solo > .ws-sheet {
+  max-width: 640px;
+  margin: 0 auto;
+  min-height: 100%;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+
+.against-note,
+.settings-note,
+.inline-warn,
+.alert-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--soft);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.against-note > svg,
+.settings-note > svg,
+.inline-warn > svg,
+.alert-error > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+.against-note {
+  border-color: transparent;
+  background: var(--warn-soft);
+}
+
+.against-note > svg {
+  color: var(--warn);
+}
+
+.inline-warn {
+  border-color: transparent;
+  background: var(--warn-soft);
+}
+
+.inline-warn > svg {
+  color: var(--warn);
+}
+
+.alert-error,
+.settings-note.danger {
+  border-color: transparent;
+  background: var(--due-soft);
+}
+
+.alert-error > svg,
+.settings-note.danger > svg {
+  color: var(--due);
+}
+
+.settings-head {
+  display: grid;
+  gap: 3px;
+}
+
+.settings-head .muted {
+  margin: 0;
+}
+
+.trade-quote {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--line-strong);
+  font-size: 14.5px;
+}
+
+.trade-quote > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.trade-quote dt {
+  color: var(--muted);
+}
+
+.trade-quote dd {
+  margin: 0;
+  font-weight: 500;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.quote-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.coin-detail-head {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.coin-detail-head .section-title {
+  font-size: 23px;
+  letter-spacing: -0.02em;
+}
+
+.detail-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--line);
+}
+
+.detail-stat {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  background: var(--panel);
+  min-width: 0;
+}
+
+.detail-stat .overline {
+  font-size: 12.5px;
+}
+
+.detail-stat .num {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.detail-section > * + * {
+  margin-top: 10px;
+}
+
+.plain-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list-row {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.list-row:last-child {
+  border-bottom: 0;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.toggle-row:first-child {
+  border-top: 0;
+}
+
+.toggle-row > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.toggle-row input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 42px;
+  height: 24px;
+  margin: 0;
+  border-radius: 8px;
+  background: var(--line-strong);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.toggle-row input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background: var(--panel);
+  transition: transform 0.15s;
+}
+
+.toggle-row input[type="checkbox"]:checked {
+  background: var(--accent);
+}
+
+.toggle-row input[type="checkbox"]:checked::after {
+  transform: translateX(18px);
+}
+
+.toggle-row input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-title {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.toggle-row.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.toggle-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.disclosure {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.disclosure-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: var(--r);
+  background: none;
+  color: var(--ink);
+  font-weight: 500;
+  text-align: left;
+}
+
+.disclosure-toggle:hover {
+  background: var(--soft);
+}
+
+.disclosure-toggle .opt {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.disclosure-toggle svg {
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+
+.disclosure-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.disclosure-body {
+  padding: 4px 14px 16px;
+}
+
+.chart-tooltip {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 13px;
+  box-shadow: var(--shadow);
+}
+
+.rec-chart-frame {
+  min-width: 0;
+}
+
+.chart-placeholder {
+  height: 260px;
+  border-radius: var(--r);
+  background: var(--soft);
+}
+
+.answer {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  font-size: 14.5px;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 899px) {
+  .split-7-5 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stat-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stat-cell:nth-child(3) {
+    border-left: 0;
+  }
+
+  .stat-cell:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
+  }
+
+  .stat-cell-value {
+    font-size: 22px;
+  }
+}
+
+@media (max-width: 759px) {
+  .btn {
+    height: 44px;
+  }
+
+  .btn-sm {
+    height: 40px;
+  }
+
+  .btn-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .btn-icon.btn-sm {
+    width: 40px;
+    height: 40px;
+  }
+
+  .seg-btn {
+    height: 40px;
+  }
+
+  .chip {
+    height: 40px;
+    padding: 0 12px;
+  }
+
+  .input,
+  .select {
+    height: 46px;
+    font-size: 16px;
+  }
+
+  textarea.input,
+  textarea {
+    font-size: 16px;
+  }
+
+  .kebab-item {
+    height: 44px;
+  }
+
+  .toast-stack {
+    left: 12px;
+    right: 12px;
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    max-width: none;
+  }
+
+  .hide-sm {
+    display: none !important;
+  }
+
+  .site-footer-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 18px 16px 24px;
+  }
+
+  .site-footer-links a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 640px) {
+  .grid2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .kpi-row > .stat-card:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .kpi-row > .stat-card:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
+  }
+
+  .table-stack thead {
+    display: none;
+  }
+
+  .table-stack,
+  .table-stack tbody,
+  .table-stack tr,
+  .table-stack td {
+    display: block;
+    width: 100%;
+  }
+
+  .table-stack tbody tr {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .table-stack tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .table-stack td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 0;
+    text-align: right;
+  }
+
+  .table-stack td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 13px;
+    text-align: left;
+  }
+
+  .table-stack td[data-label=""]::before {
+    content: none;
+  }
+
+  .detail-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+
+  .printable,
+  .printable * {
+    visibility: visible !important;
+  }
+
+  .printable {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    border: 0 !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 .nav-item {
@@ -471,875 +1987,10 @@ h4 {
   gap: 10px;
 }
 
-/* Widened from 1440px, which left ~480px of dead margin at 1920. At 1680 the
-   content fills a 1920 viewport (minus the 244px sidebar) with balanced gutters,
-   and still centres comfortably at 1366. */
-.page {
-  width: 100%;
-  max-width: 1680px;
-  margin: 0 auto;
-  padding: 32px;
-  flex: 1;
-}
-
-.footer {
-  border-top: 1px solid var(--border);
-  padding: 14px 28px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-
-/* ---------------- page header ---------------- */
-.page-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-/* ---------------- avatar ---------------- */
-.avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 600;
-  flex: none;
-  user-select: none;
-}
-
-.avatar-lg {
-  width: 32px;
-  height: 32px;
-  font-size: 12.5px;
-}
-
-.avatar-t0 {
-  background: var(--accent-50);
-  color: var(--accent-700);
-}
-.avatar-t1 {
-  background: #eef1f4;
-  color: #5a6472;
-}
-.avatar-t2 {
-  background: #f4eddc;
-  color: #7a5e1b;
-}
-.avatar-t3 {
-  background: #e3ecf7;
-  color: #2a4a7a;
-}
-.avatar-t4 {
-  background: var(--accent-100);
-  color: var(--accent-700);
-}
-
-/* ---------------- buttons ---------------- */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  height: 36px;
-  padding: 0 14px;
-  background: var(--card);
-  border: 1px solid var(--border-hi);
-  color: var(--ink);
-  border-radius: 8px;
-  font-size: 13.5px;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  text-decoration: none;
-  white-space: nowrap;
-  box-shadow: var(--sh-card);
-  transition: background var(--t-fast) ease, border-color var(--t-fast) ease,
-    color var(--t-fast) ease, box-shadow var(--t-fast) ease,
-    transform var(--t-fast) ease;
-}
-
-.btn:hover {
-  background: var(--well);
-  border-color: var(--border-hi);
-  box-shadow: var(--sh-md);
-}
-
-.btn:active {
-  transform: translateY(0.5px);
-}
-
-.btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.btn-primary {
-  background: var(--accent-600);
-  border-color: var(--accent-600);
-  color: #ffffff;
-  font-weight: 600;
-}
-
-.btn-primary:hover {
-  background: var(--accent-700);
-  border-color: var(--accent-700);
-}
-
-.btn-ghost {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-  color: var(--muted);
-}
-
-.btn-ghost:hover {
-  background: var(--well);
-  border-color: transparent;
-  color: var(--ink);
-}
-
-.btn-danger {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-  color: var(--neg-text);
-}
-
-.btn-danger:hover {
-  background: var(--neg-bg);
-  border-color: transparent;
-}
-
-.btn-icon {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-}
-
-.btn-sm {
-  height: 30px;
-  padding: 0 10px;
-  font-size: 12.5px;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  background: var(--card);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 12.5px;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  transition: color var(--t-fast) ease, border-color var(--t-fast) ease,
-    background var(--t-fast) ease;
-}
-
-.chip:hover {
-  color: var(--accent-700);
-  border-color: var(--accent-100);
-  background: var(--accent-50);
-}
-
-/* focus-visible: solid double ring (white gap + emerald) — passes 3:1 non-text
-   contrast on every surface, and wins over component box-shadow overrides. */
-.btn:focus-visible,
-.chip:focus-visible,
-.nav-item:focus-visible,
-.seg-btn:focus-visible,
-.seg-btn.active:focus-visible,
-.kebab-item:focus-visible,
-a:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px var(--accent-600);
-}
-
-/* ---------------- forms ---------------- */
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.field-label {
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--body);
-}
-
-.input,
-.select {
-  background: var(--card);
-  border: 1px solid var(--border-hi);
-  border-radius: 8px;
-  height: 40px;
-  padding: 0 12px;
-  color: var(--ink);
-  font-size: 14px;
-  font-family: inherit;
-  width: 100%;
-  transition: border-color var(--t-fast) ease, box-shadow var(--t-fast) ease;
-}
-
-.input::placeholder {
-  color: var(--muted);
-}
-
-.input:focus,
-.select:focus {
-  outline: none;
-  border-color: var(--accent-500);
-  box-shadow: 0 0 0 4px var(--ring);
-}
-
-.field-error {
-  font-size: 12.5px;
-  color: var(--neg-text);
-}
-
-fieldset {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px;
-  margin: 0;
-}
-
-legend {
-  padding: 0 6px;
-  font-size: 12.5px;
-  color: var(--muted);
-}
-
-.seg {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  gap: 4px;
-  background: var(--well);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 3px;
-}
-
-.seg-btn {
-  border: none;
-  background: transparent;
-  color: var(--body);
-  border-radius: 6px;
-  padding: 7px 0;
-  font-size: 13.5px;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background var(--t-fast) ease, color var(--t-fast) ease,
-    box-shadow var(--t-fast) ease;
-}
-
-.seg-btn:hover {
-  color: var(--ink);
-}
-
-.seg-btn.active {
-  background: var(--card);
-  color: var(--ink);
-  box-shadow: var(--sh-card);
-}
-
-/* ---------------- cards ---------------- */
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 22px 24px;
-  box-shadow: var(--sh-sm);
-  animation: rise-in 300ms var(--ease-out) both;
-}
-
-/* Tier 3 — elevated hero: stronger shadow + a 3px navy→gold top rule. */
-/* NOTE: no `overflow: hidden` here. It used to be set so the top accent stripe
-   followed the card's rounded corners, but it also CLIPPED the hero figure — a
-   large total was cut off at the card's edge. The stripe now rounds its own top
-   corners instead, so nothing crops the number. */
-.card.hero {
-  position: relative;
-  box-shadow: var(--sh-lg);
-}
-.card.hero::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, var(--accent-600), var(--gold-500));
-  /* Rounds itself to the card's corners, so the card no longer needs
-     `overflow: hidden` — which was clipping the hero figure. */
-  border-top-left-radius: 12px;
-  border-top-right-radius: 12px;
-}
-
-/* legend swatch (replaces a bullet glyph in chart tooltips) */
-.legend-swatch {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  border-radius: 3px;
-  flex: none;
-}
-
-.card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin: -2px -24px 18px;
-  padding: 0 24px 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.card-head.plain {
-  border-bottom: none;
-  padding-bottom: 0;
-  margin-bottom: 16px;
-}
-
-.card-head-main {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.card-eyebrow {
-  margin-bottom: 3px;
-}
-
-.card-sub {
-  font-size: 13px;
-  color: var(--muted);
-  margin-top: 3px;
-  max-width: 64ch;
-}
-
-.well {
-  background: var(--well);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 14px;
-}
-
-/* ---------------- KPI stat cards ---------------- */
-.stat-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 18px 20px 16px;
-  box-shadow: var(--sh-sm);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  animation: rise-in 300ms var(--ease-out) both;
-  transition: box-shadow var(--t-fast) ease, transform var(--t-fast) ease;
-}
-
-.stat-card:hover {
-  box-shadow: var(--sh-md);
-  transform: translateY(-1px);
-}
-
-.kpi-row > .stat-card:nth-child(2) {
-  animation-delay: 60ms;
-}
-.kpi-row > .stat-card:nth-child(3) {
-  animation-delay: 120ms;
-}
-.kpi-row > .stat-card:nth-child(4) {
-  animation-delay: 180ms;
-}
-
-.stat-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.stat-body {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-/* SIZE IS SET IN THE OVERSIZED-FIGURES BLOCK, NOT HERE.
-   This rule carried `font-size: 36px`, which the responsive clamp further down
-   the file replaced, and a third declaration in the 560px block replaced that.
-   Anyone changing the 36px watched nothing happen and would reasonably conclude
-   the stylesheet was not loading (LW-042). The one that wins is the only one
-   left: search for "OVERSIZED FIGURES". */
-.stat-value {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
-  font-weight: 700;
-  letter-spacing: -0.9px;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.05;
-}
-
-.stat-hint {
-  font-size: 12.5px;
-  color: var(--muted);
-}
-
-.delta-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  background: var(--neutral-bg);
-  color: var(--neutral-text);
-}
-
-.delta-chip.pos {
-  background: var(--pos-bg);
-  color: var(--pos-text);
-}
-.delta-chip.neg {
-  background: var(--neg-bg);
-  color: var(--neg-text);
-}
-
-/* ---------------- tables ---------------- */
-.table-wrap {
-  overflow-x: auto;
-}
-
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-
-.table thead th {
-  background: var(--well);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-
-.table thead th:first-child {
-  border-top-left-radius: 8px;
-  border-bottom-left-radius: 8px;
-}
-
-.table thead th:last-child {
-  border-top-right-radius: 8px;
-  border-bottom-right-radius: 8px;
-}
-
-.table th {
-  text-align: left;
-  padding: 9px 12px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-/* The live holdings table asks for this. A denser row for tables that are read
-   as a list of figures rather than scanned for one record. */
-.table.compact th { padding: 7px 10px; }
-.table.compact td { padding: 9px 10px; }
-.table.compact { font-size: 13.5px; }
-
-.table td {
-  text-align: left;
-  padding: 15px 12px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: middle;
-  color: var(--body);
-  box-shadow: inset 2px 0 0 transparent;
-  transition: box-shadow var(--t-fast) ease;
-}
-
-/* The entrance animation and its stagger ladder were removed from here — see
-   the note further down where the duplicate `row-in` copy stood. app.css
-   suppresses row animation outright, so this rule now carries only the hover
-   transition, which is the part that has an effect. */
-.table tbody tr {
-  transition: background var(--t-fast) ease;
-}
-
-.table tbody tr:hover td:first-child {
-  box-shadow: inset 2px 0 0 var(--accent-500);
-}
-
-.table tbody tr:hover {
-  background: var(--well);
-}
-
-.table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.table th.ta-right,
-.table td.ta-right {
-  text-align: right;
-}
-
-.table td.num {
-  font-variant-numeric: tabular-nums;
-}
-
-.cell-lead {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.cell-lead .lead-name {
-  font-weight: 500;
-  color: var(--ink);
-}
-
-.cell-lead .lead-sub {
-  font-size: 12.5px;
-  color: var(--muted);
-}
-
-/* ---------------- pills ---------------- */
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 500;
-  border: none;
-  transition: background var(--t-fast) ease, color var(--t-fast) ease;
-}
-
-.pill-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: currentColor;
-}
-
-.pill.pending {
-  color: var(--neutral-text);
-  background: var(--neutral-bg);
-}
-.pill.overdue,
-.pill.sell {
-  color: var(--neg-text);
-  background: var(--neg-bg);
-}
-.pill.paid,
-.pill.sent,
-.pill.buy {
-  color: var(--pos-text);
-  background: var(--pos-bg);
-}
-.pill.scheduled {
-  color: var(--accent-700);
-  background: var(--accent-50);
-}
-.pill.hold {
-  color: var(--neutral-text);
-  background: var(--neutral-bg);
-}
-
-.pill.cancelled {
-  color: var(--muted);
-  background: transparent;
-  border: 1px solid var(--border);
-  text-decoration: line-through;
-}
-
-/*
- * THE VARIANTS THE COMPONENTS ACTUALLY EMIT.
- *
- * The same failure as LW-077 ("hide-sm" used in three places and defined
- * nowhere), and it had reached four more classes. A pill whose variant has no
- * rule is not a broken layout — it renders, in the default grey, so it reads as
- * a deliberate neutral and nobody looks again.
- *
- * `StatusPill` maps `approved` and `dismissed` in its LABELS table, so every
- * outcome on Alert history was uncoloured. It also emits `partially_paid`,
- * while the stylesheet carried `.pill.partially`, which nothing has ever
- * emitted — so a part-paid invoice was grey everywhere in the product.
- * The landing page's own sample ledger asks for `neg`.
- */
-.pill.approved {
-  color: var(--pos-text);
-  background: var(--pos-bg);
-}
-.pill.dismissed {
-  color: var(--muted);
-  background: var(--neutral-bg);
-}
-/* Kept alongside `partially` rather than replacing it: an older row or a future
-   caller may still use the short form, and one of the two must not go silent. */
-.pill.partially,
-.pill.partially_paid {
-  color: var(--warn-text);
-  background: var(--warn-bg);
-}
-/* The landing page's tone word for an overdue row. Same semantic as .overdue. */
-.pill.neg {
-  color: var(--neg-text);
-  background: var(--neg-bg);
-}
-
-/*
- * Holds the space a deferred chart is about to occupy. Both receivables charts
- * render at height 260 inside a ResponsiveContainer, so the figures above do not
- * jump when the recharts chunk lands (LW-046 split the charts out of the main
- * bundle). Defined here rather than assumed — a class used in JSX and defined
- * nowhere is LW-077, and this pass has already found six more of them.
- */
-.chart-placeholder {
-  height: 260px;
-  border-radius: 10px;
-  background: var(--well);
-  border: 1px solid var(--line-soft, var(--border));
-}
-
-/* ---------------- kebab menu ---------------- */
-.kebab-wrap {
-  position: relative;
-  display: inline-flex;
-}
-
-.kebab-menu {
-  /* fixed so the menu escapes the table's overflow clip; top/left set inline */
-  position: fixed;
-  min-width: 190px;
-  background: var(--card);
-  border-radius: 10px;
-  box-shadow: var(--sh-pop);
-  padding: 6px;
-  z-index: 40;
-  animation: pop-in var(--t-pop) var(--ease-out) both;
-}
-
-.kebab-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--body);
-  font-size: 13.5px;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  text-align: left;
-  transition: background var(--t-fast) ease, color var(--t-fast) ease;
-}
-
-.kebab-item svg {
-  color: var(--muted);
-}
-
-.kebab-item:hover {
-  background: var(--well);
-  color: var(--ink);
-}
-
-.kebab-item.danger {
-  color: var(--neg-text);
-}
-
-.kebab-item.danger svg {
-  color: var(--neg-text);
-}
-
-.kebab-item.danger:hover {
-  background: var(--neg-bg);
-}
-
-/* ---------------- modal ---------------- */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.32);
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  /* Keep a modal's top edge out from under the status bar and its bottom
-     edge above the home indicator in the installed iPhone app. */
-  padding-top: calc(24px + env(safe-area-inset-top, 0px));
-  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-  z-index: 50;
-  animation: fade-in 200ms ease both;
-}
-
-.modal-panel {
-  width: 100%;
-  max-width: 560px;
-  /* 88vh measures the viewport with the phone's URL bar HIDDEN, so on iOS
-     Safari and Chrome Android the panel was taller than the visible area and
-     its bottom — where the confirm and cancel buttons live — sat underneath the
-     browser chrome with no way to reach it. dvh tracks the height you can
-     actually see. The vh line stays as the fallback for older browsers. */
-  max-height: 88vh;
-  max-height: 88dvh;
-  overflow-y: auto;
-  background: var(--card);
-  border-radius: 12px;
-  padding: 24px;
-  box-shadow: var(--sh-modal);
-  animation: modal-in var(--t-modal) var(--ease-out) both;
-}
-
-/* ---------------- skeletons ---------------- */
-.skeleton {
-  position: relative;
-  overflow: hidden;
-  background: var(--canvas-deep);
-  border-radius: 6px;
-}
-
-.skeleton::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.7),
-    transparent
-  );
-  animation: shimmer 1.4s linear infinite;
-}
-
-.sk-line {
-  height: 14px;
-}
-
-.sk-block {
-  height: 56px;
-}
-
-/* ---------------- empty states ---------------- */
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 36px 16px;
-  text-align: center;
-}
-
-.empty-icon-disc {
-  width: 44px;
-  height: 44px;
-  border-radius: 999px;
-  background: var(--well);
-  border: 1px solid var(--border);
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  margin-bottom: 2px;
-}
-
-.empty-title {
-  font-size: 14.5px;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.empty-hint {
-  font-size: 13px;
-  color: var(--muted);
-  max-width: 380px;
-}
-
-.empty .btn {
-  margin-top: 6px;
-}
-
 .auth-card {
   width: 100%;
   max-width: 440px;
 }
-
-/* disclosure (collapsible bank details) */
-.disclosure {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.disclosure-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 11px 13px;
-  border: none;
-  background: var(--well);
-  color: var(--body);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--t-fast) ease;
-}
-
-.disclosure-toggle:hover {
-  background: var(--canvas-deep);
-}
-
-.disclosure-toggle .opt {
-  color: var(--faint);
-  font-weight: 500;
-}
-
-.disclosure-toggle svg {
-  color: var(--muted);
-  transition: transform var(--t-pop) ease;
-}
-
-.disclosure-toggle[aria-expanded="true"] svg {
-  transform: rotate(180deg);
-}
-
-.disclosure-body {
-  padding: 14px 13px 4px;
-  border-top: 1px solid var(--border);
-  animation: rise-in var(--t-pop) var(--ease-out) both;
-}
-
-/* ---------------- alert bar ---------------- */
 .alert {
   display: flex;
   align-items: flex-start;
@@ -1354,52 +2005,6 @@ legend {
   flex: none;
   margin-top: 1px;
 }
-
-.alert-error {
-  background: var(--neg-bg);
-  color: var(--neg-text);
-  /* Was a literal light pink, so a dark-theme error panel got a bright pink
-     outline on a dark red ground. Derived from the pair it sits on instead. */
-  border: 1px solid color-mix(in srgb, var(--neg-text) 32%, var(--neg-bg));
-}
-@supports not (background: color-mix(in srgb, red 50%, blue)) {
-  .alert-error { border-color: var(--neg-text); }
-}
-
-/* ---------------- spinner ---------------- */
-.spinner {
-  width: 15px;
-  height: 15px;
-  border-radius: 999px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  animation: spin 0.6s linear infinite;
-}
-
-.btn-block {
-  width: 100%;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.center-screen .spinner {
-  color: var(--accent-600);
-}
-
-.center-screen {
-  min-height: 100vh; /* fallback */
-  min-height: 100dvh; /* see the modal note: vh hides content under the phone's
-                         browser chrome, dvh does not */
-  display: grid;
-  place-items: center;
-  background: var(--canvas);
-}
-
-/* ---------------- receivables ---------------- */
 .reminder-box {
   background: var(--well);
   border: 1px solid var(--border);
@@ -1428,8 +2033,6 @@ legend {
 .log li:last-child {
   border-bottom: none;
 }
-
-/* Reminder log rows that also carry per-channel delivery chips stack vertically. */
 .log li.log-row {
   display: flex;
   flex-direction: column;
@@ -1475,76 +2078,9 @@ legend {
   background: var(--well);
   border-color: var(--border);
 }
-
-/* Settings toggles (auto-send) inside the Payout & reminders modal. */
 .settings-section {
   border-top: 1px solid var(--border);
   padding-top: 16px;
-}
-
-.toggle-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 11px;
-  padding: 9px 0;
-  cursor: pointer;
-}
-
-.toggle-row input[type="checkbox"] {
-  margin-top: 3px;
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent-700);
-  flex: none;
-  cursor: pointer;
-}
-
-.toggle-row > span {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.toggle-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.toggle-row.is-disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.toggle-row.is-disabled input[type="checkbox"] {
-  cursor: not-allowed;
-}
-
-.answer {
-  background: var(--well);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 13px 15px;
-  white-space: pre-wrap;
-  font-size: 13.5px;
-  animation: rise-in 300ms var(--ease-out) both;
-}
-
-/* ---------------- market watch ---------------- */
-.plain-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.list-row {
-  padding: 11px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.list-row:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
 }
 
 .alert-card {
@@ -1598,12 +2134,6 @@ legend {
   color: var(--body);
   border-bottom-left-radius: 4px;
 }
-
-/* portfolio hero */
-/* The figure column was capped at 300px, which cut off large totals — a value
-   like $999,999,999.99 needs well over that. `min-content` lets the column grow
-   to whatever the number actually needs, and the cap only applies once there is
-   room to spare. */
 .hero-grid {
   display: grid;
   grid-template-columns: minmax(min-content, 0.85fr) minmax(0, 1fr);
@@ -1625,9 +2155,6 @@ legend {
   background: linear-gradient(180deg, var(--hero-tint), var(--card) 70%);
   border: 1px solid var(--accent-100);
 }
-
-/* Size lives in the OVERSIZED FIGURES block, which used to override the clamp
-   that stood here. Same trap as `.stat-value` above. */
 .hero-value {
   font-weight: 700;
   letter-spacing: -1.4px;
@@ -1635,16 +2162,7 @@ legend {
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
-
-/* ====================================================================
-   LEGIBILITY GUARD — a primary figure must never be blurred, hazed,
-   faded or gradient-filled. Enforced here rather than left to
-   discipline, so a later effect cannot quietly make a number
-   unreadable. Every figure stays solid, opaque and high contrast.
-   ==================================================================== */
-.stat-value,
-.hero-value,
-.pill {
+.hero-value {
   filter: none !important;
   backdrop-filter: none !important;
   opacity: 1 !important;
@@ -1672,8 +2190,6 @@ legend {
   background: var(--neg-bg);
   color: var(--neg-text);
 }
-
-/* chart */
 .chart-frame {
   height: 240px;
   margin: 0 -8px;
@@ -1684,199 +2200,12 @@ legend {
   min-height: 200px;
 }
 
-.chart-tooltip {
-  background: var(--card);
-  border-radius: 8px;
-  box-shadow: var(--sh-pop);
-  padding: 8px 12px;
-  font-size: 12.5px;
-}
-
-.coin-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 34px;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: 6px;
-  background: var(--accent-50);
-  color: var(--accent-700);
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-/* value-update flash */
-.pulse {
-  animation: value-flash 700ms ease both;
-}
-
-/* ---------------- animations ---------------- */
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes rise-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes pop-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes modal-in {
-  from {
-    opacity: 0;
-    transform: scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes shimmer {
-  to {
-    transform: translateX(100%);
-  }
-}
-
-@keyframes value-flash {
-  0% {
-    background-color: var(--accent-50);
-  }
-  100% {
-    background-color: transparent;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
-  }
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-delay: 0ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-
-/* ---------------- responsive ---------------- */
-@media (max-width: 980px) {
-  .split-7-5 {
-    grid-template-columns: 1fr;
-  }
-}
-
 @media (max-width: 820px) {
-
-  .sidebar {
-    display: none;
-  }
-
 
   .hero-grid {
     grid-template-columns: 1fr;
   }
-
-  .page {
-    padding: 18px 16px;
-  }
-
-  .footer {
-    padding: 12px 16px;
-  }
 }
-
-@media (max-width: 640px) {
-  .grid2 {
-    grid-template-columns: 1fr;
-  }
-
-  /* tables collapse to labeled stacked cards */
-  .table-stack thead {
-    display: none;
-  }
-
-  .table-stack,
-  .table-stack tbody,
-  .table-stack tr,
-  .table-stack td {
-    display: block;
-    width: 100%;
-  }
-
-  .table-stack tbody tr {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 6px 14px;
-    margin-bottom: 10px;
-    box-shadow: var(--sh-card);
-  }
-
-  .table-stack td {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    border-bottom: 1px solid var(--border);
-    padding: 10px 0;
-    text-align: right;
-  }
-
-  .table-stack td:last-child {
-    border-bottom: none;
-  }
-
-  .table-stack td::before {
-    content: attr(data-label);
-    font-size: 11.5px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--muted);
-    text-align: left;
-  }
-
-  .table-stack td[data-label=""]::before {
-    content: none;
-  }
-
-  .table-wrap {
-    margin: 0;
-    padding: 0;
-  }
-}
-
-/* ================================================================
-   STEP 12 — live market dashboard
-   ================================================================ */
-
-/* ---- live indicator ---- */
 .live-indicator {
   display: inline-flex;
   align-items: center;
@@ -1896,18 +2225,9 @@ legend {
   background: var(--pos-text);
   position: relative;
 }
-/* The dot used to carry a `::after` ring running `live-pulse 1.8s infinite`, so
-   the market page had something moving on it permanently. The September rebuild
-   was prompted by users saying the interface was too much, and app.css silenced
-   every entrance animation on cards, tables and alerts — this one was missed, so
-   the rule "nothing that moves on its own" held everywhere except the page
-   people had actually complained about. The dot states liveness by being there
-   and by its colour; it does not need to move to do that. */
 .live-dot.delayed {
   background: var(--warn-text);
 }
-
-/* ---- animated price tick ---- */
 .animated-price {
   display: inline-flex;
   align-items: center;
@@ -1936,8 +2256,6 @@ legend {
   0% { background-color: var(--neg-bg); }
   100% { background-color: transparent; }
 }
-
-/* ---- sparkline ---- */
 .sparkline {
   display: block;
 }
@@ -1947,8 +2265,6 @@ legend {
 .sparkline-col {
   width: 108px;
 }
-
-/* ---- market table ---- */
 .market-table td {
   vertical-align: middle;
 }
@@ -1961,37 +2277,6 @@ legend {
   width: 34px;
   height: 34px;
 }
-.th-sort {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--muted);
-  cursor: pointer;
-}
-.th-sort.right {
-  flex-direction: row-reverse;
-}
-.th-sort:hover {
-  color: var(--ink);
-}
-.clickable-row {
-  cursor: pointer;
-}
-.clickable-row:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--accent-500);
-}
-
-/* ---- coin chart + timeframes ---- */
 .coin-chart {
   display: flex;
   flex-direction: column;
@@ -2029,36 +2314,6 @@ legend {
 .coin-chart-frame {
   min-height: 220px;
 }
-
-/* ---- coin detail modal ---- */
-.modal-panel.modal-lg {
-  max-width: 720px;
-}
-.coin-detail-head {
-  align-items: flex-start;
-}
-.detail-stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-}
-.detail-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  background: var(--well);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-.detail-stat .num {
-  font-size: 14.5px;
-}
-.detail-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
 .detail-holding {
   display: flex;
   align-items: baseline;
@@ -2069,8 +2324,6 @@ legend {
   border-radius: 8px;
   padding: 10px 12px;
 }
-
-/* ---- coin picker ---- */
 .coin-picker {
   position: relative;
   display: flex;
@@ -2148,13 +2401,9 @@ legend {
 .quick-chips {
   gap: 6px;
 }
-
-/* ---- watch edit ---- */
 .watch-edit {
   width: 100%;
 }
-
-/* ---- allocation bar ---- */
 .alloc-block {
   display: flex;
   flex-direction: column;
@@ -2208,120 +2457,23 @@ legend {
   background: var(--canvas-deep);
   border: 1px solid var(--border-hi);
 }
-
-/* ---- alert history ---- */
 .alert-history-row {
   display: flex;
   flex-direction: column;
-}
-
-/* ---- toasts ---- */
-.toast-stack {
-  position: fixed;
-  right: 20px;
-  /* Clear the home indicator and Safari's bottom toolbar on a phone. */
-  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  z-index: 60;
-  max-width: min(360px, calc(100vw - 40px));
-}
-.toast {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: var(--sh-lg);
-  padding: 11px 12px;
-  animation: toast-in 250ms var(--ease-out) both;
-}
-.toast-icon {
-  display: inline-flex;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  background: var(--accent-50);
-  color: var(--accent-600);
 }
 .toast-success .toast-icon {
   background: var(--pos-bg);
   color: var(--pos-text);
 }
-.toast-error .toast-icon {
-  background: var(--neg-bg);
-  color: var(--neg-text);
-}
-/* `info` is the DEFAULT type in Toast.jsx (`opts.type || "info"`), so this was
-   the most common toast in the product and the only one with no icon treatment. */
 .toast-info .toast-icon {
   background: var(--accent-50);
   color: var(--accent-700);
 }
-.toast-msg {
-  flex: 1;
-  font-size: 13.5px;
-  color: var(--ink);
-}
-.toast-close {
-  border: none;
-  background: transparent;
-  color: var(--faint);
-  cursor: pointer;
-  padding: 2px;
-  border-radius: 5px;
-  display: inline-flex;
-}
-.toast-close:hover {
-  color: var(--ink);
-  background: var(--well);
-}
-@keyframes toast-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* ---- responsive: detail modal full-screen, stat grid, alloc ---- */
 @media (max-width: 640px) {
-  .modal-panel.modal-lg {
-    max-width: 100%;
-    max-height: 100%;
-    height: 100%;
-    border-radius: 0;
-  }
-  .modal-overlay {
-    padding: 0;
-  }
-  .detail-stats {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  .toast-stack {
-    right: 12px;
-    left: 12px;
-    bottom: 12px;
-    max-width: none;
-  }
   .sparkline-col {
     width: auto;
   }
 }
-
-/* ================================================================
-   STEP 13 — Receivables depth
-   ================================================================ */
-
-/* partial-payment status pill */
-.pill.partially_paid {
-  color: var(--warn-text);
-  background: var(--warn-bg);
-}
-
-/* sub-tabs (Overview / Debts / Debtors) */
 .subtabs {
   display: inline-flex;
   gap: 4px;
@@ -2358,8 +2510,6 @@ legend {
   outline: none;
   box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--accent-600);
 }
-
-/* filters row */
 .filters-row {
   display: flex;
   gap: 10px;
@@ -2380,24 +2530,12 @@ legend {
   z-index: 1;
 }
 .search-field .input { padding-left: 34px; }
-
-/* table: checkbox column + selected row + balance cell */
-.check-col { width: 34px; }
-input[type="checkbox"] {
-  width: 15px;
-  height: 15px;
-  accent-color: var(--accent-600);
-  cursor: pointer;
-}
-.row-selected { background: var(--accent-50) !important; }
 .balance-cell {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
 }
-
-/* progress bar */
 .progress-wrap {
   display: flex;
   align-items: center;
@@ -2422,8 +2560,6 @@ input[type="checkbox"] {
 }
 .progress-fill.full { background: var(--pos-text); }
 .progress-label { font-size: 12px; color: var(--muted); }
-
-/* bulk action bar */
 .bulk-bar {
   position: fixed;
   bottom: calc(20px + env(safe-area-inset-bottom, 0px));
@@ -2441,12 +2577,6 @@ input[type="checkbox"] {
   animation: bulk-in 220ms var(--ease-out) both;
 }
 .bulk-count { font-size: 13.5px; font-weight: 600; }
-@keyframes bulk-in {
-  from { opacity: 0; transform: translate(-50%, 8px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
-}
-
-/* reliability badge */
 .rel-badge {
   display: inline-flex;
   align-items: center;
@@ -2474,8 +2604,6 @@ input[type="checkbox"] {
 .rel-badge.tone-warn .rel-score { background: var(--warn-text); }
 .rel-badge.tone-neg .rel-score { background: var(--neg-text); }
 .rel-badge.tone-neutral .rel-score { background: var(--faint); }
-
-/* add-debt reliability warning / note */
 .rel-warning {
   display: flex;
   align-items: center;
@@ -2499,8 +2627,6 @@ input[type="checkbox"] {
   font-size: 13px;
   color: var(--pos-text);
 }
-
-/* payment panel */
 .payment-summary {
   background: var(--well);
   border: 1px solid var(--border);
@@ -2511,8 +2637,6 @@ input[type="checkbox"] {
   gap: 10px;
 }
 .detail-actions { justify-content: flex-end; }
-
-/* receipt */
 .receipt-card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -2543,8 +2667,6 @@ input[type="checkbox"] {
   margin-top: 8px;
   padding-top: 12px !important;
 }
-
-/* statement */
 .statement {
   background: var(--card);
   border: 1px solid var(--border);
@@ -2586,8 +2708,6 @@ input[type="checkbox"] {
   font-weight: 700;
   color: var(--ink);
 }
-
-/* timeline */
 .timeline { list-style: none; margin: 8px 0 0; padding: 0; }
 .timeline-item {
   display: flex;
@@ -2621,46 +2741,17 @@ input[type="checkbox"] {
 .timeline-dot.t-reminder { background: var(--accent-50); color: var(--accent-600); border-color: var(--accent-100); }
 .timeline-body { display: flex; flex-direction: column; gap: 2px; padding-top: 3px; }
 .timeline-title { font-size: 13.5px; color: var(--ink); display: inline-flex; align-items: center; gap: 8px; }
-
-/* overview charts */
 .overview-charts { align-items: start; }
-.rec-chart-frame { width: 100%; }
-
-/* print: show only the printable card */
-@media print {
-  body * { visibility: hidden !important; }
-  .printable, .printable * { visibility: visible !important; }
-  .printable {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    box-shadow: none !important;
-    border: none !important;
-  }
-  .no-print { display: none !important; }
-}
 
 @media (max-width: 640px) {
   .filters-row { flex-direction: column; align-items: stretch; }
   .bulk-bar { left: 12px; right: 12px; transform: none; }
-  @keyframes bulk-in {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
   .overview-charts { grid-template-columns: 1fr; }
   .statement-head { flex-direction: column; }
   .statement-meta { text-align: left; }
 }
 
-/* ================================================================
-   STEP 14 — brand + public landing page
-   ================================================================ */
-
 .logo-svg { display: block; flex: none; }
-
-
-/* ---- display typography ---- */
 .display {
   font-size: clamp(33px, 3.7vw, 52px);
   font-weight: 700;
@@ -2670,7 +2761,6 @@ input[type="checkbox"] {
   margin: 0;
 }
 
-
 .lead {
   font-size: 18px;
   line-height: 1.6;
@@ -2678,15 +2768,11 @@ input[type="checkbox"] {
   margin: 0;
   max-width: 54ch;
 }
-
-
-/* ---- landing shell ---- */
 .landing {
   background: var(--card);
   min-height: 100vh;
   overflow-x: hidden;
 }
-
 
 .section-head {
   display: flex;
@@ -2700,14 +2786,6 @@ input[type="checkbox"] {
   text-align: center;
 }
 
-
-.btn-lg {
-  height: 46px;
-  padding: 0 20px;
-  font-size: 15px;
-}
-
-
 .progress-track.sm { height: 6px; margin-top: 6px; }
 
 .step {
@@ -2717,18 +2795,6 @@ input[type="checkbox"] {
   position: relative;
   padding-top: 8px;
 }
-
-
-/* ============================================================================
-   PHASE 4 — TESTNET WALLET
-   ========================================================================== */
-
-/* `.testnet-badge` — a "permanent testnet marker" — was removed with the
-   mainnet banner below it. Seven mainnets have been reachable since long before
-   this rule went unused, and a badge that hardcodes "testnet" onto a wallet
-   screen showing real money is the wrong kind of wrong. Nothing renders it. */
-
-/* Security guarantee + warning banners. */
 .wallet-guarantee,
 .wallet-warning {
   display: flex;
@@ -2756,8 +2822,6 @@ input[type="checkbox"] {
   background: var(--neg-bg);
   border: 1px solid #f2cfca;
 }
-
-/* Recovery-phrase grid. */
 .mnemonic-grid {
   list-style: none;
   margin: 0;
@@ -2789,18 +2853,6 @@ input[type="checkbox"] {
 }
 
 .wallet-pk { text-align: center; }
-.linklike {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  background: none;
-  border: none;
-  color: var(--accent-600);
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 4px;
-}
 .pk-value {
   display: block;
   margin-top: 8px;
@@ -2812,8 +2864,6 @@ input[type="checkbox"] {
   border-radius: 8px;
   padding: 10px 12px;
 }
-
-/* Encryption progress. */
 .encrypt-progress { display: flex; flex-direction: column; gap: 5px; }
 .encrypt-bar {
   height: 6px;
@@ -2822,12 +2872,6 @@ input[type="checkbox"] {
   transition: width 120ms linear;
 }
 .encrypt-progress { background: var(--well); border-radius: 999px; padding: 3px; }
-
-
-/* ---- Network scoping: assets live on ONE chain ---------------------------
-   Added after a user sent 80 USDC to their own address expecting it to cross
-   chains. Everything here exists to make the active network impossible to
-   overlook, so it is stated plainly rather than tucked into fine print. */
 
 .chain-chip {
   display: inline-flex;
@@ -2867,9 +2911,6 @@ input[type="checkbox"] {
   background: var(--well);
   border: 1px solid var(--border);
 }
-/* The blocked-send variant. The gold warn family rather than red: the user has
-   done nothing wrong and lost nothing — they are being stopped before they can,
-   so this is a caution, not an error. */
 .net-scope-notice.warning {
   background: var(--warn-bg);
   border-color: var(--gold-200);
@@ -2899,25 +2940,6 @@ input[type="checkbox"] {
 }
 .self-send-block p { margin: 0; }
 
-.inline-warn {
-  margin: -4px 0 0;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--warn-text);
-}
-
-/* How far today's rate has moved from the one this invoice was quoted at. Muted
-   on purpose: it is information, not a problem — the invoice still settles at
-   its own snapshot rate, which is the whole point of taking one. */
-.quote-sub.rate-drift {
-  color: var(--warn-text);
-  font-weight: 600;
-}
-
-/* ---- Wallet backup and secret reveal ---------------------------------------
-   The most dangerous screen in the app: what it shows hands over total control
-   of the funds. Styled to slow the user down rather than to look slick. */
-
 .reveal-warning {
   display: flex;
   gap: 12px;
@@ -2936,9 +2958,6 @@ input[type="checkbox"] {
 .reveal-warn-lead { margin: 0 0 8px; font-size: 14px; font-weight: 700; }
 .reveal-warn-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.65; }
 .reveal-warn-list li { margin-bottom: 4px; }
-
-/* The concealed state. A full-size target, because revealing must be a
-   deliberate act and never something brushed by accident. */
 .reveal-cover {
   display: flex;
   flex-direction: column;
@@ -2958,8 +2977,6 @@ input[type="checkbox"] {
 }
 .reveal-cover:hover { border-color: var(--navy-100); background: var(--navy-50); }
 .reveal-cover-title { font-size: 14px; font-weight: 650; color: var(--ink); }
-
-/* Numbered grid. Order is part of the secret, so the numbers are not decoration. */
 .phrase-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2981,17 +2998,12 @@ input[type="checkbox"] {
   gap: 8px;
   padding: 9px 10px;
   border-radius: 8px;
-  /* A TOKEN, NOT #fff. This was a literal white while the words themselves use
-     var(--ink), which in dark mode is #f1efe9 — so the twelve words that are the
-     only way to recover a wallet rendered white on white and could not be read
-     at all. The one screen in this product where that is unrecoverable. */
   background: var(--card);
   border: 1px solid var(--border);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13.5px;
   font-weight: 600;
   color: var(--ink);
-  /* A phrase that wraps mid-word is a phrase transcribed wrong. */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3041,17 +3053,12 @@ input[type="checkbox"] {
   margin-bottom: 2px;
 }
 
-
 .security-questions {
   padding: 16px;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--well);
 }
-
-/* ---- Live portfolio states -------------------------------------------------
-   Live mode must never fall back to a paper figure, so every failure and empty
-   case gets a designed answer instead of a blank or a zero. */
 .live-read-error {
   display: flex;
   gap: 10px;
@@ -3089,8 +3096,6 @@ input[type="checkbox"] {
   margin: 4px 0 10px;
   word-break: break-all;
 }
-
-/* Chain attribution on every history row. */
 .tx-chain-line {
   display: flex;
   flex-wrap: wrap;
@@ -3126,8 +3131,6 @@ input[type="checkbox"] {
   text-decoration: none;
 }
 .faucet-link:hover { text-decoration: underline; }
-
-/* Receive. */
 .receive-card {
   display: flex;
   flex-direction: column;
@@ -3153,8 +3156,6 @@ input[type="checkbox"] {
   color: var(--body);
   max-width: 320px;
 }
-
-/* Tx summary (review step). */
 .tx-summary {
   margin: 0;
   border: 1px solid var(--border);
@@ -3178,8 +3179,6 @@ input[type="checkbox"] {
   text-align: right;
   word-break: break-all;
 }
-
-/* Tx history. */
 .tx-list { list-style: none; margin: 0; padding: 0; }
 .tx-row {
   display: flex;
@@ -3213,9 +3212,6 @@ input[type="checkbox"] {
 }
 .tx-confirmed { color: var(--pos-text); background: var(--pos-bg); border-color: transparent; }
 .tx-failed { color: var(--neg-text); background: var(--neg-bg); border-color: transparent; }
-/* `pending` is the WalletTx default and the state a person most wants to see
-   clearly — a transaction still in flight. It was the one status of the three
-   with no rule, so it rendered as an untreated chip beside a green and a red. */
 .tx-pending { color: var(--warn-text); background: var(--warn-bg); border-color: transparent; }
 .tx-explorer { color: var(--muted); display: inline-flex; padding: 6px; }
 .tx-explorer:hover { color: var(--accent-600); }
@@ -3223,53 +3219,6 @@ input[type="checkbox"] {
 @media (max-width: 520px) {
   .mnemonic-grid { grid-template-columns: repeat(2, 1fr); }
 }
-
-/* ============================================================================
-   POLISH — card hover lift, staggered entrance, table rows
-   ========================================================================== */
-
-/* Consistent lift on every card surface: 2px + a slightly deeper shadow. */
-.card,
-.stat-card {
-  transition: transform 200ms ease, box-shadow 200ms ease;
-}
-
-.card:hover,
-.stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--sh-md);
-}
-
-/* Staggered entrance for KPI cards — 60ms apart, always ending fully opaque
-   (rise-in resolves to opacity 1, and `both` holds that final state). */
-.kpi-row > *:nth-child(1) { animation-delay: 0ms; }
-.kpi-row > *:nth-child(2) { animation-delay: 60ms; }
-.kpi-row > *:nth-child(3) { animation-delay: 120ms; }
-.kpi-row > *:nth-child(4) { animation-delay: 180ms; }
-
-/* THE TABLE ROW ENTRANCE WAS DECLARED TWICE AND USED ZERO TIMES.
-   `.table tbody tr { animation: rise-in ... }` sits at the top of this file and
-   was silently replaced here by a `row-in` version with different delays, so
-   anyone editing the first saw nothing change and would reasonably conclude the
-   stylesheet was not loading (LW-042 flagged exactly this shape). Both were dead
-   in any case: app.css sets `animation: none !important` on `.table tbody tr` as
-   part of the rebuild that stopped things moving on their own. The `row-in`
-   keyframes and its whole delay ladder are removed, and the first declaration
-   now keeps only the hover transition it actually contributes. */
-
-@media (prefers-reduced-motion: reduce) {
-  .card:hover,
-  .stat-card:hover {
-    transform: none;
-  }
-  .table tbody tr {
-    animation: none;
-  }
-}
-
-/* ============================================================================
-   SETTINGS — sectioned page with sub-navigation
-   ========================================================================== */
 .settings-layout {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
@@ -3279,11 +3228,6 @@ input[type="checkbox"] {
 
 .settings-nav {
   position: sticky;
-  /* Must clear the sticky chrome (.lw-chrome = masthead + rail), which is about
-     96px on a desktop. 88px was measured against the old shell and left this
-     tucking under the rail as you scrolled the settings page. Below 900px the
-     rule further down makes this static, so this offset is desktop and
-     iPad-landscape only. */
   top: 112px;
   display: flex;
   flex-direction: column;
@@ -3304,47 +3248,9 @@ input[type="checkbox"] {
   min-width: 0;
   animation: rise-in 300ms var(--ease-out) both;
 }
-
-.settings-head {
-  padding-bottom: 4px;
-}
-.settings-head .muted {
-  margin: 4px 0 0;
-}
-
-.settings-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 14px 0 0;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--muted);
-}
-.settings-note svg {
-  flex: none;
-  margin-top: 1px;
-  color: var(--accent-600);
-}
-.settings-note.danger svg {
-  color: var(--neg-text);
-}
-
-
-/* The single travelling bar replaces the per-row marker. */
 .nav-item.active::before {
   display: none;
 }
-
-/* ---- Avatar image ---- */
-.avatar-img {
-  object-fit: cover;
-  background: var(--well);
-  display: block;
-  border-radius: 999px;
-}
-
-/* ---- Avatar upload ---- */
 .avatar-upload {
   display: flex;
   align-items: flex-start;
@@ -3378,8 +3284,6 @@ input[type="checkbox"] {
 .avatar-drop svg {
   color: var(--accent-600);
 }
-
-/* ---- Danger zone ---- */
 .danger-zone {
   display: flex;
   flex-direction: column;
@@ -3390,17 +3294,10 @@ input[type="checkbox"] {
   display: flex;
   gap: 14px;
   padding: 20px;
-  /* TOKENS, NOT LITERALS. These were a light pink border on a near-white ground,
-     defined nowhere else, so in dark mode the Danger Zone — delete account, wipe
-     data, clear wallet — rendered as a near-white slab with the theme's light
-     text on it, unreadable. The semantic pair is theme-aware in both. */
   border: 1px solid var(--neg-bg);
   background: color-mix(in srgb, var(--neg-bg) 34%, var(--card));
   border-radius: 12px;
 }
-/* color-mix has no support in older WebKit, where the declaration above is
-   dropped and the element falls back to this. Same reason the sticky chrome
-   carries a fallback (LW-067). */
 @supports not (background: color-mix(in srgb, red 50%, blue)) {
   .danger-action { background: var(--card); }
 }
@@ -3439,21 +3336,6 @@ input[type="checkbox"] {
     max-width: none;
   }
 }
-
-
-/* Live compact preview under a large amount input (₦152.0M while typing). */
-.field-hint {
-  display: block;
-  margin-top: 6px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--accent-700);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ============================================================================
-   TRADE PANEL — user-set Buy/Sell on an alert
-   ========================================================================== */
 .agent-reasoning {
   display: flex;
   gap: 12px;
@@ -3461,53 +3343,6 @@ input[type="checkbox"] {
   background: var(--well);
   border: 1px solid var(--border);
   border-radius: 10px;
-}
-
-/* Shown when the user takes the opposite side to the agent. Informational, not
-   a blocker — the human decides. */
-.against-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 11px 14px;
-  border-radius: 10px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--warn-text);
-  background: var(--warn-bg);
-}
-.against-note svg {
-  flex: none;
-  margin-top: 1px;
-}
-
-.trade-quote {
-  margin: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-}
-.trade-quote > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-}
-.trade-quote > div:last-child {
-  border-bottom: none;
-}
-.trade-quote dt {
-  color: var(--muted);
-  font-size: 13px;
-}
-.trade-quote dd {
-  margin: 0;
-  color: var(--ink);
-  font-size: 13.5px;
-  font-weight: 600;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
 }
 
 .override-chip {
@@ -3520,78 +3355,25 @@ input[type="checkbox"] {
   color: var(--warn-text);
   background: var(--warn-bg);
 }
-
-/* ============================================================================
-   OVERSIZED FIGURES — must never clip, at any value or viewport.
-   A big number is the most-looked-at element on every screen; it may scale
-   down, but it may never be cut off, truncated or ellipsised.
-   ========================================================================== */
 .hero-value,
-.stat-value,
 .figure-xl {
-  /* Scales with the viewport AND stays inside its column. min-width:0 lets a
-     flex/grid child shrink below its content size instead of overflowing. */
   min-width: 0;
   max-width: 100%;
   overflow: visible;
   text-overflow: clip;
   white-space: nowrap;
-  /* Long values wrap to a smaller size rather than spilling past the card. */
   overflow-wrap: normal;
 }
-
-/* Responsive sizes: the floor is small enough that even a 14-character value
-   ($999,999,999.99) fits a narrow column at 1366px. */
 .hero-value {
   font-size: clamp(28px, 3.2vw, 46px);
 }
-
-.stat-value {
-  font-size: clamp(24px, 2.2vw, 34px);
-}
-
-
-/* Their containers must not crop either. */
-.hero-figure,
-.stat-card,
-.stat-body {
+.hero-figure {
   min-width: 0;
 }
 
-.hero-figure,
-.stat-body {
+.hero-figure {
   overflow: visible;
 }
-
-
-/* ============================================================
-   CRYPTO PAYMENT ADDRESSES ON INVOICES
-   Reuses the existing navy system: white card, --well insets,
-   --border hairlines, the same pill and icon-tile tones. No new
-   visual language, no gradient or blur anywhere near a figure.
-   ============================================================ */
-
-/* Sub-label under a quote figure — the rate's age, the confirmation depth.
-   Small and muted, but fully opaque: it qualifies a number, so it has to be
-   readable. */
-.quote-sub {
-  display: block;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--muted);
-  letter-spacing: 0;
-}
-
-/* Gold-family warning tone for pills and figures, matching --warn-*. */
-.pill.warn {
-  color: var(--warn-text);
-  background: var(--warn-bg);
-}
-.value-warn {
-  color: var(--warn-text);
-}
-
-/* Blocked states in the issue modal: no wallet, or a wallet that cannot derive. */
 .crypto-blocked {
   display: flex;
   align-items: flex-start;
@@ -3601,8 +3383,6 @@ input[type="checkbox"] {
   border-radius: 10px;
   background: var(--well);
 }
-
-/* ---- The address card on the invoice ---- */
 .crypto-card {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -3637,8 +3417,6 @@ input[type="checkbox"] {
   gap: 14px;
   min-width: 0;
 }
-
-/* Progress: confirmed money against what was asked for. */
 .crypto-progress {
   display: flex;
   flex-direction: column;
@@ -3646,10 +3424,6 @@ input[type="checkbox"] {
 }
 .crypto-progress-figures {
   display: grid;
-  /* auto-fit, NOT a fixed 3 columns. This card lives inside a fixed-width modal,
-     so viewport media queries cannot help it — the container is narrow however
-     wide the screen is. auto-fit reflows to two rows on a tight container instead
-     of crushing three figures into columns too narrow to hold them. */
   grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 10px;
 }
@@ -3667,15 +3441,8 @@ input[type="checkbox"] {
   font-size: 13.5px;
   line-height: 1.25;
   min-width: 0;
-  /* Wrap only as a last resort. `white-space: nowrap` with `overflow: visible`
-     used to be here, which is why a large amount ran straight out through the
-     tile border: it could neither wrap nor be contained. Clipping instead would
-     be worse than either, because a cut-off figure reads as a smaller amount. */
   overflow-wrap: break-word;
 }
-/* The unit on its own line. This is the actual fix for the overflow: each tile
-   has roughly 100px of content width in the invoice modal, and the digits alone
-   need about 60px where digits plus " USDC" need very nearly the lot. */
 .figure-unit {
   display: block;
   font-size: 11px;
@@ -3683,8 +3450,6 @@ input[type="checkbox"] {
   letter-spacing: 0.04em;
   color: var(--muted);
 }
-/* The summary line above the bar carries two amounts, so let it wrap onto a
-   second line rather than push past the card edge. */
 .crypto-progress-head {
   flex-wrap: wrap;
   gap: 4px 12px;
@@ -3694,10 +3459,6 @@ input[type="checkbox"] {
   margin: 0;
   padding: 0 14px 14px;
 }
-
-/* Observed transactions. Detected and confirmed are deliberately distinct: a
-   transfer that has landed but not yet confirmed must be visible as incoming,
-   not reported as nothing. */
 .crypto-tx-list {
   padding: 0 14px;
   border-top: 1px solid var(--border);
@@ -3733,8 +3494,6 @@ input[type="checkbox"] {
   border-top: 1px solid var(--border);
   background: var(--well);
 }
-
-/* Ledger indicator: which invoices are awaiting a stablecoin payment. */
 .crypto-chip {
   display: inline-flex;
   align-items: center;
@@ -3766,9 +3525,6 @@ input[type="checkbox"] {
     align-items: stretch;
   }
 }
-
-
-/* ---- Sweeping collected payments into the main wallet ---- */
 .sweep-list {
   max-height: 300px;
   overflow-y: auto;
@@ -3781,9 +3537,6 @@ input[type="checkbox"] {
 .sweep-row-state .error-text {
   margin: 0;
 }
-/* A destination address must be readable in full before it is approved, so it
-   wraps rather than truncating. Sending to a half-read address is the one
-   mistake this screen exists to prevent. */
 .sweep-dest {
   word-break: break-all;
   font-size: 12.5px;
@@ -3812,17 +3565,9 @@ input[type="checkbox"] {
   gap: 12px;
   padding: 18px 4px;
 }
-
-/* Notification permission status row in Settings. The value is stated plainly
-   because the API cannot re-prompt once blocked, so the user has to be told
-   exactly what state they are in. */
 .perm-row {
   padding: 10px 0 2px;
 }
-
-/* Notification deep link pointing at an alert that has already been resolved.
-   Information, not an error, so it uses the neutral well rather than the error
-   tone. */
 .deeplink-note {
   padding: 11px 14px;
   border: 1px solid var(--border);
@@ -3835,13 +3580,6 @@ input[type="checkbox"] {
   gap: 9px;
   align-items: center;
 }
-
-
-/* ============================================================
-   NETWORK SWITCHER (3B)
-   Testnets and mainnets are visually separated on purpose — they
-   are one careless click apart otherwise.
-   ============================================================ */
 .net-switcher { position: relative; }
 .net-trigger {
   display: inline-flex;
@@ -3856,9 +3594,6 @@ input[type="checkbox"] {
   font-weight: 600;
   cursor: pointer;
 }
-/* --accent-500, not --navy-600: the raw navy scale is only defined on the light
-   :root, so this hover border stayed a light-theme value in dark and all but
-   vanished against the dark card. The accent scale is redefined in both themes. */
 .net-trigger:hover { border-color: var(--accent-500); }
 .net-trigger.mainnet {
   border-color: var(--warn-text);
@@ -3915,9 +3650,6 @@ input[type="checkbox"] {
   line-height: 1.5;
   color: var(--muted);
 }
-.toggle-inline { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
-
-/* ---- Paper vs live trading toggle (3D) ---- */
 .mode-toggle-wrap { display: flex; flex-direction: column; gap: 8px; }
 .mode-toggle {
   display: inline-flex;
@@ -3943,9 +3675,6 @@ input[type="checkbox"] {
 }
 .mode-btn:hover:not(:disabled) { color: var(--ink); }
 .mode-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-/* LW-042: this referenced --sh-1, which was defined nowhere, so the whole
-   declaration was invalid and the active toggle sat flat while every other
-   active segmented control in the app had elevation. */
 .mode-btn.active { background: var(--card); color: var(--ink); box-shadow: var(--sh-sm); }
 .mode-btn.active.live { color: var(--warn-text); }
 .mode-note {
@@ -3957,16 +3686,7 @@ input[type="checkbox"] {
   color: var(--muted);
 }
 .mode-note.danger { color: var(--warn-text); font-weight: 500; }
-
-/* Live positions total — same figure treatment as the other oversized numbers. */
 .live-total { display: flex; flex-direction: column; gap: 2px; margin: 14px 0 6px; }
-
-/* ===========================================================================
-   TURNSTILE  Cloudflare human check, sits under the last field in the auth
-   forms. The widget renders in its own iframe at a fixed 300x65, so it is
-   centred rather than stretched: forcing width on it just leaves whitespace
-   inside the frame.
-   =========================================================================== */
 .turnstile-field { display: flex; justify-content: center; margin: 4px 0 2px; min-height: 65px; }
 .turnstile-field .field-error { margin-top: 6px; text-align: center; }
 
@@ -3974,34 +3694,8 @@ input[type="checkbox"] {
   background: var(--warn-bg); border: 1px solid var(--gold-200); border-radius: 8px;
   color: var(--warn-text); font-size: 13px; line-height: 1.5; text-align: left; }
 .turnstile-missing .caption { color: var(--warn-text); opacity: .85; margin-top: 2px; }
-
-/* ===========================================================================
-   MARKET WATCH  mobile
-
-   The shell fix above stops the page scrolling sideways. These stop the wide
-   content from being unreadable once it is forced to fit.
-   =========================================================================== */
 @media (max-width: 820px) {
-  /* Belt and braces: any layout child that meets long unbreakable content, a
-     42 character address or a nine figure amount, can now shrink instead of
-     pushing its parent wide. */
-  .page, .split-7-5 > *, .card, .stat-card { min-width: 0; }
-
-  /* Long tokens must break rather than widen a row. */
-  .list-row, .alert-card, .chat-msg, .hero-figure { overflow-wrap: anywhere; }
-
-  /* The market table keeps its own horizontal scroll rather than the page
-     taking it. Between 640 and 820 it is still a real table. */
-  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-
-  /* The allocation bar is decorative and reads badly at phone widths. */
+  .alert-card, .chat-msg, .hero-figure { overflow-wrap: anywhere; }
   .alloc-bar { min-width: 0; }
 }
-
-@media (max-width: 560px) {
-  /* Two KPI tiles per row reads better than one very wide one. */
-  .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .stat-value { font-size: clamp(20px, 6vw, 28px); }
-}
-
 

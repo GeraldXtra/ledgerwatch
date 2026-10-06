@@ -1,8 +1,14 @@
-import { useEffect, useRef } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
-
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * THE OPEN MODALS, OUTERMOST FIRST (LW-039).
@@ -15,12 +21,68 @@ const FOCUSABLE =
  */
 const openModals = [];
 
-/**
- * Modal dialog: overlay fade + panel rise. Closes on backdrop click and Esc.
- * Focus management: moves focus into the panel on open, traps Tab inside it,
- * and restores focus to the previously focused element on close.
- * `label` names the dialog for assistive tech.
- */
+const WorkspaceContext = createContext(null);
+
+export function WorkspaceProvider({ children }) {
+  const [pane, setPane] = useState(null);
+  const [entries, setEntries] = useState([]);
+
+  const add = useCallback((entry) => {
+    setEntries((list) => [...list.filter((e) => e.id !== entry.id), entry]);
+  }, []);
+  const remove = useCallback((id) => {
+    setEntries((list) => list.filter((e) => e.id !== id));
+  }, []);
+
+  const value = useMemo(
+    () => ({ pane, setPane, entries, add, remove }),
+    [pane, entries, add, remove]
+  );
+
+  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
+}
+
+export function useWorkspace() {
+  return useContext(WorkspaceContext);
+}
+
+function useDetailEntry(kind, screen, back) {
+  const ws = useContext(WorkspaceContext);
+  const idRef = useRef(null);
+  if (idRef.current === null) idRef.current = {};
+  const backRef = useRef(back);
+  backRef.current = back;
+
+  const add = ws ? ws.add : null;
+  const remove = ws ? ws.remove : null;
+
+  useLayoutEffect(() => {
+    if (!add) return undefined;
+    const id = idRef.current;
+    add({ id, kind, screen, back: () => backRef.current && backRef.current() });
+    return () => remove(id);
+  }, [add, remove, kind, screen]);
+
+  const entries = ws ? ws.entries : [];
+  const top = entries[entries.length - 1];
+  const registered = entries.some((e) => e.id === idRef.current);
+  const hidden = registered && top && top.id !== idRef.current;
+
+  return { ws, hidden };
+}
+
+export function DetailPane({ label, screen = "screen", onBack, children }) {
+  const { ws, hidden } = useDetailEntry("pane", screen, onBack);
+
+  if (!ws || !ws.pane) return null;
+  return createPortal(
+    <section className="ws-sheet ws-sheet-base" aria-label={label} hidden={hidden}>
+      {children}
+    </section>,
+    ws.pane
+  );
+}
+
 export default function Modal({ onClose, label = "Dialog", size = "md", children }) {
   const panelRef = useRef(null);
   // The opener is captured during the FIRST RENDER, before anything in the
@@ -28,29 +90,12 @@ export default function Modal({ onClose, label = "Dialog", size = "md", children
   // autofocused input inside the dialog, and "restored" focus to a detached
   // node on close.
   const previousFocusRef = useRef(null);
-  /**
-   * DID THIS CLICK ACTUALLY START ON THE BACKDROP?
-   *
-   * A `click` fires on the nearest common ancestor of its mousedown and its
-   * mouseup, so selecting text inside a field, dragging past the edge of the
-   * panel and releasing dispatched a click on the overlay — and the overlay
-   * closes the dialog. On the record-a-debt form or a trade panel that threw
-   * away everything typed, from a gesture nobody would call a click. The
-   * backdrop now closes only when the press AND the release were both on it.
-   */
-  const pressedOnOverlayRef = useRef(false);
   if (previousFocusRef.current === null) {
     previousFocusRef.current = typeof document !== "undefined" ? document.activeElement : null;
   }
 
-  // Move focus in on open; restore it on unmount.
-  //
-  // The PANEL takes focus, not the first control. Focusing the first control
-  // drew a focus ring on whatever happened to come first (a close button, a
-  // CSV button, a segment) every time a dialog opened on a phone, which read
-  // as a highlighted choice nobody had made. The Tab trap below still keeps
-  // keyboard users inside the dialog, and their first Tab lands on the first
-  // control as before.
+  const { ws, hidden } = useDetailEntry("dialog", "screen", onClose);
+
   useEffect(() => {
     const panel = panelRef.current;
     // A form that autofocuses its first field has already taken focus by the
@@ -80,78 +125,28 @@ export default function Modal({ onClose, label = "Dialog", size = "md", children
         const mine = panelRef.current && panelRef.current.__modalId;
         if (top && mine && top !== mine) return; // a modal above this one owns Escape
         onClose();
-        return;
-      }
-      // Trap Tab within the panel.
-      if (e.key === "Tab" && panelRef.current) {
-        const focusables = Array.from(
-          panelRef.current.querySelectorAll(FOCUSABLE)
-        ).filter((el) => el.offsetParent !== null);
-        if (!focusables.length) {
-          e.preventDefault();
-          return;
-        }
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        const active = document.activeElement;
-        // The panel itself holds focus right after opening; Shift+Tab from it
-        // must wrap to the last control, not escape to the page underneath.
-        if (
-          e.shiftKey &&
-          (active === first || active === panelRef.current || !panelRef.current.contains(active))
-        ) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && active === last) {
-          e.preventDefault();
-          first.focus();
-        }
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  /**
-   * RENDERED INTO document.body, NOT IN PLACE (LW-085).
-   *
-   * Rendered in place, the overlay is a child of whatever opened it, and two
-   * ordinary page rules then reach it. `.stack > * + *` gave it a 24px top
-   * margin as the last sibling in a section, so the "full screen" dialog on a
-   * phone started 24px down with a strip of the page showing above it. Worse,
-   * the debtor profile opens from inside a `.card`, whose hover lift is a
-   * transform, and a transformed ancestor becomes the containing block of a
-   * fixed descendant: the dialog was sized and positioned to the card, with
-   * its top off the screen on a phone, where a tap leaves the card hovered.
-   * The body has no such rules, and carries the theme tokens and typography,
-   * so nothing else changes. Events still bubble through the React tree
-   * exactly as before, which is why the panel's stopPropagation keeps working.
-   */
   if (typeof document === "undefined") return null;
-  return createPortal(
+
+  const panel = (
     <div
-      className="modal-overlay"
-      onMouseDown={(e) => {
-        pressedOnOverlayRef.current = e.target === e.currentTarget;
-      }}
-      onClick={(e) => {
-        const startedHere = pressedOnOverlayRef.current;
-        pressedOnOverlayRef.current = false;
-        if (e.target === e.currentTarget && startedHere) onClose();
-      }}
+      className={`ws-sheet ws-sheet-dialog stack${size === "lg" ? " ws-sheet-lg" : ""}`}
+      role="dialog"
+      aria-label={label}
+      tabIndex={-1}
+      ref={panelRef}
+      hidden={hidden}
     >
-      <div
-        className={`modal-panel stack ${size === "lg" ? "modal-lg" : ""}`.trim()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={label}
-        tabIndex={-1}
-        ref={panelRef}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {children}
-      </div>
-    </div>,
-    document.body
+      {children}
+    </div>
   );
+
+  if (!ws) return createPortal(<div className="ws-solo">{panel}</div>, document.body);
+  if (!ws.pane) return null;
+  return createPortal(panel, ws.pane);
 }
