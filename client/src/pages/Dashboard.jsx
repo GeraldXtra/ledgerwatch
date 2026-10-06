@@ -123,7 +123,7 @@ export default function Dashboard() {
         </header>
 
         <main className="page">
-          <Suspense fallback={<p className="muted">Loading this section...</p>}>
+          <Suspense fallback={<p className="fallback-text">Loading this section...</p>}>
             <Outlet />
           </Suspense>
         </main>

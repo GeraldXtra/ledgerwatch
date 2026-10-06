@@ -40,7 +40,7 @@ export function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", t);
   // The browser chrome on a phone follows this, so it should agree with the page.
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", t === "dark" ? "#0f1216" : "#16283f");
+  if (meta) meta.setAttribute("content", t === "dark" ? "#111416" : "#FFFCF3");
 }
 
 export function setTheme(theme) {

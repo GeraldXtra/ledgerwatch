@@ -5,7 +5,6 @@ import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
 import Dashboard from "./pages/Dashboard";
 import ReceivablesPage from "./features/receivables/ReceivablesPage";
-import LogoMark from "./components/LogoMark";
 
 // Wallet pulls in ethers + qrcode — code-split so those load only on demand.
 const WalletPage = lazy(() => import("./features/wallet/WalletPage"));
@@ -39,15 +38,26 @@ const ContactPage = lazy(() => import("./pages/ContactPage"));
 
 function Booting() {
   return (
-    <div className="center-screen">
-      <div className="stack-sm" style={{ textAlign: "center" }}>
-        <div className="row" style={{ justifyContent: "center" }}>
-          <LogoMark size={34} />
-        </div>
-        <div className="wordmark">
+    <div className="center-screen boot" aria-busy="true">
+      <div className="boot-inner">
+        <svg className="boot-mark" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+          <rect className="boot-sq" width="64" height="64" rx="16" />
+          <g transform="translate(32 32.4) scale(.74) translate(-32 -32.4)">
+            <path className="boot-rule boot-r1" d="M14 44H50" strokeWidth="5.5" />
+            <path className="boot-rule boot-r2" d="M14 52H50" strokeWidth="5.5" />
+            <path
+              className="boot-tick"
+              d="M18 25L27.5 34.5L46 14"
+              strokeWidth="8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </g>
+        </svg>
+        <div className="wordmark boot-word">
           Ledger<span className="tick">Watch</span>
         </div>
-        <p className="muted small">Loading your workspace...</p>
+        <p className="boot-text">Loading your workspace...</p>
       </div>
     </div>
   );
@@ -67,7 +77,7 @@ function Public({ children }) {
     <Suspense
       fallback={
         <div className="center-screen">
-          <p className="muted small">Loading...</p>
+          <p className="fallback-text">Loading...</p>
         </div>
       }
     >

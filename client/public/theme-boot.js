@@ -17,7 +17,7 @@
     }
     document.documentElement.setAttribute("data-theme", t);
     var m = document.querySelector('meta[name="theme-color"]');
-    if (m) m.setAttribute("content", t === "dark" ? "#0f1216" : "#16283f");
+    if (m) m.setAttribute("content", t === "dark" ? "#111416" : "#FFFCF3");
   } catch {
     /* storage unavailable: the stylesheet's light default applies */
   }

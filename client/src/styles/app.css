@@ -4,6 +4,125 @@
   --shell-max: var(--maxw);
 }
 
+.logo-svg {
+  display: block;
+  flex: none;
+}
+
+.fallback-text {
+  margin: 0;
+  padding: 24px 4px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.boot-inner {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.boot-mark {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 8px;
+}
+
+.boot-sq {
+  fill: var(--accent);
+}
+
+.boot-rule,
+.boot-tick {
+  stroke: var(--on-accent);
+}
+
+.boot-rule {
+  stroke-dasharray: 36;
+  stroke-dashoffset: 36;
+  animation: boot-draw 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+
+.boot-r2 {
+  animation-delay: 0.18s;
+}
+
+.boot-tick {
+  stroke-dasharray: 44 60;
+  stroke-dashoffset: 50;
+  animation: boot-tick 2.8s cubic-bezier(0.3, 0.7, 0.2, 1) 0.75s infinite;
+}
+
+.boot-word {
+  font-size: 20px;
+  opacity: 0;
+  animation: boot-show 0.4s ease-out 1s forwards;
+}
+
+.boot-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  opacity: 0;
+  animation: boot-show 0.4s ease-out 1.15s forwards;
+}
+
+@keyframes boot-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes boot-tick {
+  0% {
+    stroke-dashoffset: 50;
+    opacity: 1;
+  }
+  24% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  78% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  92% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+  100% {
+    stroke-dashoffset: 50;
+    opacity: 0;
+  }
+}
+
+@keyframes boot-show {
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-rule,
+  .boot-tick,
+  .boot-word,
+  .boot-text {
+    animation: none !important;
+  }
+
+  .boot-rule,
+  .boot-tick {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+
+  .boot-word,
+  .boot-text {
+    opacity: 1;
+  }
+}
+
 .app {
   min-height: 100vh;
   min-height: 100dvh;

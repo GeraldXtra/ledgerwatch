@@ -2750,8 +2750,6 @@ button.chip:hover {
   .statement-head { flex-direction: column; }
   .statement-meta { text-align: left; }
 }
-
-.logo-svg { display: block; flex: none; }
 .display {
   font-size: clamp(33px, 3.7vw, 52px);
   font-weight: 700;
