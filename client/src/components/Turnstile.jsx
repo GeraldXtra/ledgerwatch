@@ -80,6 +80,8 @@ export function unloadTurnstile() {
 
 export const turnstileEnabled = Boolean(SITE_KEY);
 
+let warnedMissingKey = false;
+
 export default function Turnstile({ onToken, action }) {
   const holder = useRef(null);
   const widgetId = useRef(null);
@@ -142,7 +144,43 @@ export default function Turnstile({ onToken, action }) {
    * that case for whoever is deploying.
    */
   if (!SITE_KEY) {
-    if (!import.meta.env.DEV) return null;
+    /**
+     * RENDERING NOTHING IN PRODUCTION WAS THE WORST OF THE THREE OPTIONS.
+     *
+     * `VITE_TURNSTILE_SITE_KEY` is inlined at BUILD time, exactly like
+     * VITE_API_URL, so it has to be set in the Vercel build environment and not
+     * merely in a local .env. Neither variable is listed in DEPLOY_CHECKLIST.md.
+     *
+     * When it was missing this branch returned null, so the sign-in page showed
+     * no widget at all — while the SERVER, which has its own secret set, refused
+     * every submission with "Please complete the verification box before
+     * continuing." Nobody could sign in or sign up, and the error named a box
+     * that was not on the screen. A total, silent lockout of the whole product
+     * from one absent build variable.
+     *
+     * It still cannot show an operational note to real users, but it can stop
+     * being invisible: the form is told the check is unavailable, so it can say
+     * something true, and it is logged for whoever is looking at the console.
+     */
+    if (!import.meta.env.DEV) {
+      if (!warnedMissingKey) {
+        warnedMissingKey = true;
+        console.error(
+          "[turnstile] VITE_TURNSTILE_SITE_KEY was not set at build time, so the verification " +
+            "widget cannot render. If the server has TURNSTILE_SECRET_KEY set, every sign in and " +
+            "sign up will be refused. Set it in the build environment and redeploy."
+        );
+      }
+      return (
+        <div className="turnstile-field" role="status">
+          <div className="caption error-text">
+            The human check could not load, so signing in is unavailable right now. This is a
+            configuration problem on our side, not something you can fix — please try again
+            shortly.
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="turnstile-field turnstile-missing">
         <div>

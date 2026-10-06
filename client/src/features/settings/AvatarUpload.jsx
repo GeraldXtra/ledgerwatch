@@ -8,33 +8,63 @@ const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
 const OUTPUT_SIZE = 512; // square, matching the avatar's object-fit: cover
 
 /**
+ * A phone photo is a few MB; anything far past that is not a profile picture,
+ * and the whole file is read into memory as a data URL before it is drawn, so
+ * the check has to come first rather than after.
+ */
+const MAX_INPUT_BYTES = 20 * 1024 * 1024;
+
+/**
  * Square-crop and downscale in the browser before upload. A phone photo is
  * several MB; this lands around 60kB, which keeps the user document small and
  * stays far inside the server's 2MB decoded cap.
+ *
+ * EVERY CALLBACK IS WRAPPED, BECAUSE A THROW IN ONE GOES NOWHERE.
+ *
+ * `img.onload` runs long after this executor returned, so anything it threw —
+ * most plausibly `getContext("2d")` handing back null for a very large image or
+ * under memory pressure, and then `ctx.imageSmoothingQuality` throwing on it —
+ * escaped into no handler at all. The promise then never settled: not resolved,
+ * not rejected. The caller's `finally` never ran, so the button read
+ * "Uploading…" for as long as the page stayed open and no error was ever shown.
+ * A hung promise is the quietest failure there is.
  */
 function processImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("Could not read that file"));
     reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error("That file is not a readable image"));
-      img.onload = () => {
-        // Centre-crop to a square, then draw at OUTPUT_SIZE.
-        const side = Math.min(img.width, img.height);
-        const sx = (img.width - side) / 2;
-        const sy = (img.height - side) / 2;
+      try {
+        const img = new Image();
+        img.onerror = () => reject(new Error("That file is not a readable image"));
+        img.onload = () => {
+          try {
+            // Centre-crop to a square, then draw at OUTPUT_SIZE.
+            const side = Math.min(img.width, img.height);
+            const sx = (img.width - side) / 2;
+            const sy = (img.height - side) / 2;
 
-        const canvas = document.createElement("canvas");
-        canvas.width = OUTPUT_SIZE;
-        canvas.height = OUTPUT_SIZE;
-        const ctx = canvas.getContext("2d");
-        ctx.imageSmoothingQuality = "high";
-        ctx.drawImage(img, sx, sy, side, side, 0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
+            const canvas = document.createElement("canvas");
+            canvas.width = OUTPUT_SIZE;
+            canvas.height = OUTPUT_SIZE;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+              throw new Error(
+                "This browser would not give a drawing surface for that image, which usually means it is too large"
+              );
+            }
+            ctx.imageSmoothingQuality = "high";
+            ctx.drawImage(img, sx, sy, side, side, 0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
 
-        resolve(canvas.toDataURL("image/jpeg", 0.86));
-      };
-      img.src = reader.result;
+            resolve(canvas.toDataURL("image/jpeg", 0.86));
+          } catch (err) {
+            reject(err instanceof Error ? err : new Error("That image could not be processed"));
+          }
+        };
+        img.src = reader.result;
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error("That image could not be opened"));
+      }
     };
     reader.readAsDataURL(file);
   });
@@ -54,6 +84,14 @@ export default function AvatarUpload() {
     if (!file) return;
     if (!ACCEPTED.includes(file.type)) {
       setError("Choose a JPEG, PNG or WebP image.");
+      return;
+    }
+    if (file.size > MAX_INPUT_BYTES) {
+      setError(
+        `That image is ${(file.size / (1024 * 1024)).toFixed(1)}MB, which is too large to open here. Choose one under ${
+          MAX_INPUT_BYTES / (1024 * 1024)
+        }MB.`
+      );
       return;
     }
     setBusy(true);

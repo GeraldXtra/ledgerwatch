@@ -2,6 +2,7 @@ const Watch = require("../models/Watch");
 const Alert = require("../models/Alert");
 const Portfolio = require("../models/Portfolio");
 const SimTrade = require("../models/SimTrade");
+const User = require("../models/User");
 const { resolveSymbol } = require("./coinMap");
 const { getPrices, getPrice } = require("./coingecko.service");
 const { explainAlert } = require("./anthropic.service");
@@ -135,13 +136,19 @@ function evaluateCondition(watch, price) {
   const baseline = watch.baselinePrice;
 
   switch (type) {
+    /**
+     * `baseline == null`, not `!baseline`. The original rejected a baseline of
+     * exactly 0 as if it were missing — the second half of LW-044. A zero
+     * baseline still cannot divide, so it is refused separately and for the
+     * real reason.
+     */
     case "drop_pct": {
-      if (!baseline) return { hit: false, pctChange: null };
+      if (baseline == null || baseline <= 0) return { hit: false, pctChange: null };
       const pct = ((baseline - price) / baseline) * 100;
       return { hit: pct >= value, pctChange: pct };
     }
     case "rise_pct": {
-      if (!baseline) return { hit: false, pctChange: null };
+      if (baseline == null || baseline <= 0) return { hit: false, pctChange: null };
       const pct = ((price - baseline) / baseline) * 100;
       return { hit: pct >= value, pctChange: pct };
     }
@@ -213,6 +220,43 @@ async function runPricePass({ userId } = {}) {
       const priceRow = prices[watch.coinId];
       if (!priceRow || typeof priceRow.usd !== "number") continue;
       const price = priceRow.usd;
+
+      /**
+       * LW-044, THE HALF THAT WAS NEVER BUILT.
+       *
+       * A percentage watch measures against `baselinePrice`, captured when the
+       * watch is created. If CoinGecko was unreachable at that moment the
+       * baseline is null, and `evaluateCondition` returns {hit:false} for a null
+       * baseline — so the watch is inert. Forever, silently.
+       *
+       * The register records LW-044 as FIXED, describing exactly this self-heal:
+       * "a percentage watch with a null baseline takes the next available price
+       * as its baseline". The only recapture that was ever written lives in
+       * `updateWatchCondition`, which runs when a person EDITS the watch — which
+       * is the original bug report's own workaround, not a fix.
+       *
+       * Here is the fix, on the pass that actually runs. Taking the first price
+       * we can see is the correct baseline: it is the earliest moment this watch
+       * could honestly have started measuring from.
+       *
+       * `== null` is deliberate and covers both null and undefined. `!baseline`
+       * was the original defect's other half — it also rejects a legitimate
+       * baseline of exactly 0.
+       */
+      const isPct =
+        watch.condition.type === "drop_pct" || watch.condition.type === "rise_pct";
+      if (isPct && watch.baselinePrice == null) {
+        watch.baselinePrice = price;
+        await watch.save();
+        console.log(
+          `[market] watch ${watch._id} (${watch.symbol}) had no baseline and has taken ` +
+            `${price} as its starting point. It was inert until now.`
+        );
+        // Deliberately no alert on this pass: a baseline set from this tick
+        // cannot yet have moved away from it, and firing here would raise a
+        // spurious alert the instant the price feed came back.
+        continue;
+      }
 
       const { hit, pctChange } = evaluateCondition(watch, price);
       if (!hit) continue;
@@ -310,6 +354,30 @@ async function runPricePass({ userId } = {}) {
   return { alertsCreated, watchesChecked };
 }
 
+/**
+ * THESE TWO ENTRY POINTS SIMULATE. A LIVE ALERT MUST NOT REACH THEM.
+ *
+ * `approveAlert` and `actOnAlert` move a pretend cash balance and write a
+ * SimTrade. In live mode the browser never calls them — it opens the real swap
+ * dialog and closes the alert through POST /api/alerts/:id/executed, which
+ * records the on chain transaction and touches no simulated ledger. But the
+ * endpoints stayed reachable by any signed-in caller regardless of mode, and
+ * called with a live alert they stamped a SimTrade `mode: "live"` and adjusted a
+ * live cash balance that starts at zero. That is a trade record asserting a real
+ * trade happened when nothing touched a chain, sitting in the live history
+ * beside ones that did — the trading equivalent of a payment row with no
+ * payment, and the same class of defect as LW-075.
+ */
+function assertPaperAlert(alert) {
+  if (alert && alert.mode === "live") {
+    throw httpError(
+      409,
+      "This is a live alert. A live trade is a real swap from your own wallet: open the trade " +
+        "dialog to execute it, and it is recorded against this alert when it confirms."
+    );
+  }
+}
+
 // ---- portfolio -------------------------------------------------------------
 
 async function loadOrCreatePortfolio(userId, mode = "paper") {
@@ -355,15 +423,28 @@ async function getPortfolio(userId, mode = "paper") {
 
   const cashBalance = portfolio.cashBalance;
   const totalValue = cashBalance + holdingsValue;
-  const totalPnl = totalValue - STARTING_CASH;
+
+  /**
+   * THE BASELINE IS THE BOOK'S OWN STARTING CASH, not the practice one.
+   *
+   * `totalValue - STARTING_CASH` was applied to every book, and STARTING_CASH is
+   * the million dollars the PRACTICE account opens with. `loadOrCreatePortfolio`
+   * deliberately opens a live book at zero, so a live-mode user was reported as
+   * down one million dollars — a figure that was then handed to the AI as
+   * context, which would happily discuss a catastrophic loss that never
+   * happened.
+   */
+  const startingCash = portfolio.mode === "live" ? 0 : STARTING_CASH;
+  const totalPnl = totalValue - startingCash;
 
   return {
+    mode: portfolio.mode === "live" ? "live" : "paper",
     cashBalance,
     holdings: enriched,
     holdingsValue,
     totalValue,
     totalPnl,
-    startingCash: STARTING_CASH,
+    startingCash,
   };
 }
 
@@ -390,6 +471,7 @@ async function actOnAlert(userId, alert, intent) {
   if (alert.status !== "pending") {
     throw httpError(409, `Alert is already ${alert.status}`);
   }
+  assertPaperAlert(alert);
 
   const side = intent.action;
   if (side !== "buy" && side !== "sell") {
@@ -490,6 +572,7 @@ async function approveAlert(userId, alert) {
   if (alert.status !== "pending") {
     throw httpError(409, `Alert is already ${alert.status}`);
   }
+  assertPaperAlert(alert);
 
   const side = alert.suggestion; // "buy" | "sell" | "hold"
   const portfolio = await loadOrCreatePortfolio(userId, alert.mode || "paper");
@@ -621,10 +704,23 @@ function parseWatchCommand(message) {
 
 /**
  * Build a plain-text portfolio/status summary for the no-AI fallback.
+ *
+ * THE BOOK IS RESOLVED FROM THE USER, not defaulted to paper. The mode argument
+ * was optional and defaulted through `getPortfolio` to the practice book, so a
+ * person trading real money who asked "how is my portfolio doing" was answered
+ * with their imaginary one — same shape as LW-075, at a call site that fix did
+ * not reach. The caller passes no mode, so the answer has to be looked up here
+ * rather than assumed, and the summary now says which book it is describing.
  */
-async function buildPortfolioSummaryText(userId) {
-  const portfolio = await getPortfolio(userId);
+async function buildPortfolioSummaryText(userId, mode) {
+  let book = mode === "live" || mode === "paper" ? mode : null;
+  if (!book) {
+    const user = await User.findById(userId).select("tradingMode").lean();
+    book = user && user.tradingMode === "live" ? "live" : "paper";
+  }
+  const portfolio = await getPortfolio(userId, book);
   const lines = [];
+  lines.push(book === "live" ? "Live book." : "Practice book.");
   lines.push(`Cash: $${fmt(portfolio.cashBalance)}.`);
   if (portfolio.holdings.length === 0) {
     lines.push("You hold no coins yet.");

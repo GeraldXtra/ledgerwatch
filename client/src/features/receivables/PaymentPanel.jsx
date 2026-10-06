@@ -25,6 +25,22 @@ export default function PaymentPanel({ debt, onChange }) {
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [receipt, setReceipt] = useState(null);
+  /**
+   * "WE COULD NOT ASK" IS NOT "THERE IS NONE" (LW-029).
+   *
+   * A failed history load used to `setPayments([])`, and an empty list renders
+   * the friendly "No payments yet" panel. Those are two different claims about
+   * the world. The owner opens an invoice while the connection is down, with the
+   * customer on the phone querying their balance, and the screen tells them that
+   * customer has never paid anything. The list is now left ALONE on a failure
+   * and the failure is stated, so nothing is ever asserted about money that was
+   * not actually read back.
+   */
+  const [loadError, setLoadError] = useState("");
+  // Failures from removing a payment and from fetching the receipt. Both changed
+  // or reported what is owed and both used to fail in silence.
+  const [actionError, setActionError] = useState("");
+  const [receiptError, setReceiptError] = useState("");
 
   const currency = debt.currency || "NGN";
   const total = debt.amount || 0;
@@ -36,8 +52,12 @@ export default function PaymentPanel({ debt, onChange }) {
     try {
       const { data } = await http.get(`/api/debts/${debt._id}/payments`);
       setPayments(data.payments);
-    } catch {
-      setPayments([]);
+      setLoadError("");
+    } catch (err) {
+      setLoadError(
+        err?.response?.data?.error ||
+          "The payment history for this invoice could not be loaded, so what is shown below may be out of date. This is a connection problem, not a statement that nothing has been paid."
+      );
     } finally {
       setLoading(false);
     }
@@ -72,7 +92,22 @@ export default function PaymentPanel({ debt, onChange }) {
 
   async function removePayment(p) {
     if (!window.confirm(`Remove this ${ngn(p.amount, currency)} payment?`)) return;
-    const { data } = await http.delete(`/api/debts/${debt._id}/payments/${p._id}`);
+    setActionError("");
+    let data;
+    try {
+      ({ data } = await http.delete(`/api/debts/${debt._id}/payments/${p._id}`));
+    } catch (err) {
+      // This had no catch at all. A failed delete produced an unhandled
+      // rejection in a console nobody watches, the row stayed on screen, and
+      // the owner pressed the button again believing the first press did
+      // nothing. Removing a payment changes what is owed, so a silent failure
+      // leaves them acting on a balance they think they corrected.
+      setActionError(
+        err?.response?.data?.error ||
+          "The payment could not be removed, so the balance is unchanged. Try again."
+      );
+      return;
+    }
     await load();
     if (onChange) onChange(data.debt);
   }
@@ -81,8 +116,16 @@ export default function PaymentPanel({ debt, onChange }) {
     try {
       const { data } = await http.get(`/api/debts/${debt._id}/receipt`);
       setReceipt(data.receipt);
-    } catch {
+      setReceiptError("");
+    } catch (err) {
+      // The payment itself is recorded by this point — only the receipt failed
+      // to arrive. Said out loud rather than leaving the panel to look as though
+      // no receipt exists for a payment that was just taken.
       setReceipt(null);
+      setReceiptError(
+        err?.response?.data?.error ||
+          "The payment was recorded, but its receipt could not be loaded. Reopen this invoice to try again."
+      );
     }
   }
 
@@ -116,9 +159,15 @@ export default function PaymentPanel({ debt, onChange }) {
         />
       )}
 
+      {loadError && <p className="error-text">{loadError}</p>}
+      {actionError && <p className="error-text">{actionError}</p>}
+
       {loading ? (
         <SkeletonLines count={2} />
-      ) : payments.length === 0 ? (
+      ) : payments.length === 0 && !loadError ? (
+        /* Guarded on `loadError`: "No payments yet" is a claim about this
+           invoice, and it may only be made when the history was actually read
+           back. When it was not, the message above says so instead. */
         <EmptyState
           icon={<ReceiptIcon size={20} />}
           title="No payments yet"
@@ -131,7 +180,7 @@ export default function PaymentPanel({ debt, onChange }) {
             ) : null
           }
         />
-      ) : (
+      ) : payments.length === 0 ? null : (
         <ul className="plain-list">
           {payments.map((p) => (
             <li key={p._id} className="row space-between list-row">
@@ -149,6 +198,8 @@ export default function PaymentPanel({ debt, onChange }) {
           ))}
         </ul>
       )}
+
+      {receiptError && <p className="error-text">{receiptError}</p>}
 
       {receipt && (
         <div className="stack-sm">

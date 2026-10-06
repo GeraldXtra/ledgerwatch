@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowDown, ArrowUp, Users } from "lucide-react";
 import http from "../../api/http";
 import { Avatar, Card, EmptyState, SkeletonLines } from "../../components/ui";
 import { ngn, shortDate } from "./format";
 import ReliabilityBadge from "./ReliabilityBadge";
-import DebtorProfile from "./DebtorProfile";
+/**
+ * The debtor profile is a dialog opened from a row, and it is the last static
+ * path pulling recharts into the main bundle (LW-046). Deferred: nobody has it
+ * open when the page loads, and by the time they click, the chunk has arrived.
+ */
+const DebtorProfile = lazy(() => import("./DebtorProfile"));
 
 const SORTS = {
   name: (a, b) => (a.debtorName || "").localeCompare(b.debtorName || ""),
@@ -104,7 +109,11 @@ export default function DebtorsView() {
         </div>
       )}
 
-      {openKey && <DebtorProfile debtorKey={openKey} onClose={() => setOpenKey(null)} />}
+      {openKey && (
+        <Suspense fallback={null}>
+          <DebtorProfile debtorKey={openKey} onClose={() => setOpenKey(null)} />
+        </Suspense>
+      )}
     </Card>
   );
 }

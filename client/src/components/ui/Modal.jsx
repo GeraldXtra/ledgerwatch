@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -27,6 +28,17 @@ export default function Modal({ onClose, label = "Dialog", size = "md", children
   // autofocused input inside the dialog, and "restored" focus to a detached
   // node on close.
   const previousFocusRef = useRef(null);
+  /**
+   * DID THIS CLICK ACTUALLY START ON THE BACKDROP?
+   *
+   * A `click` fires on the nearest common ancestor of its mousedown and its
+   * mouseup, so selecting text inside a field, dragging past the edge of the
+   * panel and releasing dispatched a click on the overlay — and the overlay
+   * closes the dialog. On the record-a-debt form or a trade panel that threw
+   * away everything typed, from a gesture nobody would call a click. The
+   * backdrop now closes only when the press AND the release were both on it.
+   */
+  const pressedOnOverlayRef = useRef(false);
   if (previousFocusRef.current === null) {
     previousFocusRef.current = typeof document !== "undefined" ? document.activeElement : null;
   }
@@ -100,8 +112,34 @@ export default function Modal({ onClose, label = "Dialog", size = "md", children
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  return (
-    <div className="modal-overlay" onClick={onClose}>
+  /**
+   * RENDERED INTO document.body, NOT IN PLACE (LW-085).
+   *
+   * Rendered in place, the overlay is a child of whatever opened it, and two
+   * ordinary page rules then reach it. `.stack > * + *` gave it a 24px top
+   * margin as the last sibling in a section, so the "full screen" dialog on a
+   * phone started 24px down with a strip of the page showing above it. Worse,
+   * the debtor profile opens from inside a `.card`, whose hover lift is a
+   * transform, and a transformed ancestor becomes the containing block of a
+   * fixed descendant: the dialog was sized and positioned to the card, with
+   * its top off the screen on a phone, where a tap leaves the card hovered.
+   * The body has no such rules, and carries the theme tokens and typography,
+   * so nothing else changes. Events still bubble through the React tree
+   * exactly as before, which is why the panel's stopPropagation keeps working.
+   */
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      className="modal-overlay"
+      onMouseDown={(e) => {
+        pressedOnOverlayRef.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        const startedHere = pressedOnOverlayRef.current;
+        pressedOnOverlayRef.current = false;
+        if (e.target === e.currentTarget && startedHere) onClose();
+      }}
+    >
       <div
         className={`modal-panel stack ${size === "lg" ? "modal-lg" : ""}`.trim()}
         role="dialog"
@@ -113,6 +151,7 @@ export default function Modal({ onClose, label = "Dialog", size = "md", children
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

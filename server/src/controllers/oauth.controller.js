@@ -94,6 +94,46 @@ async function googleCallback(req, res) {
       }
     } else {
       let changed = false;
+
+      /**
+       * ACCOUNT PRE-HIJACKING, AND WHY LINKING IS NOT ALWAYS SAFE.
+       *
+       * `register` creates a User row before the address is verified — it
+       * deliberately issues no session until the emailed code is entered, which
+       * is correct. But the row exists, with a password the registrant chose.
+       *
+       * So anybody could register victim@example.com, set their own password,
+       * and wait. When the real owner later signed in with Google, this branch
+       * found that row BY EMAIL, linked it, stamped `emailVerified = true`, and
+       * handed them a session — inside the attacker's account. The attacker's
+       * password still worked and any session they held stayed valid, because
+       * `tokenVersion` was untouched. Shared access to the victim's debtors,
+       * bank details and wallet address, indefinitely.
+       *
+       * Google has told us `email_verified === true`, so the person in front of
+       * us owns the address and the unverified row does not. This is therefore a
+       * TAKEOVER, not a link: the password that was never proven is discarded,
+       * and every session issued under it is invalidated. The rightful owner can
+       * set a new password through the normal reset flow, which sends a code to
+       * the address they have just proved they control.
+       *
+       * An already-verified account is a different case: whoever holds it proved
+       * this address themselves at registration, so linking is safe and their
+       * other sessions are left alone.
+       */
+      if (!user.emailVerified && !user.googleId) {
+        user.passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
+        user.tokenVersion = (Number(user.tokenVersion) || 0) + 1;
+        // The emailVerification challenge that row was carrying is spent: the
+        // address has been proven by a stronger route.
+        user.emailVerification = undefined;
+        changed = true;
+        console.warn(
+          `[oauth] Google sign-in claimed the unverified account ${user._id} (${email}). ` +
+            "Its password and every existing session were invalidated."
+        );
+      }
+
       if (!user.googleId) {
         user.googleId = profile.sub;
         changed = true;

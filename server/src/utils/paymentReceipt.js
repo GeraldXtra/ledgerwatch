@@ -51,7 +51,27 @@ function buildPaymentReceiptEmail({
   hasLogo,
 }) {
   const supplier = esc(businessName || "your supplier");
-  const explorer = chain && chain.explorer && txHash ? `${chain.explorer}/tx/${txHash}` : null;
+
+  /**
+   * ONLY A REAL CHAIN HASH IS SHOWN AS A TRANSACTION.
+   *
+   * `txHash` on a Payment row is an IDEMPOTENCY KEY, and only the crypto writer
+   * puts a chain hash in it. A bank payment recorded against an invoice that
+   * also has a crypto address stores `manual:<owner database id>:<key from the
+   * browser>`, and a force settlement stores `markpaid:<invoice id>:<kobo paid
+   * so far>`. Both were printed to the payer under the heading "Transaction" and
+   * linked to a block explorer, so a debtor's receipt carried a line of the
+   * business's internal record identifiers and a link that always 404s, which
+   * reads as the business's system being broken.
+   *
+   * Anything that is not 32 bytes of hex is not a transaction and is simply not
+   * mentioned. The href is escaped for the same reason the hash beside it always
+   * was: this is an email to a third party, and the asymmetry two lines apart
+   * was a latent injection point held shut only by validation somewhere else.
+   */
+  const chainTxHash = /^0x[0-9a-fA-F]{64}$/.test(String(txHash || "")) ? String(txHash) : null;
+  const explorer =
+    chain && chain.explorer && chainTxHash ? `${chain.explorer}/tx/${chainTxHash}` : null;
   const isCrypto = method === "crypto" && amountUsdc != null && tokenSymbol;
 
   const headline = fullyPaid
@@ -97,7 +117,7 @@ function buildPaymentReceiptEmail({
   if (isLate) {
     lines.push("", "This arrived after the payment window had closed, and it has still been credited to you in full.");
   }
-  if (txHash) lines.push("", `Transaction: ${txHash}`);
+  if (chainTxHash) lines.push("", `Transaction: ${chainTxHash}`);
   lines.push("", `Warm regards,`, businessName || "");
 
   const text = lines.join("\n");
@@ -229,8 +249,8 @@ function buildPaymentReceiptEmail({
         explorer
           ? `<tr><td style="padding:16px 28px 4px">
                <div style="font:600 11px ${FONT};letter-spacing:.08em;text-transform:uppercase;color:${MUTED};padding-bottom:6px">Transaction</div>
-               <div style="font:600 12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;word-break:break-all;color:${INK}">${esc(txHash)}</div>
-               <a href="${explorer}" style="display:inline-block;margin-top:8px;font:600 13px ${FONT};color:#22406f;text-decoration:underline">View it on the blockchain explorer</a>
+               <div style="font:600 12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;word-break:break-all;color:${INK}">${esc(chainTxHash)}</div>
+               <a href="${esc(explorer)}" style="display:inline-block;margin-top:8px;font:600 13px ${FONT};color:#22406f;text-decoration:underline">View it on the blockchain explorer</a>
              </td></tr>`
           : ""
       }

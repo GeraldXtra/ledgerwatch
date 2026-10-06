@@ -20,7 +20,7 @@ export default function PublicShell({ children, wide = false }) {
     isActive ? "site-nav-link hide-sm active" : "site-nav-link hide-sm";
 
   return (
-    <div className="site pub">
+    <div className="site">
       <header className="site-nav">
         <div className="site-nav-inner">
           <Link to="/" className="brand" aria-label="LedgerWatch front page">

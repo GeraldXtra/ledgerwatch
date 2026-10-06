@@ -411,13 +411,28 @@ function normalizeFrom(raw) {
  *   QR embedded that way silently never appears.
  */
 /**
- * Where an unsubscribe click lands. Uses the deployed client URL so the link is
- * real rather than decorative — an unsubscribe header pointing nowhere is worse
- * than none, because it invites a complaint when the link fails.
+ * Where an unsubscribe click lands, or null when there is nowhere for it to go.
+ *
+ * THE COMMENT HERE USED TO CLAIM THE LINK WAS REAL. It was not. It was built as
+ * `${CLIENT_URL}/unsubscribe`, and the client has no such route: its catch-all
+ * redirects to the marketing home page, so anyone who clicked was bounced to the
+ * front page and never unsubscribed. Worse, the `List-Unsubscribe-Post` header
+ * beside it tells Gmail the address accepts a one-click POST, and Gmail acts on
+ * that promise on the recipient's behalf. A sender whose one-click unsubscribe
+ * does not work is scored as a bad sender, and that score decides whether the
+ * next reminder reaches an inbox or a spam folder — an invisible failure that
+ * shows up only as reminders quietly ceasing to work.
+ *
+ * So the HTTPS form is now opt-in and explicit: set MAIL_UNSUBSCRIBE_URL only
+ * once a page exists that honours it. Until then the mailto form is advertised
+ * alone, which is a real mailbox a human reads and is honest about what the
+ * business can actually do.
  */
 function unsubscribeUrl(to) {
-  const base = (process.env.CLIENT_URL || "http://localhost:5173").split(",")[0].trim();
-  return `${base}/unsubscribe?email=${encodeURIComponent(to || "")}`;
+  const base = String(process.env.MAIL_UNSUBSCRIBE_URL || "").trim();
+  if (!base) return null;
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}email=${encodeURIComponent(to || "")}`;
 }
 
 /** The mailbox an unsubscribe request can be emailed to. */
@@ -426,6 +441,21 @@ function unsubscribeMailbox() {
   // MAIL_FROM may be `"Name" <addr>`; the header needs the bare address.
   const match = String(raw).match(/<([^>]+)>/);
   return (match ? match[1] : raw).trim() || "unsubscribe@localhost";
+}
+
+/**
+ * The unsubscribe headers for one recipient. Only ever advertises what exists:
+ * the mailto form always, the HTTPS form and its one-click POST promise only
+ * when MAIL_UNSUBSCRIBE_URL is set.
+ */
+function unsubscribeHeaders(to) {
+  const url = unsubscribeUrl(to);
+  const mailto = `<mailto:${unsubscribeMailbox()}?subject=unsubscribe>`;
+  if (!url) return { "List-Unsubscribe": mailto };
+  return {
+    "List-Unsubscribe": `<${url}>, ${mailto}`,
+    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+  };
 }
 
 async function sendEmail(to, subject, html, opts = {}) {
@@ -487,10 +517,11 @@ async function sendEmail(to, subject, html, opts = {}) {
        */
       headers: {
         // A well-formed unsubscribe path is one of the clearest "legitimate bulk
-        // sender" signals there is. BOTH forms, because Gmail honours the HTTPS
-        // one-click and older clients only understand mailto.
-        "List-Unsubscribe": `<${unsubscribeUrl(to)}>, <mailto:${unsubscribeMailbox()}?subject=unsubscribe>`,
-        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        // sender" signals there is. The HTTPS form is only advertised when
+        // MAIL_UNSUBSCRIBE_URL names a page that honours it, and the one-click
+        // POST header only alongside it — see unsubscribeUrl for why promising
+        // one-click without an endpoint is worse than promising nothing.
+        ...unsubscribeHeaders(to),
         // Says plainly that a machine sent this, so filters do not read it as a
         // human failing to get a reply. Also stops well-behaved auto-responders
         // from bouncing back at us.

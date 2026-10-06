@@ -1,6 +1,6 @@
 const Debt = require("../models/Debt");
 const Payment = require("../models/Payment");
-const { recomputeDebtStatus, withDerived } = require("../services/receivables.service");
+const { recomputeDebtStatus, withDerived, paidForDebt } = require("../services/receivables.service");
 const { resyncActivePaymentAddress } = require("../services/paymentAddress.service");
 const { onInvoiceSettled } = require("../services/settlement.service");
 
@@ -8,12 +8,10 @@ async function findMyDebt(req) {
   return Debt.findOne({ _id: req.params.id, userId: req.user._id });
 }
 
+// Kept as a name local callers already use; the sum itself is the shared one
+// (LW-034), so there is one definition of "paid" in the product rather than nine.
 async function amountPaidFor(debtId) {
-  const rows = await Payment.aggregate([
-    { $match: { debtId } },
-    { $group: { _id: null, paid: { $sum: "$amount" } } },
-  ]);
-  return rows.length ? rows[0].paid : 0;
+  return paidForDebt(debtId);
 }
 
 // POST /api/debts/:id/payments  { amount, method?, note?, paidAt? }
@@ -39,18 +37,32 @@ async function record(req, res) {
     const cleanNote = note == null ? undefined : String(note).trim().slice(0, 500);
 
     /**
-     * IDEMPOTENCY FOR A MANUAL PAYMENT.
+     * IDEMPOTENCY FOR A MANUAL PAYMENT. REQUIRED, NOT OPTIONAL.
      *
      * The client mints one key per form and sends it with the submit. A
      * double submit, a retry after a lost response, or a second tab replaying
      * the request all carry the same key and hit the unique index on txHash,
      * so the payment is recorded once. Scoped to the user so two accounts
      * cannot collide, and prefixed so it can never look like a chain hash.
+     *
+     * A MISSING KEY IS NOW A 400. It used to fall through to `undefined`, and
+     * the payment was then written with no key and no protection at all — which
+     * is LW-016, the double-recorded payment that understates a balance and can
+     * flip a small invoice to fully paid, returning silently whenever the field
+     * was absent or malformed. Nothing logged it and the response looked
+     * identical, so a stale cached bundle or any future bug that dropped the
+     * field would have reintroduced the defect invisibly. A guard that applies
+     * only when the caller volunteers it is not a guard.
      */
-    const key =
-      typeof idempotencyKey === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(idempotencyKey)
-        ? `manual:${req.user._id}:${idempotencyKey}`
-        : undefined;
+    if (typeof idempotencyKey !== "string" || !/^[A-Za-z0-9_-]{8,80}$/.test(idempotencyKey)) {
+      return res.status(400).json({
+        error:
+          "This payment was sent without an idempotency key, so it was refused rather than " +
+          "risk recording it twice. Reload the page and try again.",
+        code: "idempotency_key_required",
+      });
+    }
+    const key = `manual:${req.user._id}:${idempotencyKey}`;
 
     let payment;
     try {
@@ -61,10 +73,10 @@ async function record(req, res) {
         method: method || "transfer",
         note: cleanNote,
         paidAt: when,
-        ...(key ? { txHash: key } : {}),
+        txHash: key,
       });
     } catch (err) {
-      if (key && err && err.code === 11000) {
+      if (err && err.code === 11000) {
         const existing = await Payment.findOne({ txHash: key, userId: req.user._id });
         const totalPaidNow = await recomputeDebtStatus(debt);
         return res.status(200).json({
@@ -96,14 +108,44 @@ async function record(req, res) {
      * route sent both. Same event, same three consequences, so they can never
      * disagree about what happened.
      */
-    await onInvoiceSettled({
+    /**
+     * THE KEY IS NOT A TRANSACTION REFERENCE, AND THE PAYER MUST NOT SEE IT.
+     *
+     * The receipt prints `payment.txHash` as a "Transaction:" line. That field
+     * holds a real chain hash for a crypto payment and, since idempotency was
+     * added, the synthetic key `manual:<userId>:<key>` for a bank one — so every
+     * bank receipt mailed the customer a line containing the owner's internal
+     * account id, dressed as a reference they might quote back. A bank payment
+     * has no transaction hash; the honest receipt is one with no such line.
+     */
+    const forReceipt = { ...payment.toObject(), txHash: null };
+
+    /**
+     * THE OUTCOME IS READ, NOT DISCARDED (LW-028).
+     *
+     * This was `.catch(() => {})`, so a receipt that never went out — expired
+     * SMTP credentials, a bouncing address, a debounce — left no trace anywhere
+     * and the owner believed the customer had been receipted. The event reports
+     * `{emailed, reason}` precisely so somebody can know; throwing it away made
+     * the report pointless. Still non-fatal: the payment is recorded either way,
+     * and a failed receipt must never fail the payment.
+     */
+    const settled = await onInvoiceSettled({
       debt,
-      payment,
+      payment: forReceipt,
       method: "bank",
       creditNgn: amt,
       totalPaid,
       fullyPaid: debt.status === "paid",
-    }).catch(() => {});
+    }).catch((err) => ({ emailed: false, reason: err && err.message }));
+
+    if (settled && !settled.emailed) {
+      console.warn(
+        `[payments] no receipt sent for debt ${debt._id} after a manual payment: ${
+          settled.reason || "unknown reason"
+        }`
+      );
+    }
 
     return res.status(201).json({
       payment,
@@ -148,6 +190,74 @@ async function remove(req, res) {
       userId: req.user._id,
     });
     if (!payment) return res.status(404).json({ error: "Payment not found" });
+
+    /**
+     * RELEASE THE ON-CHAIN TRANSFERS THIS PAYMENT WAS COVERING, BEFORE DELETING IT.
+     *
+     * A crypto Payment is the record that a set of confirmed transfers has been
+     * credited. Each of those transfers carries `settledPaymentId` pointing at
+     * this row. Deleting the row on its own left those stamps pointing at a
+     * Payment that no longer exists, and `settleIfDue` reads them as "already
+     * settled":
+     *
+     *     const unstamped   = confirmed.filter(o => !o.settledPaymentId)   // skips them
+     *     const settledUsdc = confirmed.filter(o =>  o.settledPaymentId)   // counts them
+     *     const unsettled   = totalUsdc - settledUsdc                      // 0
+     *     if (unsettled <= 0) return { outcome: "NOTHING_NEW" }            // forever
+     *
+     * So the invoice reopened, `resyncActivePaymentAddress` re-quoted it UPWARDS,
+     * and the customer was asked a second time for money that was sitting,
+     * confirmed, in the derived address — which the watcher would never credit
+     * again. Money already received, permanently uncreditable, and a customer
+     * chased for it.
+     *
+     * Clearing the stamps puts those transfers back into the unsettled pool, so
+     * the very next watch pass re-credits them correctly. The deletion becomes
+     * what a person means by it: undo the bookkeeping, not disown the money.
+     */
+    const covered = [
+      ...(Array.isArray(payment.txHashes) ? payment.txHashes : []),
+      ...(payment.txHash ? [payment.txHash] : []),
+    ].filter(Boolean);
+
+    if (covered.length) {
+      const PaymentAddress = require("../models/PaymentAddress");
+      const addresses = await PaymentAddress.find({
+        debtId: debt._id,
+        userId: req.user._id,
+        "observed.txHash": { $in: covered },
+      });
+      for (const pa of addresses) {
+        let released = 0;
+        for (const o of pa.observed) {
+          // ONLY the stamps that name THIS payment. A transfer stamped by a
+          // different Payment is still legitimately covered by that row, which
+          // is not being deleted — releasing it would double-credit later.
+          if (o.settledPaymentId && String(o.settledPaymentId) === String(payment._id)) {
+            o.settledPaymentId = null;
+            released++;
+          }
+        }
+        if (released) {
+          // The naira this address is recorded as having settled goes with it,
+          // or the next settlement adds on top of a figure that includes the
+          // credit just removed.
+          pa.settledNgn = Math.max(0, (pa.settledNgn || 0) - (payment.amount || 0));
+          // An address closed by this payment must be watched again. Which state
+          // it returns to depends on the clock, not on how it was closed.
+          if (pa.status === "paid") {
+            const stillOpen = pa.expiresAt && new Date(pa.expiresAt).getTime() > Date.now();
+            pa.status = stillOpen ? "active" : "expired";
+            if (!stillOpen && !pa.expiredAt) pa.expiredAt = new Date();
+          }
+          await pa.save();
+          console.warn(
+            `[payments] released ${released} confirmed transfer(s) on ${pa.address} ` +
+              `after payment ${payment._id} was deleted. They will be re-credited on the next watch pass.`
+          );
+        }
+      }
+    }
 
     await payment.deleteOne();
     const totalPaid = await recomputeDebtStatus(debt); // may revert status

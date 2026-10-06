@@ -56,16 +56,64 @@ async function get(req, res) {
   }
 }
 
+/**
+ * TURNING THE SECOND LOCK OFF, OR REPLACING IT, IS AN EVENT SOMEBODY MUST HEAR
+ * ABOUT.
+ *
+ * It used to happen in total silence: one request from any signed-in session
+ * cleared the questions, with no existing answer given, no password re-entered
+ * and nothing written anywhere. A person whose session had been taken would
+ * find their questions simply gone, with no explanation and no timestamp, which
+ * is the shape of an incident nobody can reconstruct afterwards.
+ *
+ * This does not make the control unremovable — that needs proof of the existing
+ * factor, and the settings panel does not collect one yet (see the note in the
+ * report accompanying this change). What it does is make the removal audible:
+ * a structured line in the log, which SECURITY.md 4.3 SHOULD 6 asks for, and a
+ * push to the owner's devices, which is the only channel that reaches a person
+ * who is not the one making the request.
+ */
+async function announceChange(userId, event) {
+  console.warn(
+    `[wallet-security] ${event} user=${userId} at=${new Date().toISOString()}`
+  );
+  try {
+
+    const { notifyUser } = require("../services/push.service");
+    await notifyUser(userId, {
+      title: "Wallet verification changed",
+      body:
+        event === "disabled"
+          ? "The security questions on your wallet were switched off. If that was not you, change your password now."
+          : "The security questions on your wallet were replaced. If that was not you, change your password now.",
+      tag: "wallet-security",
+      type: "security",
+      url: "/app/settings",
+    });
+    // Deliberately NO category: a per-type opt-out must not be able to silence
+    // a notice that the account's own defences changed.
+  } catch (err) {
+    // Never fails the request — but never silent either.
+    console.error("[wallet-security] could not notify the owner:", err.message);
+  }
+}
+
 // PUT /api/wallet/security  { enabled, answers: [{id, prompt, answer}] }
 async function set(req, res) {
   try {
     const { enabled, answers } = req.body || {};
+
+    // What it is NOW, so the log can say whether a lock was actually removed
+    // rather than a switch flipped that was already off.
+    const before = await User.findById(req.user._id).select("walletSecurity.enabled").lean();
+    const wasEnabled = Boolean(before && before.walletSecurity && before.walletSecurity.enabled);
 
     if (!enabled) {
       await User.updateOne(
         { _id: req.user._id },
         { $set: { "walletSecurity.enabled": false, "walletSecurity.questions": [] } }
       );
+      if (wasEnabled) await announceChange(req.user._id, "disabled");
       return res.json({ enabled: false, questions: [] });
     }
 
@@ -111,6 +159,7 @@ async function set(req, res) {
         },
       }
     );
+    if (wasEnabled) await announceChange(req.user._id, "replaced");
     return res.json({ enabled: true, questions: questions.map((q) => ({ id: q.id, prompt: q.prompt })) });
   } catch (err) {
     console.error("wallet security set error:", err.message);

@@ -145,9 +145,14 @@ export function bandTone(band) {
   }
 }
 
+// The method a payment was recorded under. `crypto` used to read "Crypto
+// (USDC)", which named a token this row does not carry: a crypto payment can
+// settle in USDT wherever a verified contract exists, and the Payment model
+// stores no symbol to check against. Naming no token is correct; naming the
+// wrong one is not.
 export const METHOD_LABEL = {
   cash: "Cash",
   transfer: "Transfer",
-  crypto: "Crypto (USDC)",
+  crypto: "Crypto",
   other: "Other",
 };

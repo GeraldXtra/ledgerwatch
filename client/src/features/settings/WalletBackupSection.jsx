@@ -21,6 +21,7 @@ export default function WalletBackupSection() {
   const [walletPresent] = useState(() => hasWallet());
   const [address] = useState(() => getStoredAddress());
   const [backedUp, setBackedUp] = useState(() => isBackedUp());
+  const [downloadError, setDownloadError] = useState("");
 
   if (!walletPresent) {
     return (
@@ -38,19 +39,48 @@ export default function WalletBackupSection() {
     );
   }
 
+  /**
+   * Download the encrypted keystore file.
+   *
+   * TWO THINGS WERE WRONG HERE, BOTH SILENT, ON A BACKUP PATH.
+   *
+   * The object URL was revoked in the same tick as the click. Chrome tolerates
+   * that; Firefox and Safari have historically not, and the download simply does
+   * not happen — with no error handling at all, the button did nothing visible
+   * and the owner walked away believing their backup was saved. That only
+   * surfaces on the day they need it. The URL is now released on the next turn
+   * of the event loop, once the browser has taken the blob, and the file stays a
+   * blob in this tab's memory for that instant rather than anywhere addressable.
+   *
+   * And `if (!json) return` meant a missing keystore did nothing whatsoever. It
+   * says so now.
+   */
   function downloadKeystore() {
+    setDownloadError("");
     const json = getKeystoreJson();
-    if (!json) return;
-    // Built and revoked in the same tick — no secret is left addressable.
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `ledgerwatch-keystore-${(address || "wallet").slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    if (!json) {
+      setDownloadError(
+        "There is no encrypted wallet in this browser for this account, so there is nothing to download."
+      );
+      return;
+    }
+    try {
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ledgerwatch-keystore-${(address || "wallet").slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (err) {
+      setDownloadError(
+        `The keystore file could not be produced: ${
+          err?.message || "your browser refused the download"
+        }. Your recovery phrase is the backup that matters most, so reveal and write that down.`
+      );
+    }
   }
 
   return (
@@ -113,6 +143,8 @@ export default function WalletBackupSection() {
         </button>
       </div>
 
+      {downloadError && <p className="error-text">{downloadError}</p>}
+
       <p className="settings-note">
         <ShieldCheck size={15} />
         Revealing happens entirely in this browser. Your phrase and key are never sent to
@@ -153,11 +185,61 @@ function SecurityQuestions() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  /**
+   * A FAILED LOAD IS NOT AN ANSWER ABOUT THE OWNER'S SECURITY (LW-029).
+   *
+   * This substituted `{ enabled: false }` on any error, so one network blip told
+   * an owner who HAS configured extra verification, in a plain sentence, that
+   * their wallet password alone unlocks a reveal. That is both untrue about
+   * their own posture and — with the reveal dialog quietly skipping the same
+   * check when its fetch fails — the visible half of a control that did not run.
+   * The four states ARCHITECTURE §9.1 asks for are kept apart here: loading,
+   * ready, error, and the genuine "off".
+   */
+  const [loadError, setLoadError] = useState("");
+  const [reload, setReload] = useState(0);
+
   useEffect(() => {
+    let live = true;
     getSecurityQuestions()
-      .then(setState)
-      .catch(() => setState({ enabled: false, questions: [], presets: [] }));
-  }, []);
+      .then((d) => {
+        if (!live) return;
+        setState(d);
+        setLoadError("");
+      })
+      .catch((err) => {
+        if (!live) return;
+        setState(null);
+        setLoadError(
+          err?.response?.data?.error || err.message || "the server did not answer"
+        );
+      });
+    return () => {
+      live = false;
+    };
+  }, [reload]);
+
+  if (loadError) {
+    return (
+      <div className="stack-sm security-questions">
+        <div className="row">
+          <span className="icon-tile"><ShieldQuestion size={16} /></span>
+          <div>
+            <div className="backup-option-title">Extra verification before revealing</div>
+            <div className="muted small">
+              Whether this is on could not be checked: {loadError}. This says nothing about your
+              settings, which are unchanged.
+            </div>
+          </div>
+        </div>
+        <div>
+          <Button size="sm" onClick={() => setReload((n) => n + 1)}>
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (!state) return null;
   const presets = state.presets || [];

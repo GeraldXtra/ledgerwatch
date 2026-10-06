@@ -24,6 +24,7 @@ const SimTrade = require("../models/SimTrade");
 const Portfolio = require("../models/Portfolio");
 const WalletTx = require("../models/WalletTx");
 const PaymentAddress = require("../models/PaymentAddress");
+const PushSubscription = require("../models/PushSubscription");
 
 const { getPrices } = require("../services/coingecko.service");
 const { createWatch, approveAlert, getPortfolio } = require("../services/market.service");
@@ -160,6 +161,22 @@ async function main() {
     // longer existed, and every automation pass selected it, made RPC calls for
     // it, and could never settle it. The account wipe got this fix first.
     PaymentAddress.deleteMany({ userId }),
+    /**
+     * LW-030's half of the same pair, which the seed never got.
+     *
+     * The account wipe in account.controller clears three more things than this
+     * did: the push subscriptions, the per-chain scan cursors and the discovered
+     * token list. The cursor is the one that matters. Every WalletTx row is
+     * deleted above, but a cursor left behind means the next History open
+     * resumes from that block, so every inbound transfer the demo wallet had
+     * ever received became permanently invisible with no way to recover it from
+     * the interface. Re-seeding reproduced exactly the failure LW-030 describes.
+     */
+    PushSubscription.deleteMany({ userId }),
+    User.updateOne(
+      { _id: userId },
+      { $set: { walletHistoryCursors: [], discoveredTokens: [] } }
+    ),
   ]);
 
   // 3) Live prices once (fallback if CoinGecko is down).
@@ -379,25 +396,39 @@ async function main() {
   process.exit(0);
 }
 
-main()
-  .then(async (result) => {
-    // main() returns null when a safety guard aborted before deleting anything.
-    // Disconnect quietly and exit with the code the guard already set.
-    if (result === null) {
+/**
+ * ONLY WHEN RUN DIRECTLY.
+ *
+ * This ran on `require`. Anything that loaded the scripts directory — a test
+ * sweep, or a tooling pass that requires every module to check it parses —
+ * connected to whatever MONGO_URI pointed at and did the work. During this
+ * audit exactly that happened: a module-load check ran dedupe-alerts against
+ * the development database and dismissed eight duplicate pending alerts.
+ *
+ * `require.main === module` is true for `node <this file>` and false for every
+ * require, which is the distinction that was missing.
+ */
+if (require.main === module) {
+  main()
+    .then(async (result) => {
+      // main() returns null when a safety guard aborted before deleting anything.
+      // Disconnect quietly and exit with the code the guard already set.
+      if (result === null) {
+        try {
+          await mongoose.disconnect();
+        } catch {
+          /* ignore */
+        }
+        process.exit(process.exitCode || 1);
+      }
+    })
+    .catch(async (err) => {
+      console.error("\n❌ Seed failed:", err.message);
       try {
         await mongoose.disconnect();
       } catch {
         /* ignore */
       }
-      process.exit(process.exitCode || 1);
-    }
-  })
-  .catch(async (err) => {
-    console.error("\n❌ Seed failed:", err.message);
-    try {
-      await mongoose.disconnect();
-    } catch {
-      /* ignore */
-    }
-    process.exit(1);
-  });
+      process.exit(1);
+    });
+}

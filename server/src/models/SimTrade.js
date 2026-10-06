@@ -24,4 +24,7 @@ const simTradeSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+// Trade history is read by account and book, newest first.
+simTradeSchema.index({ userId: 1, mode: 1, createdAt: -1 });
+
 module.exports = mongoose.model("SimTrade", simTradeSchema);

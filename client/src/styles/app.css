@@ -939,7 +939,7 @@ textarea:focus {
   font-size: 12px;
   font-weight: 700;
   background: var(--navy-50);
-  color: var(--navy-700);
+  color: var(--accent-700);
   border: 1px solid var(--navy-100);
 }
 .mm-mark.native {
@@ -1281,7 +1281,7 @@ textarea:focus {
   margin: 0 auto;
   background: var(--navy-50);
   border: 1px solid var(--navy-100);
-  color: var(--navy-700);
+  color: var(--accent-700);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1699,7 +1699,7 @@ textarea:focus {
   display: grid;
   place-items: center;
   background: var(--navy-50);
-  color: var(--navy-700);
+  color: var(--accent-700);
   margin-bottom: 14px;
 }
 .site-feature h3 {
@@ -2705,11 +2705,24 @@ textarea:focus {
     display: none !important;
   }
 
-  /* A full screen dialog's header: the name and a long email on the left
-     must shrink and wrap, so the status pill and the close button on the
-     right stay on the screen instead of being pushed past its edge. */
+  /* EVERY dialog is full screen on a phone, not only the large ones. A
+     centred panel with a margin around it did not sit right: the keyboard
+     pushed a centred form about, the top of a tall form could scroll out of
+     reach, and the rounded card floating over the page looked like a popup
+     rather than a screen. Full screen, the dialog scrolls like a page, the
+     keyboard behaves, and the bottom padding clears the home indicator. */
+  .modal-overlay {
+    padding: 0;
+    place-items: stretch;
+  }
   .modal-panel {
-    padding: 18px 16px;
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    padding: 18px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+    padding-top: calc(18px + env(safe-area-inset-top, 0px));
   }
   .coin-detail-head {
     gap: 8px;

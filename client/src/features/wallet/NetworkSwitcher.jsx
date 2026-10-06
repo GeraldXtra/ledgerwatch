@@ -28,10 +28,25 @@ export function rememberChain(chainId) {
   }
 }
 
+/**
+ * The chain chosen earlier this session, if it is still on offer.
+ *
+ * A CHAIN ID IS NOT ALWAYS A NUMBER. This coerced the stored value with
+ * `Number(...)`, which was true while every entry was an EVM chain and became
+ * false the moment Bitcoin joined the same menu with the ids "bitcoin" and
+ * "bitcoin-testnet": `Number("bitcoin")` is NaN, the guard failed, and a Bitcoin
+ * user who reloaded was put back on an EVM network every time with nothing said.
+ * The stored string is now compared as a string against each chain's own id, so
+ * both kinds restore, and the numeric ids keep their numeric type in the return
+ * value because the rest of the wallet compares them with `===`.
+ */
 export function recallChain(chains) {
   try {
-    const saved = Number(sessionStorage.getItem(LAST_CHAIN_KEY));
-    if (saved && chains.some((c) => c.chainId === saved)) return saved;
+    const saved = sessionStorage.getItem(LAST_CHAIN_KEY);
+    if (saved) {
+      const hit = (chains || []).find((c) => String(c.chainId) === saved);
+      if (hit) return hit.chainId;
+    }
   } catch {
     /* ignore */
   }

@@ -5,12 +5,32 @@ import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
 import Dashboard from "./pages/Dashboard";
 import ReceivablesPage from "./features/receivables/ReceivablesPage";
-import MarketWatchPage from "./features/market/MarketWatchPage";
-import SettingsPage from "./pages/Settings";
 import LogoMark from "./components/LogoMark";
 
 // Wallet pulls in ethers + qrcode — code-split so those load only on demand.
 const WalletPage = lazy(() => import("./features/wallet/WalletPage"));
+
+/**
+ * MARKET WATCH IS SPLIT TOO. (LW-046, BUILD_PLAN P7-3.)
+ *
+ * It was the last large static import, and it is the heaviest thing in the app
+ * after the wallet: recharts for the charts, ethers and the whole DEX layer for
+ * live trading, the quoter and the router encoding. All of that was in the main
+ * chunk, so it was downloaded by every visitor to the FRONT PAGE — before
+ * signing in, and whether or not they ever open Market Watch.
+ *
+ * Receivables stays static on purpose: it is the app's default route
+ * (`/app/*` redirects to it), so splitting it would only add a round trip
+ * before the first screen anybody sees.
+ */
+const MarketWatchPage = lazy(() => import("./features/market/MarketWatchPage"));
+
+/**
+ * Settings too: it reaches into the keystore for the backup and reveal panels,
+ * and carries the avatar cropper. Nobody lands on it, so nothing is lost by
+ * fetching it when it is opened.
+ */
+const SettingsPage = lazy(() => import("./pages/Settings"));
 // The guide, the policy pages and the contact form carry a lot of text that
 // the app itself never needs. Split, so signing in does not download it.
 const DocsPage = lazy(() => import("./pages/DocsPage"));

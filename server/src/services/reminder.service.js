@@ -1,11 +1,11 @@
 const Reminder = require("../models/Reminder");
-const Payment = require("../models/Payment");
 const PaymentAddress = require("../models/PaymentAddress");
 const { normalizePhone } = require("../utils/phone");
 const { buildReminderMessage } = require("../utils/reminderTemplate");
 const { cryptoBlockText, cryptoBlockHtml } = require("../utils/cryptoPaymentBlock");
 const { getChain } = require("../config/chains");
 const { draftReminder } = require("./anthropic.service");
+const { paidForDebt } = require("./receivables.service");
 const {
   sendWhatsApp,
   sendEmail,
@@ -77,7 +77,7 @@ async function dispatchReminder(reminder, debt, owner, { channels = [], force = 
         if (chain) {
           let qrCid = null;
           try {
-            // eslint-disable-next-line global-require
+             
             const QRCode = require("qrcode");
             // 220px, not 340. It renders at 170px in the email, so 340 was
             // paying for pixels nobody sees — and image weight against text is
@@ -170,11 +170,7 @@ function daysOverdueFor(dueDate) {
 // Outstanding balance = amount - sum(payments). Reminders reference this, not the
 // original amount, so a partly-paid debtor is asked for what they still owe.
 async function outstandingBalance(debt) {
-  const rows = await Payment.aggregate([
-    { $match: { debtId: debt._id } },
-    { $group: { _id: null, paid: { $sum: "$amount" } } },
-  ]);
-  const paid = rows.length ? rows[0].paid : 0;
+  const paid = await paidForDebt(debt._id);
   return { balance: Math.max(0, (debt.amount || 0) - paid), amountPaid: paid };
 }
 

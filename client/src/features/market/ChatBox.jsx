@@ -26,8 +26,11 @@ export default function ChatBox({ onAction }) {
     try {
       const { data } = await http.post("/api/ai/chat", { message });
       setMessages((m) => [...m, { role: "agent", text: data.reply }]);
-      if (data.createdWatches && data.createdWatches.length && onAction) onAction();
-      else if (onAction) onAction();
+      // Both branches of the condition that used to be here called `onAction`,
+      // so the check read as though the reply's contents decided something and
+      // decided nothing. That is the construction LW-008 hid inside, and the
+      // page wants a refresh after any agent reply anyway.
+      if (onAction) onAction();
     } catch (err) {
       setMessages((m) => [
         ...m,

@@ -3,6 +3,8 @@ import { AlertTriangle, Eye, EyeOff, ShieldCheck, X } from "lucide-react";
 import { Button, Field, Input, Modal } from "../../components/ui";
 import { createWallet, encryptAndStore } from "./keystore";
 import { saveAddress } from "./walletApi";
+import { assessWalletPassword, MIN_WALLET_PASSWORD } from "./passwordStrength";
+import { useAuth } from "../../context/AuthContext";
 
 /**
  * Create a new wallet: generate → show the recovery phrase ONCE (with an explicit
@@ -10,6 +12,7 @@ import { saveAddress } from "./walletApi";
  * ciphertext. The plaintext key/phrase never leave this component's memory.
  */
 export default function CreateWalletModal({ onClose, onDone }) {
+  const { user } = useAuth();
   const [step, setStep] = useState("generate"); // generate → backup → password
   const generated = useMemo(() => createWallet(), []); // in-memory only
   const [written, setWritten] = useState(false);
@@ -20,12 +23,23 @@ export default function CreateWalletModal({ onClose, onDone }) {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
 
+  // After the state it reads. Declared above `password` it sat in the temporal
+  // dead zone and threw on first render.
+  const strength = useMemo(
+    () => assessWalletPassword(password, { email: user?.email, name: user?.name }),
+    [password, user]
+  );
+
   const words = (generated.mnemonic || "").split(" ");
 
   async function finish(e) {
     e.preventDefault();
     setError("");
-    if (password.length < 8) return setError("Use at least 8 characters.");
+    // Eight characters with no other check was the whole gate on the one password
+    // in this product that cannot be reset and is attacked offline. See
+    // passwordStrength.js and docs/SECURITY.md B1.
+    const verdict = assessWalletPassword(password, { email: user?.email, name: user?.name });
+    if (!verdict.ok) return setError(verdict.reason);
     if (password !== confirm) return setError("Passwords do not match.");
     setBusy(true);
     try {
@@ -130,6 +144,17 @@ export default function CreateWalletModal({ onClose, onDone }) {
               autoFocus
               required
             />
+            {/* Live, and phrased as guidance rather than a scold. The gate is in
+                passwordStrength.js; this is the same verdict shown before the
+                user submits, so the requirement is never a surprise at the end. */}
+            <div className="caption muted" style={{ marginTop: 6 }}>
+              {password
+                ? strength.ok
+                  ? `${strength.label}. This password is never sent anywhere and cannot be reset.`
+                  : strength.reason
+                : `At least ${MIN_WALLET_PASSWORD} characters. Three or four unrelated words work well — ` +
+                  "this one encrypts your keys on this device and cannot be reset."}
+            </div>
           </Field>
           <Field label="Confirm password">
             <Input

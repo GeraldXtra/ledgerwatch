@@ -37,4 +37,12 @@ const reminderSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+/**
+ * `recentlySentOn` asks, for every debt on every reminder pass, whether this
+ * channel has a successful delivery inside the cadence window. `recomputeDebtStatus`
+ * cancels scheduled reminders by debt. Both scanned the collection.
+ */
+reminderSchema.index({ debtId: 1, createdAt: -1 });
+reminderSchema.index({ userId: 1, status: 1 });
+
 module.exports = mongoose.model("Reminder", reminderSchema);

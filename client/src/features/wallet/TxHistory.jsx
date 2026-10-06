@@ -1,4 +1,4 @@
-import { ArrowDownLeft, ArrowUpRight, ExternalLink } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, ExternalLink, RefreshCw } from "lucide-react";
 import { Button, EmptyState } from "../../components/ui";
 
 function shorten(addr) {
@@ -24,12 +24,39 @@ function when(value) {
  * no network is exactly what let a same-chain self-transfer look like a
  * completed cross-chain move.
  */
-export default function TxHistory({ txs, chain, chains, onReceive }) {
+export default function TxHistory({ txs, chain, chains, error, onRetry, onReceive }) {
   // Registry lookup, so no explorer URL is hardcoded here. Falls back to the
   // active chain for rows written before chainId was recorded.
   const chainFor = (tx) =>
     (chains || []).find((c) => c.chainId === tx.chainId) ||
     (chain && chain.chainId === tx.chainId ? chain : null);
+  /**
+   * A HISTORY THAT COULD NOT BE READ IS NOT AN EMPTY HISTORY.
+   *
+   * The empty state below is a definite claim — "No transactions yet" — and it
+   * was being shown to anyone whose history request failed, telling somebody who
+   * has made transfers that they never made one. The Bitcoin panel next door
+   * already separates the two, and so does this now. It says nothing about the
+   * balance, which is read from the chain and is unaffected.
+   */
+  if (error && (!txs || txs.length === 0)) {
+    return (
+      <div className="stack-sm">
+        <p className="error-text" style={{ margin: 0 }}>
+          Your transaction history could not be loaded: {error}. This says nothing about your
+          balance or about transfers you have made; only this list is missing.
+        </p>
+        {onRetry && (
+          <div>
+            <Button size="sm" onClick={onRetry}>
+              <RefreshCw size={14} /> Try again
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (!txs || txs.length === 0) {
     return (
       <EmptyState

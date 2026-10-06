@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BarChart3, Receipt, Sparkles, Users } from "lucide-react";
 import http from "../../api/http";
 import {
@@ -79,11 +79,32 @@ function Receivables() {
   const [analytics, setAnalytics] = useState(null);
   const [analyticsError, setAnalyticsError] = useState("");
 
+  /**
+   * WHY THIS IS KEYED RATHER THAN FETCHED ONCE.
+   *
+   * The effect below had an empty dependency array, so the four figures were
+   * read at mount and never again. Recording a payment in the tab underneath
+   * left "Outstanding" and "Collected" showing the figures from before it, and
+   * switching tabs did not help either — only a full page reload corrected
+   * them. The intent quoted above was that these numbers could never disagree
+   * between two places, and they were instead disagreeing with the invoice list
+   * on the same screen, immediately after the action that changed them.
+   *
+   * `analyticsKey` is bumped by the ledger below whenever it changes something
+   * that moves money, and by a tab change, so the rail restates itself.
+   */
+  const [analyticsKey, setAnalyticsKey] = useState(0);
+  const refreshAnalytics = useCallback(() => setAnalyticsKey((k) => k + 1), []);
+
   useEffect(() => {
     let active = true;
     http
       .get("/api/receivables/analytics")
-      .then(({ data }) => active && setAnalytics(data))
+      .then(({ data }) => {
+        if (!active) return;
+        setAnalytics(data);
+        setAnalyticsError("");
+      })
       .catch(
         (err) =>
           active &&
@@ -92,7 +113,7 @@ function Receivables() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [analyticsKey, tab]);
 
   const overdue = analytics?.countByStatus?.overdue || 0;
 
@@ -160,7 +181,7 @@ function Receivables() {
             <AssistantCard />
           </>
         )}
-        {tab === "debts" && <DebtsPanel />}
+        {tab === "debts" && <DebtsPanel onLedgerChanged={refreshAnalytics} />}
         {tab === "debtors" && <DebtorsView />}
       </div>
     </>

@@ -48,4 +48,16 @@ paymentSchema.index({ txHash: 1 }, { unique: true, sparse: true });
 // Lookup for the repair path: "which payment settled this transfer?"
 paymentSchema.index({ txHashes: 1 }, { sparse: true });
 
+/**
+ * THE HOTTEST QUERY IN THE PRODUCT, AND IT HAD NO INDEX.
+ *
+ * "Sum the payments for this debt" is implemented in nine places
+ * (`Payment.aggregate([{ $match: { debtId } }, ...])`) and runs on every invoice
+ * read, every settlement, every resync, every mark-paid and every receipt. With
+ * no index on `debtId` each one scanned the whole payments collection.
+ */
+paymentSchema.index({ debtId: 1 });
+// Account-scoped reads: the payments list and the 24-hour figures.
+paymentSchema.index({ userId: 1, paidAt: -1 });
+
 module.exports = mongoose.model("Payment", paymentSchema);

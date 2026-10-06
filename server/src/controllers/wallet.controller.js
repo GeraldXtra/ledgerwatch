@@ -1,7 +1,8 @@
 const User = require("../models/User");
 const WalletTx = require("../models/WalletTx");
 const { listChains, getChain } = require("../config/chains");
-const { sendToChain } = require("../services/rpc.service");
+const { sendToChain, rpcCallTyped } = require("../services/rpc.service");
+const { sanitizeText } = require("../services/walletHistory.service");
 
 // Strict allowlist: read methods + raw-tx broadcast + receipt polling. Notably it
 // does NOT (and cannot) include any signing method — the server never holds a key.
@@ -179,7 +180,7 @@ async function recordTx(req, res) {
     const {
       chainId, hash, from, to, value, symbol, tokenAddress, direction,
       kind, tokenOut, tokenOutSymbol, amountOut, minAmountOut, feeTier,
-      priceImpactPct, side, alertId,
+      priceImpactPct, side, alertId, route,
     } = req.body || {};
     if (!getChain(chainId)) return res.status(400).json({ error: "Unknown or disabled chain" });
     if (!HASH_RE.test(hash || "")) return res.status(400).json({ error: "Invalid tx hash" });
@@ -225,6 +226,18 @@ async function recordTx(req, res) {
       amountOut: amountOut != null ? String(amountOut) : null,
       minAmountOut: minAmountOut != null ? String(minAmountOut) : null,
       feeTier: feeTier != null ? Number(feeTier) : null,
+      /**
+       * The swap's route, e.g. "USDC > WETH > PEPE (500/3000)".
+       *
+       * Put through the same sanitiser the token discovery path uses rather
+       * than stored as given: it is built from token symbols, and a symbol is
+       * whatever a contract chose to call itself, which is a string an attacker
+       * controls. Control characters, zero-width and bidi marks are stripped and
+       * the length is capped, so a symbol made of forty invisible characters
+       * cannot dress a row up as something else. React escapes the markup on
+       * render; this is about the row still reading as what it is.
+       */
+      route: sanitizeText(route, 120),
       priceImpactPct: priceImpactPct != null ? Number(priceImpactPct) : null,
       side: ["buy", "sell"].includes(side) ? side : null,
       alertId: alertId || null,
@@ -250,12 +263,75 @@ async function updateTxStatus(req, res) {
     if (!["pending", "confirmed", "failed"].includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
     }
-    const tx = await WalletTx.findOneAndUpdate(
-      { _id: req.params.id, userId: req.user._id },
-      { status },
-      { new: true }
-    );
+
+    const tx = await WalletTx.findOne({ _id: req.params.id, userId: req.user._id });
     if (!tx) return res.status(404).json({ error: "Transaction not found" });
+
+    /**
+     * A SWAP CANNOT BE MARKED FAILED ON THE BROWSER'S WORD.
+     *
+     * The daily live-trading cap is the sum of this account's swaps in the last
+     * twenty four hours, and `spend24h` below excludes anything whose status is
+     * `failed`. This endpoint accepted `failed` on any of the caller's own rows
+     * and wrote it with nothing checked, so the party being capped could erase
+     * its own spend from the measurement: broadcast a swap, mark it failed,
+     * spend the allowance again. The cap was set, measured and reported by the
+     * browser it exists to restrain.
+     *
+     * The chain is the only authority on whether a transaction failed, and this
+     * server can already ask it. A receipt saying `status: 0x0` is a failure and
+     * is accepted. A receipt saying `0x1` is a SUCCESS, whatever the caller
+     * believes, and is recorded as confirmed instead. No receipt means not
+     * mined, which is not a failure yet — the row stays as it is and continues
+     * to count against the cap, which is the conservative direction: the worst
+     * case is that a genuinely dropped swap holds part of an allowance for
+     * twenty four hours, against the alternative of an unbounded live spend.
+     *
+     * Transfers and approvals are untouched by this: they do not enter the cap,
+     * and the wallet's own history display is the only thing that reads them.
+     */
+    if (tx.kind === "swap" && status === "failed" && tx.status !== "failed") {
+      const chain = getChain(tx.chainId);
+      if (!chain) return res.status(400).json({ error: "Unknown or disabled chain" });
+
+      /**
+       * `rpcCallTyped`, NOT `rpcCall` — this is the exact distinction LW-006
+       * was closed to make. For a receipt read, a plain null means either "the
+       * transaction is not mined" or "no endpoint answered", and those two must
+       * lead to different outcomes here.
+       */
+      const read = await rpcCallTyped(chain, "eth_getTransactionReceipt", [tx.hash]);
+      if (!read.ok) {
+        console.warn(`[wallet] could not verify swap ${tx.hash} on ${chain.name}: ${read.reason}`);
+        return res.status(503).json({
+          error:
+            `${chain.name} could not be reached to confirm that this swap failed, so nothing was ` +
+            `changed. It still counts towards your daily limit until the chain says otherwise.`,
+          code: "unverified",
+        });
+      }
+      const receipt = read.result;
+      if (receipt && receipt.status === "0x1") {
+        tx.status = "confirmed";
+        await tx.save();
+        return res.status(409).json({
+          tx,
+          error: "That swap succeeded on chain, so it has been recorded as confirmed.",
+        });
+      }
+      if (!receipt) {
+        return res.status(409).json({
+          tx,
+          error:
+            "That swap has not been mined yet, so it cannot be recorded as failed. It still " +
+            "counts towards your daily limit until the chain reports it.",
+          code: "not_mined",
+        });
+      }
+    }
+
+    tx.status = status;
+    await tx.save();
     return res.json({ tx });
   } catch (err) {
     console.error("wallet updateTxStatus error:", err.message);
@@ -292,11 +368,37 @@ async function spend24h(req, res) {
       .lean();
 
     let spent = 0;
+    let unpriced = 0;
     for (const t of rows) {
       if (t.side === "buy" && CASH_RE.test(t.symbol || "")) spent += Number(t.value) || 0;
       else if (t.side === "sell" && CASH_RE.test(t.tokenOutSymbol || "")) spent += Number(t.amountOut) || 0;
+      /**
+       * COUNTED, EVEN THOUGH IT CANNOT BE VALUED.
+       *
+       * `spent` only grows when one leg of the swap is a dollar stablecoin,
+       * which is how a swap gets a dollar value without a price lookup. A swap
+       * paid for in wrapped ether, or between two long-tail tokens, has no
+       * dollar leg and contributed exactly nothing — so the daily cap simply did
+       * not see it, and the answer said so in no way at all.
+       *
+       * A figure that silently omits trades is worse than one that admits it
+       * omits them: this is the number the swap modal refuses to plan without,
+       * and a caller reading `spent24h` alone has no way to know it is partial.
+       * The count travels with it so the UI can say "plus N trades we could not
+       * price in dollars" rather than implying the day is clear. Pricing them
+       * properly needs a per-chain USD quote at execution time, recorded on the
+       * row when the swap is written; that is a change to how swaps are
+       * recorded, not to how they are summed.
+       */
+      else unpriced += 1;
     }
-    return res.json({ spent24h: Number(spent.toFixed(2)), currency: "USD", swaps: rows.length });
+    return res.json({
+      spent24h: Number(spent.toFixed(2)),
+      currency: "USD",
+      swaps: rows.length,
+      unpricedSwaps: unpriced,
+      complete: unpriced === 0,
+    });
   } catch (err) {
     console.error("wallet spend24h error:", err.message);
     return res.status(500).json({ error: "Could not compute recent spend" });
@@ -438,6 +540,17 @@ async function discoveredAct(req, res) {
 }
 
 module.exports = {
+  /**
+   * Exported for ONE reason: so a test can assert it contains no signing method.
+   *
+   * ARCHITECTURE.md invariant 4 and SECURITY.md 4.1 item 9 both say this list is
+   * "asserted by a CI test". Until now there was no CI and no test, so the only
+   * thing standing between an added `eth_sign` and a server that signs on behalf
+   * of a user was that nobody had done it. See `__tests__/invariants.test.js`.
+   *
+   * It is read-only to the rest of the app — no handler imports it.
+   */
+  ALLOWED_METHODS,
   spend24h,
   chains,
   rpc,

@@ -43,28 +43,61 @@ async function main() {
   }
 
   if (stale.length > 0) {
-    await Alert.updateMany({ _id: { $in: stale } }, { status: "dismissed" });
+    /**
+     * THE SAME TERMINAL STATE THE DISMISS BUTTON PRODUCES, which means all three
+     * fields and not just the status word.
+     *
+     * This wrote `status` alone, while the real handler also stamps `userAction`
+     * and `actedAt` — the pair the Alert model exists to keep, so history can
+     * show recommendation against decision. After a run the history therefore
+     * showed alerts as dismissed with no record of who or when, which is not the
+     * state the comment above promises. The database holds over a thousand
+     * alerts waiting for this script, so the inconsistency would have been the
+     * bulk of the history rather than a corner of it.
+     *
+     * `dismissedBy` is deliberately absent from the model, so the honest record
+     * of "the system dismissed this, not the user" is that userAction says
+     * dismiss and actedAt is the moment the cleanup ran, all in one batch.
+     */
+    await Alert.updateMany(
+      { _id: { $in: stale } },
+      { $set: { status: "dismissed", userAction: "dismiss", actedAt: new Date() } }
+    );
   }
 
   return { scanned: pending.length, kept: keptWatches.size, dismissed: stale.length };
 }
 
-main()
-  .then((r) => {
-    if (r.scanned === 0) {
-      console.log("No pending alerts found. Nothing to clean up.");
-    } else {
-      console.log(
-        `Pending alerts scanned: ${r.scanned}\n` +
-          `Kept pending:          ${r.kept} (one per watch)\n` +
-          `Dismissed as stale:    ${r.dismissed}`
-      );
-    }
-    return mongoose.disconnect();
-  })
-  .then(() => process.exit(0))
-  .catch(async (err) => {
-    console.error("dedupe-alerts failed:", err.message);
-    await mongoose.disconnect().catch(() => {});
-    process.exit(1);
-  });
+/**
+ * ONLY WHEN RUN DIRECTLY.
+ *
+ * This ran on `require`. Anything that loaded the scripts directory — a test
+ * sweep, or a tooling pass that requires every module to check it parses —
+ * connected to whatever MONGO_URI pointed at and did the work. During this
+ * audit exactly that happened: a module-load check ran dedupe-alerts against
+ * the development database and dismissed eight duplicate pending alerts.
+ *
+ * `require.main === module` is true for `node <this file>` and false for every
+ * require, which is the distinction that was missing.
+ */
+if (require.main === module) {
+  main()
+    .then((r) => {
+      if (r.scanned === 0) {
+        console.log("No pending alerts found. Nothing to clean up.");
+      } else {
+        console.log(
+          `Pending alerts scanned: ${r.scanned}\n` +
+            `Kept pending:          ${r.kept} (one per watch)\n` +
+            `Dismissed as stale:    ${r.dismissed}`
+        );
+      }
+      return mongoose.disconnect();
+    })
+    .then(() => process.exit(0))
+    .catch(async (err) => {
+      console.error("dedupe-alerts failed:", err.message);
+      await mongoose.disconnect().catch(() => {});
+      process.exit(1);
+    });
+}

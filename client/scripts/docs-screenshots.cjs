@@ -56,6 +56,35 @@ const SECTIONS = String(process.env.SECTIONS || "")
 const WALLET_PW = "docs-screenshots-only-1";
 const results = { ok: [], failed: [] };
 
+/**
+ * THE "NEVER POINT IT AT PRODUCTION" WARNING, ENFORCED RATHER THAN TRUSTED.
+ *
+ * The header says in plain words that this must not be run against production
+ * because it creates a wallet, issues a real payment address and generates
+ * reminders on whatever account its token belongs to. Nothing checked. It
+ * targets localhost, but the page it drives talks to whichever API the local
+ * build was configured with, so a client built with a production VITE_API_URL
+ * pointed the whole run at live data with only the operator's memory in the way.
+ *
+ * Localhost is required on both halves; anything else has to be waved through
+ * deliberately with ALLOW_REMOTE=1, which is a thing somebody has to type.
+ */
+function isLocal(url) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(String(url || ""));
+}
+if (!process.env.ALLOW_REMOTE) {
+  const api = process.env.VITE_API_URL || "http://localhost:8000";
+  if (!isLocal(BASE) || !isLocal(api)) {
+    console.error(
+      `Refusing to run: this script creates a wallet, issues a payment address and generates ` +
+        `reminders on the account it is given, so it is for a local dev server and a throwaway ` +
+        `database only. Page target is ${BASE} and the API is ${api}. Set ALLOW_REMOTE=1 if you ` +
+        `genuinely mean it.`
+    );
+    process.exit(1);
+  }
+}
+
 fs.mkdirSync(OUT, { recursive: true });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -620,6 +649,16 @@ async function section(name, fn) {
   await browser.close();
   console.log("\nOK:", results.ok.length, "FAILED:", results.failed.length);
   for (const f of results.failed) console.log("  -", f);
+  /**
+   * A FAILED SHOT IS A FAILED RUN.
+   *
+   * This printed the failures and then exited 0, so twenty pictures could fail
+   * to capture and anything running the script — a person reading one line of
+   * output, or a future CI step — saw success. A guide whose pictures quietly
+   * stopped updating is how the documentation drifts back out of true, which is
+   * the whole thing this script exists to prevent.
+   */
+  if (results.failed.length > 0) process.exit(1);
 })().catch((err) => {
   console.error("fatal", err);
   process.exit(1);

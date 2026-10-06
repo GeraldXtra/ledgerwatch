@@ -17,6 +17,19 @@ function publicUser(user) {
     companyName: u.companyName || "",
     notifyPrefs: u.notifyPrefs || { marketAlerts: true, remindersDue: true, txUpdates: true },
     crypto: cryptoSettings(u.crypto),
+    /**
+     * WHICH WAY THIS ACCOUNT SIGNS IN, because nothing could tell.
+     *
+     * `authProvider` was written once, by the Google callback, and read nowhere
+     * at all: not by the login handler, not by the password-change handler, and
+     * it was left out of this object, so the interface could not see it either.
+     * A Google account is given a random hash it was never told about, so the
+     * Settings password form asks it for a current password that does not exist
+     * and there is no way to say so on the screen. The guide was corrected to
+     * tell those users to use the reset flow; this is what lets the app tell
+     * them. It is not a secret and it is not settable from the client.
+     */
+    authProvider: u.authProvider === "google" ? "google" : "password",
     tradingMode: u.tradingMode || "paper",
     customTokens: u.customTokens || [],
     createdAt: u.createdAt,

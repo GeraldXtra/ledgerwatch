@@ -9,12 +9,15 @@ import {
   encryptAndStore,
 } from "./keystore";
 import { saveAddress } from "./walletApi";
+import { assessWalletPassword } from "./passwordStrength";
+import { useAuth } from "../../context/AuthContext";
 
 /**
  * Import an existing wallet from a recovery phrase or a private key, then encrypt it
  * with a password and store only the ciphertext (same guarantee as create).
  */
 export default function ImportWalletModal({ onClose, onDone }) {
+  const { user } = useAuth();
   const [mode, setMode] = useState("phrase"); // phrase | key | keystore
   const [secret, setSecret] = useState("");
   const [password, setPassword] = useState("");
@@ -41,7 +44,10 @@ export default function ImportWalletModal({ onClose, onDone }) {
      * the minimum length, apply only when a NEW encryption password is being set.
      */
     if (mode !== "keystore") {
-      if (password.length < 8) return setError("Use at least 8 characters.");
+      // Same gate as creating a wallet: this password encrypts the imported key
+      // on this device and is never recoverable.
+      const verdict = assessWalletPassword(password, { email: user?.email, name: user?.name });
+      if (!verdict.ok) return setError(verdict.reason);
       if (password !== confirm) return setError("Passwords do not match.");
     }
 
@@ -113,6 +119,24 @@ export default function ImportWalletModal({ onClose, onDone }) {
             { id: "keystore", label: "Keystore file" },
           ]}
         />
+
+        {/* THE COST OF THE MIDDLE OPTION, SAID WHERE THE CHOICE IS MADE.
+            A wallet imported from a bare private key cannot derive anything: no
+            per-invoice payment addresses, which is the whole point of the
+            receivables feature, and no Bitcoin, because both need the seed a
+            lone secp256k1 scalar does not carry. That wording already existed in
+            derivation.js and in bitcoin/derivation.js, but it was only ever
+            shown at signing time — so the limitation was discovered later, on an
+            invoice, with a "re-import it using your recovery phrase" message.
+            The keystore tab explained itself and this one offered "0x…". */}
+        {mode === "key" && (
+          <p className="inline-warn">
+            A private key is one account and carries no seed, so a wallet
+            imported this way <strong>cannot issue invoice payment addresses and cannot hold
+            Bitcoin</strong>. Both are derived from the recovery phrase. If you have the phrase,
+            import that instead and everything works.
+          </p>
+        )}
 
         {mode === "keystore" && (
           <div className="stack-sm">

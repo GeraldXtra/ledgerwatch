@@ -59,6 +59,56 @@ export async function planSwap({
 
   // 2. Best price across EVERY tier, with impact measured.
   const quote = await bestQuote({ provider, chain, tokenIn: tokenIn.address, tokenOut: tokenOut.address, amountIn });
+
+  /**
+   * "WE COULD NOT CHECK" IS NOT "THERE IS NO POOL".
+   *
+   * These were one branch, and the conflation is the LW-006 shape in a new
+   * place. Measured against Base's own two endpoints, five spaced runs of the
+   * ten route search failed 0, 6, 10, 10 and 2 routes — throttling is most
+   * runs, not an edge case. A total failure used to state a permanent-sounding
+   * fact about the chain, and a partial one used to say nothing while silently
+   * dropping whichever routes did not answer. On PEPE the winning route pays
+   * 2.08x the direct pool, so that silence could hand somebody half the market
+   * price with every check on screen passing.
+   *
+   * Refusing costs a retry a few seconds later. Guessing costs the difference.
+   */
+  if (quote && quote.incomplete) {
+    return {
+      ok: false,
+      reason: "incomplete-quote",
+      blocks: [
+        `Only ${quote.priced} of ${quote.total} price routes on ${chain.name} could be checked just now, ` +
+          `so this is not necessarily the best price and it was not offered. The network is busy rather ` +
+          `than broken. Try again in a few seconds.`,
+      ],
+    };
+  }
+
+  /**
+   * TOO SMALL TO MEASURE IS NOT ZERO IMPACT.
+   *
+   * The price impact is measured by re-quoting a reference trade a thousandth
+   * of this size. Below a thousand of the input token's smallest units that
+   * reference rounds to nothing, and `bestQuote` used to skip the measurement
+   * and leave the impact at its initialiser — so the confirm screen showed
+   * "0.00%", the most reassuring number on it, from a reading never taken, and
+   * the impact cap was then checked against it. Refused instead, with the one
+   * thing the user can do about it.
+   */
+  if (quote && quote.unmeasurable) {
+    return {
+      ok: false,
+      reason: "amount-too-small",
+      blocks: [
+        `This amount is too small to price safely: it is under a thousand of ${tokenIn.symbol}'s ` +
+          `smallest units, which is less than the reference trade the price impact is measured ` +
+          `against, so there is no impact figure for it. Enter a larger amount.`,
+      ],
+    };
+  }
+
   if (!quote) {
     return {
       ok: false,
@@ -76,14 +126,19 @@ export async function planSwap({
   const needsApproval = allowance < amountIn;
 
   // 4. Gas — the Part 2 preflight, not a second implementation.
+  // The QUOTE is passed, not a pair of addresses. It carries the route its
+  // price was measured on, and the encoded swap has to match that route or the
+  // trade is signed at a price nobody quoted.
   const swapTx = buildSwapTx({
     chain,
-    tokenIn: tokenIn.address,
-    tokenOut: tokenOut.address,
-    fee: quote.fee,
+    quote,
     amountIn,
     amountOutMinimum,
     recipient: address,
+    // Passed so the encoder can refuse a quote whose route does not start and
+    // end at the tokens this plan is actually about.
+    tokenIn: tokenIn.address,
+    tokenOut: tokenOut.address,
   });
 
   let gas = null;
@@ -185,7 +240,13 @@ export async function approveRouter({ plan, password, onStep = () => {} }) {
     tokenAddress: plan.tokenIn.address,
     direction: "out",
     kind: "approval",
-  }).catch(() => null);
+  }).catch((err) => {
+    // Not fatal — the approval is on chain and the swap that follows is what the
+    // cap measures — but it still leaves a gap in history, so it is said out loud
+    // rather than dropped.
+    console.error("[liveSwap] the approval is on chain but was not recorded:", err && err.message);
+    return null;
+  });
 
   onStep("Waiting for the approval to confirm");
   const receipt = await tx.wait();
@@ -205,7 +266,10 @@ export async function approveRouter({ plan, password, onStep = () => {} }) {
  */
 const DEADLINE_MARGIN_SECONDS = 45;
 
-export function planExpired(plan) {
+// Not exported: `executeSwap` below is its only caller anywhere in the client.
+// An export with no importer in a signing module reads as a contract somebody
+// depends on, which is how a meaningless change comes to look like a safe one.
+function planExpired(plan) {
   const deadline = plan && plan.swapTx && plan.swapTx.deadline;
   if (deadline == null) return false;
   return Number(deadline) - Math.floor(Date.now() / 1000) < DEADLINE_MARGIN_SECONDS;
@@ -230,6 +294,21 @@ export async function executeSwap({ plan, password, side, alertId, onStep = () =
   // ONE record, in the same system as every other wallet transaction, so the
   // existing reconciliation loop confirms it and the existing per-chain explorer
   // link works with no new code.
+  /**
+   * A SWALLOWED RECORD IS A SWAP THAT NEVER HAPPENED, AS FAR AS THIS APP KNOWS.
+   *
+   * This was `.catch(() => null)` and nothing else, which meant a network blip
+   * between the broadcast and this call left the swap on chain and invisible:
+   * absent from history, absent from the confirmation poll below, and — the part
+   * that matters — absent from `GET /api/wallet/spend`, which sums exactly these
+   * rows to enforce the daily cap. The cap then under-counts, so the browser
+   * lets the user spend past their own limit.
+   *
+   * Nothing here can be undone: the transaction is already broadcast. So the
+   * failure is CARRIED BACK to the caller instead of being dropped, and the
+   * confirm screen says so with the hash. See LW-091.
+   */
+  let recorded = true;
   const record = await recordTx({
     chainId: plan.chain.chainId,
     hash: txResp.hash,
@@ -245,10 +324,19 @@ export async function executeSwap({ plan, password, side, alertId, onStep = () =
     amountOut: amountOutDisplay,
     minAmountOut: ethers.formatUnits(plan.amountOutMinimum, plan.tokenOut.decimals),
     feeTier: plan.quote.fee,
+    // The whole route, as symbols and tiers. `feeTier` above is the first hop
+    // and stays what it always was, so nothing that reads it changes.
+    route: plan.quote.via
+      ? `${plan.tokenIn.symbol} > ${plan.quote.via} > ${plan.tokenOut.symbol} (${plan.quote.fees.join("/")})`
+      : `${plan.tokenIn.symbol} > ${plan.tokenOut.symbol} (${plan.quote.fee})`,
     priceImpactPct: Number(plan.quote.impactPct.toFixed(4)),
     side,
     alertId: alertId || null,
-  }).catch(() => null);
+  }).catch((err) => {
+    recorded = false;
+    console.error("[liveSwap] the swap is on chain but was not recorded:", err && err.message);
+    return null;
+  });
 
   // In dollars, for the same reason the cap is. Charging a session budget of 150
   // with "12.8" for a 995,000 dollar sale made the session cap meaningless too.
@@ -263,5 +351,12 @@ export async function executeSwap({ plan, password, side, alertId, onStep = () =
       .catch(() => {});
   }
 
-  return { txHash: txResp.hash, amountOut: amountOutDisplay, feeTier: plan.quote.fee };
+  return {
+    txHash: txResp.hash,
+    amountOut: amountOutDisplay,
+    feeTier: plan.quote.fee,
+    // False when the trade happened but this app could not write it down. The
+    // caller MUST surface this: the daily cap is computed from these rows.
+    recorded,
+  };
 }

@@ -13,6 +13,11 @@ const { emailConfigured } = require("./notify.service");
 const DEFAULT_INTERVAL_MS = 60000; // 60s for demo
 
 // Module-level state, exposed via getStatus() for the /status route.
+//
+// The payment fields are DECLARED here rather than only assigned in
+// runAllPasses. They were assigned and never declared, which is precisely why
+// they were easy to leave out of getStatus and out of the loop's log line — see
+// the note on getStatus.
 const state = {
   active: false,
   intervalMs: DEFAULT_INTERVAL_MS,
@@ -22,6 +27,10 @@ const state = {
   lastDebtsChecked: null,
   lastAlertsCreated: null,
   lastWatchesChecked: null,
+  lastAddressesChecked: null,
+  lastPaymentsDetected: null,
+  lastPaymentsSettled: null,
+  lastPassMs: null,
 };
 
 let intervalHandle = null;
@@ -204,6 +213,7 @@ async function runAllPasses({ userId } = {}) {
     };
   }
   state.isRunning = true;
+  const startedAt = Date.now();
 
   try {
     // Reminder pass — never lets the whole run die.
@@ -238,7 +248,25 @@ async function runAllPasses({ userId } = {}) {
     state.lastAlertsCreated = prices.alertsCreated;
     state.lastWatchesChecked = prices.watchesChecked;
     state.lastPaymentsSettled = payments.settled;
+    state.lastPaymentsDetected = payments.detected;
     state.lastAddressesChecked = payments.addressesChecked;
+    state.lastPassMs = Date.now() - startedAt;
+
+    /**
+     * A pass that outruns its own interval holds the overlap guard, and every
+     * tick underneath it then logs "pass skipped (previous pass still running)",
+     * which reads as healthy overlap protection while nothing at all is
+     * happening. Say plainly that the run was long and how long, so the skip
+     * lines have an explanation next to them.
+     */
+    if (state.intervalMs && state.lastPassMs > state.intervalMs) {
+      console.warn(
+        `Automation: pass took ${Math.round(state.lastPassMs / 1000)}s, longer than the ` +
+          `${Math.round(state.intervalMs / 1000)}s interval. Ticks in the meantime were skipped ` +
+          `by the overlap guard, so no reminders were sent and no payments were detected while ` +
+          `it ran.`
+      );
+    }
 
     return {
       generated: reminders.generated,
@@ -269,9 +297,19 @@ function startAutomation() {
       if (result.skipped) {
         console.log("Automation: pass skipped (previous pass still running)");
       } else {
+        /**
+         * THE PAYMENT PASS IS NAMED HERE TOO. It was not, and the operator's
+         * manual in CLAUDE.md points at exactly these two numbers: "addresses
+         * checked above zero and payments detected zero, forever" is what a
+         * broken watcher looks like. They were computed on every pass and then
+         * printed nowhere and returned nowhere, so the one diagnostic the
+         * documentation names did not exist on any surface an operator has.
+         */
         console.log(
           `Automation: reminder pass — generated ${result.generated} (checked ${result.debtsChecked}); ` +
-            `price pass — alerts ${result.alertsCreated} (watches ${result.watchesChecked})`
+            `price pass — alerts ${result.alertsCreated} (watches ${result.watchesChecked}); ` +
+            `payment pass — addresses ${result.addressesChecked}, detected ${result.paymentsDetected}, ` +
+            `confirmed ${result.paymentsConfirmed}, settled ${result.paymentsSettled}`
         );
       }
     } catch (err) {
@@ -287,6 +325,16 @@ function startAutomation() {
   console.log(`Automation: loop started (every ${state.intervalMs}ms)`);
 }
 
+/**
+ * The loop's own account of itself, for /api/automation/status and /api/health.
+ *
+ * Hand-written rather than spread from `state`, which is why the payment
+ * counters went missing: they were computed on every pass, written onto the
+ * state object, and then read by nothing at all. A payment watcher that has
+ * silently stopped detecting anything was indistinguishable from a quiet week
+ * from every surface an operator has. They are listed here now, alongside how
+ * long the last pass took, which is the other half of that diagnosis.
+ */
 function getStatus() {
   return {
     active: state.active,
@@ -297,6 +345,10 @@ function getStatus() {
     lastDebtsChecked: state.lastDebtsChecked,
     lastAlertsCreated: state.lastAlertsCreated,
     lastWatchesChecked: state.lastWatchesChecked,
+    lastAddressesChecked: state.lastAddressesChecked,
+    lastPaymentsDetected: state.lastPaymentsDetected,
+    lastPaymentsSettled: state.lastPaymentsSettled,
+    lastPassMs: state.lastPassMs,
   };
 }
 

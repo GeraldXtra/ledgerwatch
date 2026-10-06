@@ -29,4 +29,24 @@ const debtSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+/**
+ * INDEXES. There were none, on the collection every screen and the automation
+ * loop read most.
+ *
+ * `doReminderPass` runs `Debt.find({ status: {$in: [...]}, dueDate: {$lte: now} })`
+ * on a timer, with NO userId filter and no limit — a full collection scan of
+ * every invoice belonging to every account, once a minute, plus a second scan
+ * for `countDocuments` on the not-yet-due count. Every list, statement and
+ * analytics read filters on `userId`.
+ *
+ * Ordering matters: the equality field goes first, the range field second, so
+ * the index can seek rather than scan.
+ */
+debtSchema.index({ userId: 1, status: 1, dueDate: 1 });
+debtSchema.index({ status: 1, dueDate: 1 });
+debtSchema.index({ userId: 1, createdAt: -1 });
+// Debtors are grouped by name in memory today; this makes the per-debtor
+// profile and statement reads a seek instead of a scan of the account.
+debtSchema.index({ userId: 1, debtorName: 1 });
+
 module.exports = mongoose.model("Debt", debtSchema);

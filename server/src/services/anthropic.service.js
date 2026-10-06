@@ -105,18 +105,62 @@ async function draftReminder({
  * Answer a natural-language question over a compact summary of the user's debts.
  * Returns AI text, or null if AI is unavailable / fails (caller computes a fallback).
  */
+/**
+ * The most debtor rows one question may send to the AI provider.
+ *
+ * The caller passes EVERY invoice the account has, with names, amounts and due
+ * dates, on every question. SECURITY.md B6 requires debtor PII sent to a third
+ * party to be minimised, and it is the one asset that cannot be un-disclosed
+ * once sent. It is also uncapped third-party spend and, past a certain size, a
+ * request that simply fails — the aiCall limiter bounds how MANY calls are made
+ * and says nothing about how large each one is.
+ *
+ * 200 rows answers any question a person actually asks while keeping a large
+ * book from being shipped wholesale. Which 200 matters: open invoices first,
+ * soonest due first, because "who owes me and when" is what the assistant is
+ * for, and a paid invoice from last year is not part of that answer. The prompt
+ * is told plainly that it is a subset, so it cannot state a total it was never
+ * given — a confidently wrong total would be worse than a refusal.
+ */
+const MAX_DEBT_ROWS = 200;
+
+function trimDebtsForPrompt(debtsSummary) {
+  const rows = Array.isArray(debtsSummary) ? debtsSummary : [];
+  if (rows.length <= MAX_DEBT_ROWS) return { rows, total: rows.length };
+  const ranked = [...rows].sort((a, b) => {
+    const aOpen = a && a.status !== "paid" ? 0 : 1;
+    const bOpen = b && b.status !== "paid" ? 0 : 1;
+    if (aOpen !== bOpen) return aOpen - bOpen;
+    const aDue = a && a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+    const bDue = b && b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+    return aDue - bDue;
+  });
+  return { rows: ranked.slice(0, MAX_DEBT_ROWS), total: rows.length };
+}
+
 async function answerReceivablesQuery(question, debtsSummary) {
   const anthropic = getClient();
   if (!anthropic) return null;
 
+  const { rows, total } = trimDebtsForPrompt(debtsSummary);
+  const subsetNote =
+    rows.length < total
+      ? `The list below is a SUBSET: ${rows.length} of ${total} invoices, open ones first ` +
+        `and soonest due first. Do not state totals or counts across the whole book, and ` +
+        `say plainly that you are working from the most urgent ${rows.length}.`
+      : null;
+
   const prompt = [
     `You are a receivables assistant. Answer the question using ONLY the data below.`,
     `Be concise and specific (name amounts and debtors). Return plain text.`,
+    subsetNote,
     ``,
     `Question: ${question}`,
     ``,
-    `Debts (JSON): ${JSON.stringify(debtsSummary)}`,
-  ].join("\n");
+    `Debts (JSON): ${JSON.stringify(rows)}`,
+  ]
+    .filter((line) => line !== null)
+    .join("\n");
 
   try {
     const response = await anthropic.messages.create({

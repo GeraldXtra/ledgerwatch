@@ -115,7 +115,14 @@ export default function NewTokensCard({
           const symbol = t.symbol || "Unknown token";
           return (
             <li key={t.address} className={t.status === "ignored" ? "mm-found-row dim" : "mm-found-row"}>
-              <TokenLogo symbol={t.symbol || "?"} unknown={unreadable} />
+              {/* THE DISC IS KEYED ON THE CONTRACT, NOT THE TICKER.
+                  TokenLogo resolves a symbol through the shared logo cache, so
+                  passing "USDC" here drew Circle's own mark on the card that
+                  calls the token bait — the counterfeit was handed the genuine
+                  artwork by the warning itself. An address matches nothing in
+                  that map, so every arrival gets the neutral coin glyph until
+                  the owner has decided it is real. */}
+              <TokenLogo symbol={t.address || "?"} unknown={unreadable} />
               <span className="mm-found-main">
                 <span className="mm-found-name">
                   {symbol}

@@ -36,4 +36,11 @@ const watchSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+/**
+ * `runPricePass` selects `{ active: true }` on a timer across every account, and
+ * every market screen reads `{ userId, mode }`. Neither had an index.
+ */
+watchSchema.index({ active: 1 });
+watchSchema.index({ userId: 1, mode: 1, active: 1 });
+
 module.exports = mongoose.model("Watch", watchSchema);

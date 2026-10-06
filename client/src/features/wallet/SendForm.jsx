@@ -15,7 +15,7 @@ import NetworkScopeNotice from "./NetworkScopeNotice";
  * The key is decrypted only for the signing call and is discarded immediately. The
  * agent can pre-fill this form but never signs — only the user's password does.
  */
-export default function SendForm({ address, chain, onSent, onConfirmed }) {
+export default function SendForm({ address, chain, tokens: tokenList, onSent, onConfirmed }) {
   const toast = useToast();
   const [step, setStep] = useState("form"); // form → review
   const [to, setTo] = useState("");
@@ -27,7 +27,18 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const tokens = chain.tokens || [];
+  /**
+   * EVERY TOKEN THE WALLET SHOWS, NOT JUST THE REGISTRY ONES.
+   *
+   * This read `chain.tokens` alone while the wallet's balance list is the
+   * registry PLUS the owner's own imports, so a token you imported appeared with
+   * a real balance and then was simply missing from this dropdown — the app
+   * displaying money it refused to move, and refusing by silent absence rather
+   * than for a stated reason (LW-038). The caller passes the same list it read
+   * the balances from; `chain.tokens` remains the fallback so a caller that
+   * passes nothing behaves as before.
+   */
+  const tokens = tokenList || chain.tokens || [];
   const selectedToken = asset === "native" ? null : tokens.find((t) => t.address === asset);
   const symbol = selectedToken ? selectedToken.symbol : chain.nativeSymbol;
   const decimals = selectedToken ? selectedToken.decimals : chain.decimals;
@@ -150,7 +161,14 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
         symbol,
         tokenAddress: selectedToken ? selectedToken.address : null,
         direction: "out",
-      }).catch(() => null);
+      }).catch((err) => {
+        // Carried, not swallowed. The success toast below used to say "Track it
+        // in history" — and with no row written there was no history to track it
+        // in, and the reconciliation the comment relies on only ever discovers
+        // INBOUND transfers, never an outbound send.
+        console.error("[send] the transfer is on chain but was not recorded:", err && err.message);
+        return null;
+      });
 
       // Settle the status in the background — a testnet confirmation takes 10-30s and
       // must never block the UI. WalletPage also reconciles stragglers on load, so a
@@ -168,7 +186,16 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
       // NAMES THE CHAIN. "Sent 80 USDC" alone is what let a same-chain transfer
       // read as a completed cross-chain move; the network is the one fact that
       // makes the outcome unambiguous.
-      toast(`Sent ${amount} ${symbol} on ${chain.name}. Track it in history.`, { type: "success" });
+      if (recorded && recorded._id) {
+        toast(`Sent ${amount} ${symbol} on ${chain.name}. Track it in history.`, { type: "success" });
+      } else {
+        // Honest about both halves: the money moved, the record did not.
+        toast(
+          `Sent ${amount} ${symbol} on ${chain.name}, but it could not be saved to your ` +
+            `history. It is on the network — check the explorer for ${String(txResp.hash).slice(0, 10)}…`,
+          { type: "error", duration: 14000 }
+        );
+      }
       onSent(txResp);
     } catch (err) {
       setError(friendly(err));
@@ -281,7 +308,17 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
             Back
           </Button>
           <Button variant="primary" type="submit" disabled={busy || !gasPlan || !gasPlan.ok}>
-            {busy ? "Signing…" : !gasPlan || gasPlan.ok ? "Sign & send" : `Not enough ${chain.nativeSymbol}`}
+            {/* Three different refusals, three different labels. A reverted
+                transaction used to reach this button reading "Sign & send"
+                behind an ordinary fee, and "Not enough ETH" would be a lie for
+                it: topping up gas changes nothing. */}
+            {busy
+              ? "Signing…"
+              : !gasPlan || gasPlan.ok
+                ? "Sign & send"
+                : gasPlan.reverted
+                  ? "This would fail"
+                  : `Not enough ${chain.nativeSymbol}`}
           </Button>
         </div>
       </form>
@@ -329,7 +366,10 @@ export default function SendForm({ address, chain, onSent, onConfirmed }) {
           <Select value={asset} onChange={(e) => setAsset(e.target.value)}>
             <option value="native">{chain.nativeSymbol} (native)</option>
             {tokens.map((t) => (
-              <option key={t.address} value={t.address}>{t.symbol}</option>
+              <option key={t.address} value={t.address}>
+                {t.symbol}
+                {t.custom ? " (added by you)" : ""}
+              </option>
             ))}
           </Select>
         </Field>

@@ -5,6 +5,10 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  // True when the account could not be loaded for a reason that is NOT a
+  // rejected session — the server being asleep or unreachable. The session is
+  // kept; the app can say so rather than silently showing a signed-out screen.
+  const [authUnreachable, setAuthUnreachable] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const logout = useCallback(() => {
@@ -23,8 +27,33 @@ export function AuthProvider({ children }) {
       try {
         const { data } = await http.get("/api/auth/me");
         if (active) setUser(data.user);
-      } catch {
-        if (active) logout();
+      } catch (err) {
+        /**
+         * ONLY A 401 MEANS THE SESSION IS OVER.
+         *
+         * This caught everything and called `logout()`, which discards the
+         * stored token — so any failure to reach the server on page load signed
+         * the user out and made them enter their password again. On this
+         * deployment that is not an edge case: the server sleeps after about
+         * fifteen minutes of inactivity and the first request then takes 30 to
+         * 60 seconds, which is written down in DEPLOY_CHECKLIST.md as an
+         * expected property of the host. A timeout, an offline moment or a 500
+         * all read as "you are not signed in".
+         *
+         * A real 401 is already handled twice over: the axios interceptor
+         * broadcasts `ledgerwatch:unauthorized`, and requireAuth returns 401 for
+         * a bad or superseded token. Everything else leaves the token alone and
+         * lets the next request try again.
+         */
+        const status = err?.response?.status;
+        if (active) {
+          if (status === 401) {
+            logout();
+          } else {
+            setAuthUnreachable(true);
+            console.error("[auth] could not load the account:", err?.message || err);
+          }
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -118,6 +147,28 @@ export function AuthProvider({ children }) {
   // context, so the sidebar and topbar update without a refetch.
   const applyUser = useCallback((next) => setUser(next), []);
 
+  /**
+   * Re-read the account from the server.
+   *
+   * Needed by anything that changes the user record through an endpoint that
+   * does not return the whole user — adding a token after a live buy, for one.
+   * Without it the new token sits in the database and the interface keeps
+   * rendering the list it loaded at sign-in, so the asset stays invisible until
+   * a reload, which is the same symptom as not having saved it at all.
+   */
+  const refreshUser = useCallback(async () => {
+    try {
+      const { data } = await http.get("/api/auth/me");
+      setUser(data.user);
+      return data.user;
+    } catch {
+      // A failed refresh leaves the previous user in place, which is correct:
+      // the change was saved server-side either way, and signing somebody out
+      // over a stale sidebar would be far worse.
+      return null;
+    }
+  }, []);
+
   const value = {
     user,
     loading,
@@ -132,6 +183,8 @@ export function AuthProvider({ children }) {
     logout,
     updateProfile,
     applyUser,
+    refreshUser,
+    authUnreachable,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

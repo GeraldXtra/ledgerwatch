@@ -1,6 +1,6 @@
-const Payment = require("../models/Payment");
 const PaymentAddress = require("../models/PaymentAddress");
 const { notifyUser } = require("./push.service");
+const { paidForDebt } = require("./receivables.service");
 
 /**
  * ONE SETTLEMENT EVENT, EVERY PAYMENT METHOD.
@@ -18,7 +18,16 @@ const { notifyUser } = require("./push.service");
 /**
  * Debounce window. Several transfers landing seconds apart (a payer splitting an
  * amount, or a watch pass confirming a backlog) are one event to a human, so they
- * produce one email rather than a burst. Keyed by debt.
+ * produce one email rather than a burst.
+ *
+ * KEYED BY DEBT *AND* BY WHETHER THE INVOICE IS NOW CLOSED, because the two
+ * receipts say materially different things: "here is what is still owed and
+ * where to send it" against "paid in full, thank you". With one key per invoice,
+ * a payer who split their payment into two transfers seconds apart — or whose
+ * two transfers confirmed in the same watch pass — got the partial receipt and
+ * never the closing one, so their only record of the transaction said they still
+ * owed money. A burst of partials still collapses to one, and a burst of full
+ * settlements cannot happen because the invoice only closes once.
  */
 const EMAIL_DEBOUNCE_MS = Number(process.env.SETTLEMENT_EMAIL_DEBOUNCE_MS || 20000);
 const lastEmailAt = new Map();
@@ -27,8 +36,8 @@ const lastEmailAt = new Map();
 // grows, rather than holding one stamp per invoice for the life of the process.
 const MAX_DEBOUNCE_KEYS = 5000;
 
-function recentlyEmailed(debtId) {
-  const key = String(debtId);
+function recentlyEmailed(debtId, fullyPaid) {
+  const key = `${debtId}:${fullyPaid ? "full" : "partial"}`;
   const prev = lastEmailAt.get(key);
   const now = Date.now();
   if (prev && now - prev < EMAIL_DEBOUNCE_MS) return true;
@@ -51,11 +60,7 @@ function recentlyEmailed(debtId) {
  * A partial receipt therefore told the debtor they owed far more than they did.
  */
 async function outstandingNgnFor(debt) {
-  const rows = await Payment.aggregate([
-    { $match: { debtId: debt._id } },
-    { $group: { _id: null, paid: { $sum: "$amount" } } },
-  ]);
-  const paid = rows.length ? rows[0].paid : 0;
+  const paid = await paidForDebt(debt._id);
   return Math.max(0, (debt.amount || 0) - paid);
 }
 
@@ -145,23 +150,31 @@ async function onInvoiceSettled({
   try {
     if (!debt.debtorEmail) return { emailed: false, reason: "no debtor email on file" };
 
-    // eslint-disable-next-line global-require
+     
     const { sendEmail, getLogoAttachment, isNonRoutableEmail } = require("./notify.service");
-    // eslint-disable-next-line global-require
+     
     const { buildPaymentReceiptEmail } = require("../utils/paymentReceipt");
-    // eslint-disable-next-line global-require
+     
     const User = require("../models/User");
 
     if (isNonRoutableEmail(debt.debtorEmail)) {
       console.warn(`[settlement] receipt not sent: ${debt.debtorEmail} would bounce.`);
       return { emailed: false, reason: "reserved domain" };
     }
-    if (recentlyEmailed(debt._id)) {
-      console.log(`[settlement] receipt debounced for debt ${debt._id}`);
+    if (recentlyEmailed(debt._id, fullyPaid)) {
+      console.log(
+        `[settlement] ${fullyPaid ? "full" : "partial"} receipt debounced for debt ${debt._id}`
+      );
       return { emailed: false, reason: "debounced" };
     }
 
-    const owner = await User.findById(debt.userId).select("name bankDetails");
+    // `companyName` has to be SELECTED to be read. It was not, so the fallback to
+    // the owner's personal name always won and a business trading under a company
+    // name emailed its customers receipts signed with the owner's own name — the
+    // failure being silent, because an unselected field reads as undefined rather
+    // than erroring. The other two receipt call sites read it off a fully loaded
+    // req.user, which is why only this one was wrong.
+    const owner = await User.findById(debt.userId).select("name companyName bankDetails");
     const logo = getLogoAttachment();
 
     const { html, text } = buildPaymentReceiptEmail({

@@ -32,6 +32,12 @@ import {
   readCachedBitcoinAddress,
   cacheBitcoinAddress,
 } from "./bitcoin/addressCache";
+import {
+  readAmbiguous,
+  readLastSend,
+  writeAmbiguous,
+  writeLastSend,
+} from "./bitcoin/pendingSend";
 
 /**
  * THE BITCOIN WALLET.
@@ -117,11 +123,40 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
 
-  // The last transaction this panel broadcast, while it is still worth acting on.
-  const [lastSend, setLastSend] = useState(null);
-  // A broadcast whose outcome the network did not confirm. Blocks sending.
-  const [ambiguous, setAmbiguous] = useState(null);
+  /**
+   * The last transaction this panel broadcast, while it is still worth acting
+   * on, and a broadcast whose outcome the network never confirmed (which blocks
+   * sending until the person has checked).
+   *
+   * BOTH SURVIVE A RELOAD NOW. They were plain component state, so refreshing
+   * the tab — the most likely thing anybody does after seeing an alarming
+   * message — silently removed the double-send guard and left nothing on screen
+   * recording that an unresolved payment existed, and permanently removed the
+   * ability to speed up or cancel a stuck one. Initialised from storage rather
+   * than in an effect, so there is no first render in which the guard is absent.
+   * See bitcoin/pendingSend.js.
+   */
+  const [lastSend, setLastSend] = useState(() => readLastSend(userId, evmAddress, network));
+  const [ambiguous, setAmbiguous] = useState(() => readAmbiguous(userId, evmAddress, network));
   const [checking, setChecking] = useState(false);
+
+  // Every write goes through these, so state and storage cannot drift: a
+  // setLastSend that forgot to persist would put the guard back to being one
+  // refresh from gone.
+  const rememberLastSend = useCallback(
+    (next) => {
+      setLastSend(next);
+      writeLastSend(userId, evmAddress, network, next);
+    },
+    [userId, evmAddress, network]
+  );
+  const rememberAmbiguous = useCallback(
+    (next) => {
+      setAmbiguous(next);
+      writeAmbiguous(userId, evmAddress, network, next);
+    },
+    [userId, evmAddress, network]
+  );
 
   // ---- replace by fee ----
   const [bump, setBump] = useState(null); // { mode: "speed"|"cancel", rate, password, busy, error }
@@ -150,8 +185,12 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
     setSendAmount("");
     setSendPassword("");
     setSendError("");
-    setLastSend(null);
-    setAmbiguous(null);
+    // Not cleared — RESTORED. Blanking these on a network change was right when
+    // they only ever lived in memory; now that they are remembered, the panel
+    // must show whatever is outstanding for the network being switched to, and
+    // nothing belonging to the one being left.
+    setLastSend(readLastSend(userId, evmAddress, network));
+    setAmbiguous(readAmbiguous(userId, evmAddress, network));
     setBump(null);
   }, [userId, network, evmAddress]);
 
@@ -248,7 +287,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       if (!alive || !list) return;
       const hit = list.find((t) => t.txid === lastSend.txid);
       if (hit && hit.confirmed) {
-        setLastSend((s) => (s && s.txid === lastSend.txid ? { ...s, confirmed: true } : s));
+        rememberLastSend({ ...lastSend, confirmed: true });
         setBump(null);
         load();
       }
@@ -258,7 +297,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       alive = false;
       clearInterval(timer);
     };
-  }, [lastSend, loadTxs, load]);
+  }, [lastSend, loadTxs, load, rememberLastSend]);
 
   /** Derive the address once, from a password typed now. */
   async function deriveAddress(e) {
@@ -407,6 +446,11 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
 
     // Hoisted so the catch can keep the txid of whatever was signed.
     let built = null;
+    // Set the instant before the request leaves, so the catch can tell an error
+    // that happened BEFORE anything was broadcast (a wrong password, a build
+    // that failed) from one that happened after — where the transaction may
+    // already be on the network. See the catch.
+    let broadcastAttempted = false;
     try {
       // The key exists only inside this block, derived from a password typed for
       // THIS transaction, and is never returned, stored or logged.
@@ -428,10 +472,11 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       });
       if (!built.ok) throw new Error(built.reason);
 
+      broadcastAttempted = true;
       const { data } = await http.post("/api/bitcoin/broadcast", { rawTx: built.hex, network });
       if (data?.ok === false) throw new Error(data.reason || "The network refused the transaction");
 
-      setLastSend({
+      rememberLastSend({
         txid: data.txid || built.txid,
         to: plan.toAddress,
         amountSats: plan.amountSats,
@@ -462,8 +507,20 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
        * and the payee is paid twice. So it becomes its own state that blocks
        * sending, keeps the transaction id, and offers to check.
        */
-      if (data && (data.kind === "ambiguous" || data.resendUnsafe)) {
-        setAmbiguous({
+      /**
+       * A LOST REPLY IS AMBIGUOUS TOO.
+       *
+       * This branch was entered only when the SERVER said so, so the case where
+       * the server broadcast successfully and the answer never reached the
+       * browser — a dropped connection, a phone changing network — fell through
+       * to the ordinary error below and told the user "Could not send" about a
+       * transaction that is on the Bitcoin network, with the form still filled
+       * in and an invitation to try again. A transport failure has no
+       * `err.response` at all, which is exactly how it is recognised here.
+       */
+      const lostReply = broadcastAttempted && !err?.response;
+      if ((data && (data.kind === "ambiguous" || data.resendUnsafe)) || lostReply) {
+        rememberAmbiguous({
           txid: built?.txid || null,
           to: plan.toAddress,
           amountSats: plan.amountSats,
@@ -471,7 +528,11 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
           feeRateSatPerVb: built?.feeRateSatPerVb || plan.feeRateSatPerVb,
           vsize: built?.vsize || plan.vsize,
           inputs: built?.inputs || plan.inputs,
-          message: data.error,
+          message: lostReply
+            ? `The transaction was signed and sent, and the connection dropped before the answer came back (${
+                err?.message || "no reply"
+              }). It may well be on the network.`
+            : data.error,
         });
         setSendPassword("");
         setStep("form");
@@ -499,7 +560,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       await load();
       if (list && ambiguous.txid && list.some((t) => t.txid === ambiguous.txid)) {
         const hit = list.find((t) => t.txid === ambiguous.txid);
-        setLastSend({
+        rememberLastSend({
           txid: ambiguous.txid,
           to: ambiguous.to,
           amountSats: ambiguous.amountSats,
@@ -511,12 +572,12 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
           at: Date.now(),
           confirmed: Boolean(hit && hit.confirmed),
         });
-        setAmbiguous(null);
+        rememberAmbiguous(null);
         setSendTo("");
         setSendAmount("");
         setTab("activity");
       } else {
-        setAmbiguous((a) => (a ? { ...a, checkedAt: Date.now(), found: false } : a));
+        rememberAmbiguous({ ...ambiguous, checkedAt: Date.now(), found: false });
       }
     } finally {
       setChecking(false);
@@ -549,6 +610,9 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
     }
     setBump((b) => ({ ...b, busy: true, error: "" }));
     if (onBusyChange) onBusyChange(true);
+    // Same marker as confirmSend: it separates "nothing left this browser" from
+    // "something did and we never heard back".
+    let bumpBroadcastAttempted = false;
     try {
       const replacing = { fee: lastSend.fee, feeRateSatPerVb: lastSend.feeRateSatPerVb };
       let toAddress = lastSend.to;
@@ -589,10 +653,11 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       });
       if (!built.ok) throw new Error(built.reason);
 
+      bumpBroadcastAttempted = true;
       const { data } = await http.post("/api/bitcoin/broadcast", { rawTx: built.hex, network });
       if (data?.ok === false) throw new Error(data.reason || "The network refused the replacement");
 
-      setLastSend({
+      rememberLastSend({
         txid: data.txid || built.txid,
         to: toAddress,
         amountSats,
@@ -611,7 +676,12 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       load();
     } catch (err) {
       const data = err?.response?.data;
-      if (data && (data.kind === "ambiguous" || data.resendUnsafe)) {
+      // A dropped connection after the replacement went out is the same
+      // situation as the server saying it could not tell: something may be live
+      // and nobody knows which. Same treatment, for the same reason as in
+      // confirmSend.
+      const lostReply = bumpBroadcastAttempted && !err?.response;
+      if ((data && (data.kind === "ambiguous" || data.resendUnsafe)) || lostReply) {
         // A replacement can be ambiguous too. Either the old or the new one
         // is live; the activity view will show which. Do not let it be
         // attempted again blind.
@@ -794,7 +864,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
                 Check the address now
               </Button>
               {ambiguous.found === false && (
-                <Button variant="ghost" onClick={() => setAmbiguous(null)}>
+                <Button variant="ghost" onClick={() => rememberAmbiguous(null)}>
                   It is not there. Let me send again
                 </Button>
               )}

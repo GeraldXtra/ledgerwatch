@@ -2,10 +2,55 @@ const Debt = require("../models/Debt");
 const Payment = require("../models/Payment");
 const Reminder = require("../models/Reminder");
 const { normalizePhone } = require("../utils/phone");
+const mongoose = require("mongoose");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ---- payment totals + derived fields --------------------------------------
+
+/**
+ * THE ONE PLACE "how much has been paid against this debt" IS COMPUTED. (LW-034.)
+ *
+ * There were NINE independent copies of this aggregation across the server —
+ * in two controllers, four services and the Payment model — each spelling out
+ * `Payment.aggregate([{ $match: { debtId } }, { $group: { $sum: "$amount" } }])`
+ * by hand. Nine copies of a money calculation is nine chances for one of them
+ * to drift: to forget a currency, to filter on `status`, to miss a new payment
+ * method, or simply to be updated while the other eight are not. This codebase
+ * has already been bitten by exactly that shape — `settlement.service` once read
+ * `debt.amountPaid`, a field that does not exist, and every prior payment was
+ * silently ignored.
+ *
+ * `paidForDebt` (single) and `paidByDebt` (batched) are now the only two, and
+ * every other site calls one of them. If the definition of "paid" ever has to
+ * change — a refund method, a currency split, a void flag — it changes here and
+ * nowhere else.
+ */
+
+/**
+ * How much has been paid against ONE debt.
+ *
+ * Deliberately not scoped by userId: every caller has already loaded the Debt
+ * through a userId-scoped query, so re-scoping here would be a second filter
+ * that adds nothing and reads as though it were load-bearing. The `debtId` is
+ * the authority.
+ *
+ * @param {import("mongoose").Types.ObjectId|string} debtId
+ * @returns {Promise<number>} total paid, in the invoice's currency
+ */
+async function paidForDebt(debtId) {
+  const rows = await Payment.aggregate([
+    { $match: { debtId: toObjectId(debtId) } },
+    { $group: { _id: null, paid: { $sum: "$amount" } } },
+  ]);
+  return rows.length ? rows[0].paid : 0;
+}
+
+/** `debtId` may arrive as a string from a route param or as an ObjectId. */
+function toObjectId(value) {
+  if (value && typeof value === "object") return value;
+  return new mongoose.Types.ObjectId(String(value));
+}
 
 /**
  * Sum of payments per debtId for a set of debts (one grouped query).
@@ -89,11 +134,7 @@ function toleratedShortfallNgn(invoiceAmountNgn) {
 }
 
 async function recomputeDebtStatus(debt) {
-  const rows = await Payment.aggregate([
-    { $match: { debtId: debt._id } },
-    { $group: { _id: null, paid: { $sum: "$amount" } } },
-  ]);
-  const amountPaid = rows.length ? rows[0].paid : 0;
+  const amountPaid = await paidForDebt(debt._id);
   const balance = (debt.amount || 0) - amountPaid;
 
   /**
@@ -433,6 +474,8 @@ async function analytics(userId) {
 }
 
 module.exports = {
+  // THE canonical payment sums. See the note above paidForDebt (LW-034).
+  paidForDebt,
   attachTotals,
   withDerived,
   recomputeDebtStatus,

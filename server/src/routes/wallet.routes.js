@@ -33,7 +33,10 @@ router.post("/discovered/:chainId/:address", wallet.discoveredAct);
  * the keystore is decrypted in the browser and the plaintext never leaves it.
  */
 router.get("/security", walletSecurity.get);
-router.put("/security", walletSecurity.set);
+// Throttled: saving costs one bcrypt hash per answer, up to six, on the single
+// process that also runs the payment watch pass. The answer count was capped
+// (LW-072); the call rate was not.
+router.put("/security", require("../middleware/rateLimit").walletSecuritySet, walletSecurity.set);
 router.post("/security/verify", walletSecurity.verify);
 
 module.exports = router;

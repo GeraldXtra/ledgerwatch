@@ -44,8 +44,18 @@ async function register(req, res) {
     if (!EMAIL_REGEX.test(email)) {
       return res.status(400).json({ error: "Invalid email format" });
     }
-    if (String(password).length < 6) {
-      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    /**
+     * EIGHT, the same as everywhere else.
+     *
+     * Registration accepted six while `changePassword` and `resetPassword` both
+     * demanded eight, so the weakest passwords in the system were the ones
+     * nobody had ever revisited, and a person trying to change a six character
+     * password to another six character one was told it was too short — which
+     * reads as a bug in the app rather than a rule. Accounts created before this
+     * are unaffected: this is checked on the way in, not on sign in.
+     */
+    if (String(password).length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters" });
     }
     if (String(name).trim().length > MAX_NAME_LENGTH) {
       return res.status(400).json({ error: `Name must be ${MAX_NAME_LENGTH} characters or fewer` });
@@ -291,9 +301,23 @@ async function resetPassword(req, res) {
 /**
  * GET /api/auth/me  (protected)
  * Returns { user }.
+ *
+ * THE AVATAR IS READ HERE, not carried on req.user.
+ *
+ * The auth middleware deliberately leaves `avatarUrl` out of the document it
+ * loads on every request, because it is a base64 data URL of up to 2.7 MB and
+ * every request was paying for it (see middleware/auth.js). This route is one
+ * of the two that actually shows the picture, so it asks for that one field and
+ * folds it back in. Without this, signing in would return a user with no avatar
+ * and the header would quietly lose it.
  */
 async function me(req, res) {
-  return res.status(200).json({ user: publicUser(req.user) });
+  const withAvatar = await User.findById(req.user._id).select("avatarUrl").lean();
+  const user = publicUser(req.user);
+  // A failed read is not "no avatar": if the lookup came back empty the field
+  // stays null and the UI falls back to initials, which is what it does anyway.
+  if (user && withAvatar) user.avatarUrl = withAvatar.avatarUrl || null;
+  return res.status(200).json({ user });
 }
 
 /**

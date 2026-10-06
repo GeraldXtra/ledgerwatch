@@ -21,6 +21,22 @@
         connect  this origin and the API. Every chain and Bitcoin call goes
                  through the API's proxy, so no RPC host is listed and a script
                  that somehow ran here still could not send a key anywhere.
+
+                 THREE LOCALHOST ORIGINS USED TO BE LISTED HERE AND THEY SHIPPED
+                 (LW-094). `http://localhost:8000`, `http://localhost:5173` and
+                 `ws://localhost:5173` were written in for local development,
+                 but this file is emitted verbatim apart from the substitution
+                 below, so every production build told the browser that the tab
+                 which decrypts private keys may open connections to whatever is
+                 listening on the visitor's own machine on those ports, and read
+                 the answers. That is a second, unmonitored channel out of the
+                 one page where an injected script is a fund loss, handed to it
+                 by the single control SECURITY.md 6.5 names for that boundary.
+                 Development does not need them: in `npm run dev` VITE_API_URL is
+                 http://localhost:8000, so the API is covered by the substitution
+                 like any other deployment, the page origin is covered by 'self',
+                 and CSP Level 3 'self' also matches ws:// on the same host and
+                 port, which is the Vite hot-reload socket.
         img      this origin, data: for QR codes and avatars, and CoinGecko's
                  image hosts for coin logos.
         style    this origin, inline (React sets style attributes), Google Fonts.
@@ -32,7 +48,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://challenges.cloudflare.com; connect-src 'self' %VITE_API_URL% http://localhost:8000 ws://localhost:5173 http://localhost:5173; img-src 'self' data: blob: https://coin-images.coingecko.com https://assets.coingecko.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; frame-src https://challenges.cloudflare.com; worker-src 'self'; manifest-src 'self'"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://challenges.cloudflare.com; connect-src 'self' %VITE_API_URL%; img-src 'self' data: blob: https://coin-images.coingecko.com https://assets.coingecko.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; frame-src https://challenges.cloudflare.com; worker-src 'self'; manifest-src 'self'"
     />
     <!-- Theme before first paint. A file, not inline, so the policy above can
          forbid inline script entirely. -->

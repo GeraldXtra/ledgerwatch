@@ -108,6 +108,33 @@ export function coinIdForSymbol(symbol) {
 }
 
 /**
+ * IS THIS ROW ALLOWED TO BE PRICED BY ITS TICKER?
+ *
+ * Everything above keys on the SYMBOL, and a symbol is not an identity: anyone
+ * can deploy a token whose contract reports "USDC". Before this check, such a
+ * token arriving in the wallet — or pasted into Import a token — was priced at
+ * one dollar a unit and drawn with Circle's own artwork, so an airdrop of ten
+ * million counterfeit units reported a ten million dollar wallet, on the network
+ * the owner actually uses, with the genuine mark beside it. The screen that
+ * warned the token was unverified was one click behind; this screen vouched for
+ * it every day afterwards.
+ *
+ * So the symbol map is now only consulted for a holding whose CONTRACT is known
+ * good: the chain's native coin, or a token from the verified registry in
+ * server/src/config/chains.js. A row the owner imported or accepted from the
+ * discovery list is `verified: false` and stays unpriced — `totalUsd` reports it
+ * in `unpriced` and the wallet says out loud that it is not counted, which is
+ * the same honesty an unread balance already gets. This is the mirror of hard
+ * rule 4: an unverified token must never render as a verified one.
+ *
+ * A row with no `verified` field at all is treated as verified, so callers that
+ * only ever hand over registry tokens are unchanged.
+ */
+export function isVerifiedRow(row) {
+  return !row || row.verified !== false;
+}
+
+/**
  * Fetch USD prices for a set of wallet symbols.
  *
  * Returns a map keyed by the SYMBOL the wallet uses, so a caller never has to
@@ -174,6 +201,11 @@ export function totalUsd(rows, prices) {
   for (const r of rows || []) {
     if (r.unknown || r.amount == null) {
       unread.push(r.symbol);
+      continue;
+    }
+    // An unverified contract is never priced by its ticker. See isVerifiedRow.
+    if (!isVerifiedRow(r)) {
+      if (Number(r.amount) > 0) unpriced.push(r.symbol);
       continue;
     }
     const price = prices[String(r.symbol).toUpperCase()];

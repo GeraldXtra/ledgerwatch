@@ -57,6 +57,39 @@ const marketsCache = new Map(); // coinId -> { data, ts }
 const chartCache = new Map(); //  "id:days" -> { data, ts }
 const searchCache = new Map(); // q(lower) -> { data, ts }
 
+/**
+ * EVERY CACHE IN THIS FILE IS BOUNDED. None of them used to be.
+ *
+ * Nothing here ever removed an entry — a stale one was overwritten on the next
+ * lookup of the same key and otherwise stayed for the life of the process. The
+ * search cache was the worst of them, because its key is whatever text a user
+ * typed, so every distinct search anybody had ever run was retained for ever.
+ * On an always-on host, memory that only grows eventually restarts the process
+ * that runs the payment watcher, which is a money-path failure arriving by a
+ * route nobody would connect to a coin search box.
+ *
+ * The caps are generous — the point is a ceiling, not tight accounting. Deleting
+ * before setting moves a refreshed key to the end of the insertion order, so the
+ * entry evicted is always the least recently written one.
+ */
+const MAX_MARKETS_ENTRIES = 2000;
+const MAX_CHART_ENTRIES = 500;
+const MAX_SEARCH_ENTRIES = 500;
+const MAX_PLATFORMS_ENTRIES = 2000;
+const MAX_NGN_ENTRIES = 200;
+
+function cacheSet(cache, key, value, max) {
+  cache.delete(key);
+  cache.set(key, value);
+  if (cache.size <= max) return;
+  const excess = cache.size - max;
+  let removed = 0;
+  for (const k of cache.keys()) {
+    cache.delete(k);
+    if (++removed >= excess) break;
+  }
+}
+
 // ---- single-flight --------------------------------------------------------
 const inFlight = new Map(); // key -> Promise
 function singleFlight(key, fn) {
@@ -73,11 +106,35 @@ function singleFlight(key, fn) {
 }
 
 // ---- throttled error logging (log once per ~60s, not per request) ---------
-let lastErrorLogAt = 0;
+/**
+ * ONE TIMESTAMP PER SCOPE. It used to be one timestamp for the whole file.
+ *
+ * Six unrelated lookups call this — markets, chart, search, asset_platforms,
+ * coin platforms and the naira rate — and they shared a single minute. Whichever
+ * failed first took the slot, so a chart failing constantly meant a completely
+ * separate failure of the NGN rate was never printed at all, and the person
+ * reading the log concluded the chart was the only problem. The naira rate is
+ * the number an invoice's payment amount is calculated from, so hiding its
+ * failure behind a decorative chart is the worst possible pairing.
+ *
+ * ARCHITECTURE.md section 7.3 names this exact anti-pattern: per-scope throttles,
+ * "never one global throttle shared by four subsystems". The suppressed count
+ * rides along so a storm still reads as a storm.
+ */
+const lastErrorLogAt = new Map(); // scope -> { at, suppressed }
+const ERROR_LOG_THROTTLE_MS = 60000;
+
 function logError(scope, err) {
   const now = Date.now();
-  if (now - lastErrorLogAt < 60000) return;
-  lastErrorLogAt = now;
+  const prev = lastErrorLogAt.get(scope);
+  if (prev && now - prev.at < ERROR_LOG_THROTTLE_MS) {
+    prev.suppressed++;
+    return;
+  }
+  if (prev && prev.suppressed) {
+    console.error(`CoinGecko ${scope}: ${prev.suppressed} further failure(s) were suppressed`);
+  }
+  lastErrorLogAt.set(scope, { at: now, suppressed: 0 });
 
   /**
    * A pause is not a failure and must not be reported as one.
@@ -326,7 +383,7 @@ async function getMarketsMap(coinIds) {
         });
         const ts = Date.now();
         for (const row of data || []) {
-          if (row && row.id) marketsCache.set(row.id, { data: trimMarket(row), ts });
+          if (row && row.id) cacheSet(marketsCache, row.id, { data: trimMarket(row), ts }, MAX_MARKETS_ENTRIES);
         }
       } catch (err) {
         logError("markets", err); // keep existing cache
@@ -420,10 +477,12 @@ async function getChart(coinId, days) {
           vs_currency: "usd",
           days,
         });
-        chartCache.set(key, {
-          data: Array.isArray(data && data.prices) ? data.prices : [],
-          ts: Date.now(),
-        });
+        cacheSet(
+          chartCache,
+          key,
+          { data: Array.isArray(data && data.prices) ? data.prices : [], ts: Date.now() },
+          MAX_CHART_ENTRIES
+        );
       } catch (err) {
         logError("chart", err);
       }
@@ -460,7 +519,7 @@ async function searchCoins(q) {
             name: c.name,
             thumb: c.thumb,
           }));
-        searchCache.set(key, { data: coins, ts: Date.now() });
+        cacheSet(searchCache, key, { data: coins, ts: Date.now() }, MAX_SEARCH_ENTRIES);
       } catch (err) {
         logError("search", err);
       }
@@ -470,6 +529,190 @@ async function searchCoins(q) {
   const entry = searchCache.get(key);
   if (!entry) return { coins: [], stale: true };
   return { coins: entry.data, stale: now - entry.ts > searchTtl() };
+}
+
+// ---- where a coin actually lives: platforms and contract addresses --------
+
+/**
+ * WHAT MAKES "EVERY COIN" POSSIBLE, AND WHY IT LIVES HERE.
+ *
+ * Watching a coin only needs a price. TRADING one needs the contract address it
+ * has on the chain the user selected, and there is no way to derive that: a
+ * token's address on Base has nothing to do with its address on Arbitrum, and
+ * guessing one would send real money to a contract nobody controls. CoinGecko
+ * publishes that mapping, and it is already the only source this project trusts
+ * for coin identity, so the two readers below sit in the same module as every
+ * other upstream call: one transport, one breaker, one set of TTLs.
+ *
+ * NEITHER OF THESE IS PERMISSION TO TRADE. What comes back is a CLAIM about an
+ * address. `tokenResolver.service.js` reads `symbol()` and `decimals()` off the
+ * contract itself before that claim is allowed anywhere near a swap, and a
+ * disagreement is refused rather than reconciled. See the note there about
+ * decimals, which is the field that loses money when it is wrong.
+ *
+ * TTLs ARE LONG ON PURPOSE. A chain id never changes and a token's address
+ * changes only when a project migrates, which is a once-in-years event, so these
+ * are hours where a price is seconds. That matters because the free allowance is
+ * small: resolving a token must not compete with the price poll for it.
+ */
+const PLATFORMS_TTL = 24 * 60 * 60 * 1000; // a day; chain ids are permanent
+const COIN_PLATFORMS_TTL = 6 * 60 * 60 * 1000; // 6h; a token address barely moves
+// Short: a coin id that is wrong today is wrong tomorrow, but a coin listed
+// this morning must not be denied all afternoon.
+const COIN_NOT_FOUND_TTL = 10 * 60 * 1000; // 10 min
+
+let platformsCache = null; // { data, ts }
+const coinPlatformsCache = new Map(); // coinId -> { data, ts }
+
+/**
+ * Every chain CoinGecko knows, keyed by its platform id.
+ *
+ * `chain_identifier` is the EVM chain id, and it is null for everything that is
+ * not EVM (Solana, TON, Tron). That is how a caller tells the families apart
+ * without a hand-written table that would drift. `native_coin_id` is the coin id
+ * of the chain's own currency, which turns "buy ETH on Base" into "buy the
+ * wrapped native the registry already carries" without a list of synonyms.
+ *
+ * `available` is the field that matters to a caller. An empty map is returned
+ * both when this chain index has never been read AND when it has been read and
+ * is genuinely empty, and those mean opposite things: the first is an outage,
+ * the second would be a fact about the world. Without the flag a caller cannot
+ * tell them apart, and the honest-looking message it writes ("that network is
+ * not listed") blames the chain for a rate limit.
+ *
+ * @returns {Promise<{platforms:Object, byChainId:Object, stale:boolean, available:boolean}>}
+ */
+async function getAssetPlatforms() {
+  const now = Date.now();
+  const fresh = platformsCache && now - platformsCache.ts <= PLATFORMS_TTL;
+
+  if (!fresh) {
+    await singleFlight("asset_platforms", async () => {
+      try {
+        console.log("CoinGecko GET asset_platforms");
+        const data = await cgGet("/asset_platforms");
+        const platforms = {};
+        const byChainId = {};
+        for (const row of Array.isArray(data) ? data : []) {
+          if (!row || !row.id) continue;
+          const chainId = Number.isInteger(row.chain_identifier) ? row.chain_identifier : null;
+          platforms[row.id] = {
+            id: row.id,
+            chainId,
+            name: row.name || row.id,
+            nativeCoinId: row.native_coin_id || null,
+          };
+          // First one wins: the list occasionally carries a second id for a
+          // renamed chain, and the canonical entry comes first.
+          if (chainId != null && byChainId[chainId] === undefined) byChainId[chainId] = row.id;
+        }
+        // Only replace the map on a real answer. An empty or partial response
+        // overwriting a good map would make every token unresolvable at once.
+        if (Object.keys(platforms).length > 0) {
+          platformsCache = { data: { platforms, byChainId }, ts: Date.now() };
+        }
+      } catch (err) {
+        logError("asset_platforms", err);
+      }
+    });
+  }
+
+  if (!platformsCache) return { platforms: {}, byChainId: {}, stale: true, available: false };
+  return {
+    ...platformsCache.data,
+    stale: Date.now() - platformsCache.ts > PLATFORMS_TTL,
+    available: true,
+  };
+}
+
+/**
+ * The contract addresses one coin has, per platform, with the decimals CoinGecko
+ * believes each one uses.
+ *
+ * `detail_platforms` is read rather than the flat `platforms` map because only
+ * the former carries `decimal_place`, and that field is the cross-check which
+ * catches the resolution error that actually costs money. USDC is 6 decimals
+ * nearly everywhere and 18 on BNB Chain; being wrong by twelve orders of
+ * magnitude is not a rounding error, it is the whole balance.
+ *
+ * The heavy sections of the response are switched off. This call is about
+ * addresses; market data comes from the markets cache.
+ *
+ * THREE OUTCOMES, NOT TWO. A coin the index has never heard of and a coin the
+ * index could not be asked about are different facts, and collapsing them into
+ * one null makes the caller write "could not be reached" over a plain 404 —
+ * blaming an outage for a typo, and inviting a retry that will never succeed.
+ * A 404 is therefore remembered as `{notFound:true}`, briefly, so a bad id
+ * cannot hammer the upstream while a newly listed coin still appears soon.
+ *
+ * @returns {Promise<{coinId:string, symbol:string|null, name:string|null, platforms:Object, stale:boolean}|{notFound:true}|null>}
+ *          null only when it could not be determined at all.
+ */
+async function getCoinPlatforms(coinId) {
+  const id = String(coinId || "").trim().toLowerCase();
+  if (!id) return null;
+  const now = Date.now();
+  const cached = coinPlatformsCache.get(id);
+  const ttl = cached && cached.data && cached.data.notFound ? COIN_NOT_FOUND_TTL : COIN_PLATFORMS_TTL;
+  const fresh = cached && now - cached.ts <= ttl;
+
+  if (!fresh) {
+    await singleFlight("coin_platforms:" + id, async () => {
+      try {
+        console.log(`CoinGecko GET coin platforms "${id}"`);
+        const data = await cgGet(`/coins/${encodeURIComponent(id)}`, {
+          localization: false,
+          tickers: false,
+          market_data: false,
+          community_data: false,
+          developer_data: false,
+          sparkline: false,
+        });
+        const platforms = {};
+        const detail = (data && data.detail_platforms) || {};
+        for (const [platformId, info] of Object.entries(detail)) {
+          const address =
+            info && typeof info.contract_address === "string" ? info.contract_address.trim() : "";
+          // An empty address is how CoinGecko represents a coin's OWN chain
+          // (bitcoin on bitcoin, ether on ethereum). It is not a contract and
+          // must never be offered as one.
+          if (!address) continue;
+          const decimals =
+            Number.isInteger(info.decimal_place) && info.decimal_place >= 0 && info.decimal_place <= 36
+              ? info.decimal_place
+              : null;
+          platforms[platformId] = { address, decimals };
+        }
+        cacheSet(
+          coinPlatformsCache,
+          id,
+          {
+            data: {
+              coinId: id,
+              symbol: data && data.symbol ? String(data.symbol).toUpperCase() : null,
+              name: (data && data.name) || null,
+              platforms,
+            },
+            ts: Date.now(),
+          },
+          MAX_PLATFORMS_ENTRIES
+        );
+      } catch (err) {
+        // A 404 is an ANSWER: there is no such coin. Anything else is a failure
+        // to get an answer, and the two must not read the same downstream.
+        if (err && err.response && err.response.status === 404) {
+          cacheSet(coinPlatformsCache, id, { data: { notFound: true }, ts: Date.now() }, MAX_PLATFORMS_ENTRIES);
+          return;
+        }
+        logError("coin platforms", err);
+      }
+    });
+  }
+
+  const entry = coinPlatformsCache.get(id);
+  if (!entry) return null;
+  if (entry.data.notFound) return { notFound: true };
+  return { ...entry.data, stale: Date.now() - entry.ts > COIN_PLATFORMS_TTL };
 }
 
 // ---- NGN rate for crypto receivables --------------------------------------
@@ -502,7 +745,9 @@ async function getNgnPrice(coinId = "usd-coin") {
       console.log(`CoinGecko GET simple/price [${coinId} in ngn]`);
       const data = await cgGet("/simple/price", { ids: coinId, vs_currencies: "ngn" });
       const ngn = data && data[coinId] && data[coinId].ngn;
-      if (typeof ngn === "number" && ngn > 0) ngnCache.set(coinId, { ngn, ts: Date.now() });
+      if (typeof ngn === "number" && ngn > 0) {
+        cacheSet(ngnCache, coinId, { ngn, ts: Date.now() }, MAX_NGN_ENTRIES);
+      }
     } catch (err) {
       logError("simple/price ngn", err);
     }
@@ -524,6 +769,8 @@ module.exports = {
   getLogosMap,
   getChart,
   searchCoins,
+  getAssetPlatforms,
+  getCoinPlatforms,
   getNgnPrice,
   cgStatus,
   MARKETS_TTL,

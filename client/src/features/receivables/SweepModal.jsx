@@ -16,7 +16,7 @@ import { Button, Field, Input, Modal, SkeletonLines } from "../../components/ui"
 import { unlockWallet } from "../wallet/keystore";
 import { canDerive } from "../wallet/derivation";
 import { executeSweepBatch, friendlySweepError, planSweep } from "./sweep";
-import { ngn, shortHash, usdc } from "./format";
+import { ngn, shortHash, usdc, usdcAmount } from "./format";
 
 /**
  * Review and sign a sweep of one or many payment addresses.
@@ -72,7 +72,17 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
     const amountNgn = sweepable.reduce((s, p) => s + p.amountNgn, 0);
     const feeWei = sweepable.reduce((s, p) => s + (p.needsGasFunding ? p.fundingWei : 0n), 0n);
     const needFunding = sweepable.filter((p) => p.needsGasFunding).length;
-    return { amount, amountNgn, feeWei, needFunding };
+    /**
+     * Every figure in this dialog used to be labelled with the literal "USDC".
+     * A batch can mix stablecoins — an invoice is issued in whatever verified
+     * token was chosen, and on the mainnets that includes USDT — so the label
+     * was simply wrong on any USDT row. Each row now names its own token, and
+     * the total only names one when the whole batch shares it. A mixed batch
+     * gets no symbol rather than an invented one.
+     */
+    const symbols = new Set(sweepable.map((p) => p.tokenSymbol).filter(Boolean));
+    const symbol = symbols.size === 1 ? [...symbols][0] : null;
+    return { amount, amountNgn, feeWei, needFunding, symbol, mixed: symbols.size > 1 };
   }, [sweepable]);
 
   async function run(e) {
@@ -188,10 +198,18 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
                     </span>
                     <div>
                       <div className="num mono-strong">
-                        {p.planFailed ? "Failed" : usdc(p.amount)}
+                        {p.planFailed ? "Failed" : usdc(p.amount, p.tokenSymbol)}
                       </div>
                       <div className="muted caption">
                         {p.chainName} · <code>{shortHash(p.address)}</code>
+                        {row?.unrecorded && (
+                          <>
+                            {" · "}
+                            <span className="error-text">
+                              moved, but not recorded — tell support with this hash
+                            </span>
+                          </>
+                        )}
                         {p.needsGasFunding && !row && (
                           <>
                             {" · "}
@@ -219,6 +237,8 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
                       >
                         {shortHash(row.txHash)} <ExternalLink size={12} />
                       </a>
+                    ) : row?.state === "done" ? (
+                      <span className="muted caption">{shortHash(row.txHash)}</span>
                     ) : (
                       <span className="muted caption">{ngn(p.amountNgn)}</span>
                     )}
@@ -232,7 +252,14 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
             <dl className="trade-quote">
               <div>
                 <dt>Total to move</dt>
-                <dd className="num">{usdc(totals.amount)}</dd>
+                <dd className="num">
+                  {totals.symbol ? usdc(totals.amount, totals.symbol) : usdcAmount(totals.amount)}
+                  {totals.mixed && (
+                    <span className="quote-sub">
+                      across more than one stablecoin, listed above
+                    </span>
+                  )}
+                </dd>
               </div>
               <div>
                 <dt>Naira value</dt>

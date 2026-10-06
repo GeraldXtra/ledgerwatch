@@ -15,6 +15,30 @@ function groupDigits(raw) {
   return rest.length ? `${grouped}.${rest.join("")}` : grouped;
 }
 
+/**
+ * What the amount box is allowed to hold.
+ *
+ * THE FIELD USED TO SHOW ONE NUMBER AND SUBMIT ANOTHER. The sanitiser was
+ * `replace(/[^\d.]/g, "")`, which permits several decimal points — easy to
+ * produce on a phone keypad. `groupDigits` then joined everything after the
+ * first point back together, so the state "1.2.3" rendered as a tidy, plausible
+ * "1.23" while `Number("1.2.3")` is NaN. The form submitted the NaN, the server
+ * refused it correctly, and the owner was shown a validation error about an
+ * amount that looked perfectly valid on their own screen.
+ *
+ * Only the first point survives now, so what is displayed and what is submitted
+ * are always the same number.
+ */
+function sanitizeAmount(value) {
+  const digitsAndDots = String(value ?? "").replace(/[^\d.]/g, "");
+  const firstDot = digitsAndDots.indexOf(".");
+  if (firstDot === -1) return digitsAndDots;
+  return (
+    digitsAndDots.slice(0, firstDot + 1) +
+    digitsAndDots.slice(firstDot + 1).replace(/\./g, "")
+  );
+}
+
 const EMPTY = {
   debtorName: "",
   debtorPhone: "",
@@ -152,7 +176,7 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
               autoComplete="off"
               value={groupDigits(form.amount)}
               onChange={(e) =>
-                setForm((f) => ({ ...f, amount: e.target.value.replace(/[^\d.]/g, "") }))
+                setForm((f) => ({ ...f, amount: sanitizeAmount(e.target.value) }))
               }
               placeholder="0"
               required

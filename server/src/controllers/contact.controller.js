@@ -74,12 +74,34 @@ function containsSecret(message) {
  * page is public and a person locked out of their account is exactly the
  * person who needs this form.
  */
-function optionalUserId(req) {
+async function optionalUserId(req) {
   const header = String((req.headers && req.headers.authorization) || "");
   if (!header.startsWith("Bearer ")) return null;
   try {
     const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET);
-    return payload && payload.id ? payload.id : null;
+    if (!payload || !payload.id) return null;
+
+    /**
+     * THE SESSION VERSION IS CHECKED HERE TOO (LW-023).
+     *
+     * Every other authenticated path in this codebase refuses a token whose `v`
+     * is not the account's current `tokenVersion`, which a password change or a
+     * reset bumps. This one verified the signature and stopped, so it was the
+     * single place a session that had been deliberately signed out still spoke
+     * for the account — for up to seven days, until the token expired on its
+     * own. The blast radius is a mislabelled support message and nothing more,
+     * which is exactly why it is worth closing: LW-023 was closed to eliminate
+     * the PATTERN, and one surviving instance is how the pattern comes back.
+     *
+     * Unattributed is the safe answer for every failure here. The page is
+     * public and the message is stored either way.
+     */
+
+    const User = require("../models/User");
+    const user = await User.findById(payload.id).select("tokenVersion").lean();
+    if (!user) return null;
+    if ((Number(payload.v) || 0) !== (Number(user.tokenVersion) || 0)) return null;
+    return payload.id;
   } catch {
     return null;
   }
@@ -138,7 +160,37 @@ function buildNotice(doc) {
   return { subject, plain, html };
 }
 
+/**
+ * WHY THIS WHOLE HANDLER IS WRAPPED.
+ *
+ * It was the one async route handler in the codebase with no try/catch, and it
+ * calls Mongoose (`ContactMessage.create`, `doc.save`), which genuinely throws:
+ * a validation error, a duplicate key, a lost connection. Express 4 does not
+ * catch a rejected promise from an async handler, and `server/src/index.js`
+ * installs no `process.on("unhandledRejection")`, so on Node 15+ the default is
+ * to terminate the process.
+ *
+ * The consequence was out of all proportion to the route: one database blip
+ * during a contact-form submission took down the entire API — every user's
+ * reminders, payment watching and wallet proxy — until the host restarted it.
+ * And `/api/contact` is public and unauthenticated, so it was reachable by
+ * anyone. The Bitcoin controller has no try/catch either, but that is backed by
+ * a service documented and written never to throw; this one was not.
+ */
 async function submit(req, res) {
+  try {
+    return await submitInner(req, res);
+  } catch (err) {
+    console.error("contact submit error:", err && err.message);
+    return res.status(500).json({
+      error:
+        "Your message could not be saved just now. Please try again in a moment, " +
+        "or email us directly if it keeps happening.",
+    });
+  }
+}
+
+async function submitInner(req, res) {
   const body = req.body || {};
 
   // The honeypot. Answered as success on purpose. The field is called
@@ -175,7 +227,7 @@ async function submit(req, res) {
   if (!human.ok) return res.status(400).json({ error: human.error, turnstile: true });
 
   const doc = await ContactMessage.create({
-    userId: optionalUserId(req),
+    userId: await optionalUserId(req),
     name,
     email,
     topic,

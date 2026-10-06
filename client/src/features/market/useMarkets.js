@@ -85,7 +85,6 @@ export default function useMarkets(coinIds) {
       document.removeEventListener("visibilitychange", onVisibility);
     };
     // Re-run when the set of watched ids changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idsKey, fetchNow]);
 
   return { markets, stale, updatedAt, lastFetchedAt, refresh: fetchNow };

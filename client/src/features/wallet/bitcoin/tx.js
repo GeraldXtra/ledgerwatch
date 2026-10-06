@@ -211,14 +211,21 @@ export function validateDestination(address, network) {
  *        | {ok:false, reason:string}}
  */
 export function selectUtxos({ utxos, amountSats, feeRateSatPerVb, destScriptLen, changeScriptLen }) {
-  const sorted = [...utxos].sort((a, b) => b.value - a.value);
+  const sorted = [...utxos].sort((a, b) => Number(b.value || 0) - Number(a.value || 0));
 
   const selected = [];
   let inputTotal = 0;
 
   for (const utxo of sorted) {
     selected.push(utxo);
-    inputTotal += utxo.value;
+    // COERCED, like the other two summing sites in this file. This added
+    // `utxo.value` straight onto the running total; every other place that sums
+    // unspent outputs here (the forced-inputs branch, and planCancel) converts
+    // with Number() first. If the API ever returned these as text, "+" would
+    // concatenate rather than add and the wallet would decide you cannot afford
+    // your own payment — the safe direction, but refusing for a reason nobody
+    // could read off the screen.
+    inputTotal += Number(utxo.value || 0);
     const shape = shapeFor({ selected, inputTotal, amountSats, feeRateSatPerVb, destScriptLen, changeScriptLen });
     if (shape) return { ok: true, selected, inputTotal, ...shape };
     // Still short. Keep adding, knowing the next input raises the fee too.

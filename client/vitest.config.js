@@ -5,11 +5,19 @@ import react from "@vitejs/plugin-react";
  * Vitest config for the CLIENT, which is ESM (`"type": "module"`), so a plain
  * `.js` config is fine here — unlike the server, which needs `.mjs`.
  *
- * There are no client tests yet, and that is deliberate. BUILD_PLAN.md P4-3 puts
- * the money-path integration tests first, because that is where every verified
- * S0 defect lives. Client tests arrive with P3-2, when the four-state fetching
- * contract gives them something worth asserting. `--passWithNoTests` in the npm
- * script keeps CI green until then rather than failing on an empty suite.
+ * THIS COMMENT USED TO SAY THERE WERE NO CLIENT TESTS AND THAT THIS WAS
+ * DELIBERATE, pointing at BUILD_PLAN.md P4-3 and P3-2 for when they would
+ * arrive. They arrived. There are dozens, including a 584-line suite checking
+ * Bitcoin derivation against the published BIP-84 vectors and the coin-selection
+ * arithmetic, plus the market money-path guards — all found by the `include`
+ * pattern below. A contributor opening this file to decide whether to write a
+ * test was being told not to bother, which is LW-047 sitting on the one file
+ * that decides how tests run.
+ *
+ * The npm script still passes `--passWithNoTests`. Keep that in mind rather than
+ * trusting it: if the include pattern ever stops matching, an empty run reports
+ * success, which is precisely the green-looking failure the note two paragraphs
+ * down had to be written about.
  */
 export default defineConfig({
   plugins: [react()],

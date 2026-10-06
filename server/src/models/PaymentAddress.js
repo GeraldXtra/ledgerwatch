@@ -85,14 +85,79 @@ const paymentAddressSchema = new mongoose.Schema({
   tokenContract: { type: String, required: true },
   tokenDecimals: { type: Number, required: true },
 
+  /**
+   * THE ISSUANCE QUOTE — WRITTEN ONCE, NEVER AGAIN. (LW-005, BUILD_PLAN P1-1,
+   * ARCHITECTURE.md invariant 6: "PaymentAddress.quote.* is immutable after
+   * issuance".)
+   *
+   * WHAT WAS WRONG. There was only one set of figures, and
+   * `resyncActivePaymentAddress` overwrote them after every partial settlement
+   * and every edit to the invoice. So the record of WHAT THE PAYER WAS ACTUALLY
+   * ASKED FOR was destroyed by the first thing that changed the balance.
+   *
+   * Why that matters more than it sounds. A payer is told "send exactly 62.50
+   * USDC". They send it. In between, a bank transfer settles part of the same
+   * invoice, resync rewrites the expectation to 22.50, and now nothing anywhere
+   * can answer the only question that matters when a payment is disputed: did
+   * this person send what they were told to send? 62.50 against a 22.50
+   * expectation reads as a 40 USDC overpayment, when in fact they paid exactly
+   * what the invoice asked. The audit trail for every crypto payment was one
+   * bank transfer away from being wrong.
+   *
+   * So the two ideas are now two fields, because they were always two ideas:
+   *
+   *   quote.*        what this address was ISSUED for. Frozen. The contract with
+   *                  the payer, and the thing a dispute is settled against.
+   *   expectedUsdc   what is STILL OWED right now. Rewritten by resync, which is
+   *   invoiceBalanceNgn   correct and is what settlement compares against.
+   *
+   * `ngnPerUsd` and `rateTimestamp` stay at the top level as well as inside the
+   * quote: settlement converts with them on every pass and moving them would
+   * touch every caller for no gain. They were never rewritten, so they were
+   * never part of this defect.
+   */
+  quote: {
+    /** The invoice balance in naira at the moment this address was issued. */
+    invoiceBalanceNgn: { type: Number },
+    /** The exact figure the payer was asked to send. 2 dp, rounded UP. */
+    expectedUsdc: { type: Number },
+    /** The rate that figure was computed at. */
+    ngnPerUsd: { type: Number },
+    rateTimestamp: { type: Date },
+    rateIsFallback: { type: Boolean, default: false },
+    issuedAt: { type: Date },
+    /**
+     * True for a row created before the quote was stored separately, and
+     * back-filled from the CURRENT figures by
+     * `scripts/backfill-issuance-quote.js`. Those figures may already have been
+     * rewritten by a resync, so the back-filled quote is the best available
+     * reconstruction and NOT evidence. Anything that settles a dispute must
+     * check this flag before relying on the numbers beside it.
+     */
+    reconstructed: { type: Boolean, default: false },
+  },
+
   // Rate snapshot taken when the address was issued. 1 USDC is treated as exactly
   // 1 USD, so `ngnPerUsd` is the only rate in play — no USDC/USD price is fetched.
-  // Both the NGN balance and the USDC figure are stored, so attribution stays
-  // unambiguous however far the rate moves afterwards.
+  //
+  // These two are the CURRENT expectation and are rewritten by resync. For what
+  // the payer was originally quoted, read `quote.*` above.
   invoiceBalanceNgn: { type: Number, required: true },
-  expectedUsdc: { type: Number, required: true }, // 2 dp, rounded UP at issue
+  expectedUsdc: { type: Number, required: true }, // 2 dp, remaining, not the quote
   ngnPerUsd: { type: Number, required: true },
   rateTimestamp: { type: Date, required: true },
+  /**
+   * True when `ngnPerUsd` came from NGN_PER_USD_FALLBACK rather than the live
+   * feed, because CoinGecko was unreachable at issuance.
+   *
+   * It has to be STORED, not just returned from the quote call, because the
+   * quote is frozen into the invoice and settles it for the rest of its life.
+   * `rateTimestamp` cannot carry this: the fallback path stamps it `new Date()`,
+   * so a hardcoded constant looked in the interface like a rate fetched a second
+   * ago, and the whole difference between it and the real market was absorbed by
+   * the business, silently, on every invoice issued during an outage.
+   */
+  rateIsFallback: { type: Boolean, default: false },
 
   // Running totals maintained by the watch pass, so the invoice can show
   // received-so-far and still-needed without recomputing from logs each render.
@@ -173,5 +238,34 @@ paymentAddressSchema.index({ status: 1, chainId: 1 });
 // The grace pass selects expired addresses least-recently watched, so it reads
 // this compound index rather than scanning every expired row each minute.
 paymentAddressSchema.index({ status: 1, lastWatchedAt: 1 });
+
+/**
+ * ONE ACTIVE ADDRESS PER INVOICE, enforced by the database.
+ *
+ * The service already refuses to issue a second one, but it does so by looking
+ * first and creating afterwards — two steps with a gap between them. Two
+ * requests arriving together (a double tap, a retried request, two tabs) both
+ * look, both find nothing, and both create. Neither of the unique indexes above
+ * stops that: the addresses differ and so do the derivation indices. The result
+ * is one invoice with two live receiving addresses, splitting a customer's
+ * payments between them and confusing who paid what.
+ *
+ * Every other invariant in this file that matters is backed by a constraint
+ * rather than by a check, and this is now too. Partial, so the many closed
+ * addresses an invoice accumulates over its life do not collide with each other.
+ *
+ * Keyed on {debtId, status} rather than on debtId alone for two reasons: the
+ * field already declares a plain index and duplicating the key pattern is a
+ * Mongoose warning, and inside a filter of status "active" the pair is exactly
+ * debtId, so the guarantee is identical.
+ *
+ * If this index fails to build on an existing deployment, the database already
+ * holds an invoice with two active addresses: find it, revoke the one that has
+ * received nothing, and let the build run again. It does not stop the server.
+ */
+paymentAddressSchema.index(
+  { debtId: 1, status: 1 },
+  { unique: true, partialFilterExpression: { status: "active" } }
+);
 
 module.exports = mongoose.model("PaymentAddress", paymentAddressSchema);

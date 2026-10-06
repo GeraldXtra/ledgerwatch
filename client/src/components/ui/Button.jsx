@@ -42,7 +42,23 @@ export default function Button({
     children
   );
 
-  if (href) {
+  /**
+   * A DISABLED LINK BUTTON USED TO BE A WORKING ONE.
+   *
+   * The link branch dropped `disabled` entirely — it is destructured out of the
+   * props above, so it was neither applied nor turned into `aria-disabled`, and
+   * a caller asking for a disabled button got a fully clickable anchor. Nothing
+   * pairs `href` with `disabled` today, so this is latent; the place it would
+   * first be used is a money screen (an explorer link on a transaction that is
+   * still broadcasting), where a click during the broadcast is exactly what is
+   * meant to be prevented.
+   *
+   * A disabled one renders as a real `<button disabled>` rather than as an
+   * anchor wearing a disabled class: nothing to navigate to is the honest shape
+   * of "this link is not available yet", it cannot be clicked or tabbed to, and
+   * it picks up the same disabled styling every other button has.
+   */
+  if (href && !(disabled || loading)) {
     return (
       <a className={cls} href={href} {...rest}>
         {content}

@@ -1,6 +1,6 @@
 const express = require("express");
 const requireAuth = require("../middleware/auth");
-const { list, history, approve, dismiss, act } = require("../controllers/alerts.controller");
+const { list, history, approve, dismiss, act, executed } = require("../controllers/alerts.controller");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -13,5 +13,10 @@ router.get("/history", history);
 router.post("/:id/act", act);
 router.patch("/:id/approve", approve);
 router.patch("/:id/dismiss", dismiss);
+
+// Closes a LIVE alert after the browser has broadcast the real swap. Without it
+// a live alert stayed pending and its watch never alerted again — see the
+// handler's header for why that silently disabled live Market Watch.
+router.post("/:id/executed", executed);
 
 module.exports = router;

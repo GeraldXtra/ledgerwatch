@@ -230,6 +230,18 @@ async function readTokenMeta(chain, contract) {
     name,
     decimals,
     readable: Boolean(symbol) && decimals != null,
+    /**
+     * At least one of the reads that MATTER came back with nothing.
+     *
+     * Additive, and separate from `transport` below on purpose. `transport`
+     * means none of the three answered, which is unambiguously a dead node.
+     * When one answers and another does not, the contract is not necessarily
+     * bad — a single call failed at the endpoint. Reporting that as "this is
+     * not a token" blames a real contract for a node's bad minute, and callers
+     * that cache a refusal then keep the blame. `name` is excluded because a
+     * token without one is unusual but not unusable.
+     */
+    anyMissing: symRaw === null || decRaw === null,
     // Distinguish "the node did not answer" from "the contract answered with
     // nothing": the former is worth retrying, the latter is not a token.
     transport: symRaw === null && nameRaw === null && decRaw === null,
@@ -265,7 +277,7 @@ async function syncInboundTransfers(args) {
   return p;
 }
 
-const EMPTY = { scanned: 0, added: 0, queries: 0, fromBlock: 0, discovered: 0, failed: false };
+const EMPTY = { scanned: 0, added: 0, queries: 0, fromBlock: 0, discovered: 0, failed: false, limited: false };
 
 /**
  * Find and record inbound token transfers to `address` on one chain, and note
@@ -274,7 +286,8 @@ const EMPTY = { scanned: 0, added: 0, queries: 0, fromBlock: 0, discovered: 0, f
  * INCREMENTAL. The first sync for a wallet walks a bounded lookback; every later
  * one resumes from the stored cursor, so it reads only new blocks.
  *
- * @returns {Promise<{scanned:number, added:number, queries:number, fromBlock:number, discovered:number, failed:boolean}>}
+ * @returns {Promise<{scanned:number, added:number, queries:number, fromBlock:number, discovered:number, failed:boolean, limited:boolean}>}
+ *   `limited` means the node refused the unfiltered query and only known tokens were read.
  */
 async function doSync({ userId, chainId, address }) {
   const chain = getChain(chainId);
@@ -336,6 +349,8 @@ async function doSync({ userId, chainId, address }) {
   let queries = 0;
   let lowest = head;
   let failed = false;
+  // True when a window could only be read for the known tokens (see below).
+  let limited = false;
   // Highest block known to have been read contiguously from the resume point.
   let readTo = saved ? saved.block : null;
   // Unknown contracts seen this sync: contract -> the earliest transfer.
@@ -343,13 +358,35 @@ async function doSync({ userId, chainId, address }) {
 
   for (const w of windows) {
     queries++;
-    const logs = await rpc(chain, "eth_getLogs", [
-      {
-        topics: [TRANSFER_TOPIC, null, addressTopic(address)],
-        fromBlock: "0x" + w.from.toString(16),
-        toBlock: "0x" + w.to.toString(16),
-      },
+    const range = { fromBlock: "0x" + w.from.toString(16), toBlock: "0x" + w.to.toString(16) };
+    // Typed, so a node that ANSWERED with an error can be told from a node
+    // that could not be reached: only the former is worth a second query.
+    const first = await rpcService.rpcCallTyped(chain, "eth_getLogs", [
+      { topics: [TRANSFER_TOPIC, null, addressTopic(address)], ...range },
     ]);
+    let logs = first && first.ok ? first.result : null;
+    const refused = Boolean(first && !first.ok && /^rpc error/i.test(String(first.reason || "")));
+
+    /**
+     * FALL BACK TO THE KNOWN CONTRACTS (LW-084). Some public nodes refuse a
+     * log query with no address filter ("please specify an address"), and
+     * that is exactly the query that finds tokens nobody told the wallet
+     * about. The same node answers for a list of addresses, so the window
+     * is read for every token the wallet already knows, and only the
+     * discovery of UNKNOWN tokens is marked as limited on this chain. That
+     * is a limit of the node, not a failure of the read: the cursor moves,
+     * arrivals of known tokens are recorded, and the wallet does not warn.
+     */
+    if (!Array.isArray(logs) && refused && known.size) {
+      queries++;
+      const fallback = await rpc(chain, "eth_getLogs", [
+        { address: Array.from(known.keys()), topics: [TRANSFER_TOPIC, null, addressTopic(address)], ...range },
+      ]);
+      if (Array.isArray(fallback)) {
+        logs = fallback;
+        limited = true;
+      }
+    }
 
     if (!Array.isArray(logs)) {
       /**
@@ -532,7 +569,7 @@ async function doSync({ userId, chainId, address }) {
     }
   }
 
-  return { scanned, added, queries, fromBlock: lowest, discovered: discoveredCount, failed };
+  return { scanned, added, queries, fromBlock: lowest, discovered: discoveredCount, failed, limited };
 }
 
 function safeUnits(dataHex, decimals) {
@@ -548,7 +585,16 @@ async function recordTransfer({ userId, chain, address, log, symbol, decimals, c
   try {
     // Already-known transactions (including ones the app sent itself) are
     // left exactly as they are.
-    const existing = await WalletTx.findOne({ hash: log.transactionHash }).select("_id").lean();
+    //
+    // SCOPED TO THIS USER. Without the userId the check asked whether the hash
+    // existed ANYWHERE, so one account's row suppressed another's: a transaction
+    // that paid two LedgerWatch wallets — a batch payout, or simply one user
+    // paying another through the app — recorded history for whichever synced
+    // first and silently nothing for the second. The unique index behind it is
+    // now {hash, userId} for the same reason.
+    const existing = await WalletTx.findOne({ hash: log.transactionHash, userId })
+      .select("_id")
+      .lean();
     if (existing) return 0;
 
     const value = safeUnits(log.data, decimals);
@@ -583,6 +629,13 @@ module.exports = {
   syncInboundTransfers,
   // Exported for tests and for the discovery endpoint's metadata retry.
   readTokenMeta,
+  /**
+   * Exported so the token resolver runs the SAME impersonation check this file
+   * already runs on arrival. It lived here and the resolver did not call it,
+   * which meant a contract copying a verified token's symbol was flagged when
+   * it turned up uninvited and not when somebody was about to buy it.
+   */
+  impersonationOf,
   decodeAbiString,
   sanitizeText,
   spanFor,

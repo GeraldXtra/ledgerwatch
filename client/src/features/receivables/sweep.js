@@ -61,6 +61,8 @@ export async function planSweep({ paymentAddress: pa, chain, destination, mainAd
 
   let gasLimit = null;
   let gasSource = "estimated";
+  // Set when the chain says this transfer would revert. See the note below.
+  let gasRevertReason = null;
   if (rawBalance > 0n) {
     // Shared with send/approve/swap: estimate as the sending address, retry as
     // the funded main wallet when a node refuses to estimate from a zero-native
@@ -77,6 +79,24 @@ export async function planSweep({ paymentAddress: pa, chain, destination, mainAd
     });
     gasLimit = estimated.gasLimit;
     gasSource = estimated.source;
+
+    /**
+     * A TRANSACTION THE CHAIN SAYS WILL FAIL MUST NOT BE OFFERED FOR SIGNATURE.
+     *
+     * `estimateGasWithFallback` now distinguishes a node that will not estimate
+     * from a chain saying this transaction reverts, and returns `reverted` with
+     * the node's own reason. SendForm already refuses on it. This path only
+     * displayed the sentence and still offered the password box, so an owner
+     * could fund the gas, sign, and lose the fee to a transfer that could never
+     * have succeeded — and a sweep is the one place a failed transaction ALSO
+     * strands the gas at a derived address.
+     *
+     * Reported as a plan failure, which SweepModal already renders per row and
+     * excludes from the sweepable set.
+     */
+    if (estimated.reverted) {
+      gasRevertReason = estimated.reverted;
+    }
   }
 
   const gasPrice = await currentGasPrice(provider);
@@ -108,6 +128,11 @@ export async function planSweep({ paymentAddress: pa, chain, destination, mainAd
     fundingWei,
     needsGasFunding,
     gasSource,
+    // Non-null when the chain says this transfer reverts; SweepModal treats a
+    // plan carrying one as unsweepable rather than merely annotated.
+    planFailed: gasRevertReason
+      ? `The network says this transfer would fail: ${gasRevertReason}`
+      : undefined,
     // Nothing to do — surfaced so the UI explains rather than offering a
     // no-op button.
     empty: rawBalance === 0n,
@@ -144,7 +169,12 @@ export async function executeSweep({ master, plan, onStep = () => {} }) {
       symbol: plan.nativeSymbol,
       tokenAddress: null,
       direction: "out",
-    }).catch(() => null);
+    }).catch((err) => {
+      // The gas has moved; only the history row is missing. Nothing downstream
+      // depends on it, but it is still said rather than dropped.
+      console.error("[sweep] gas funding is on chain but was not recorded:", err && err.message);
+      return null;
+    });
 
     // MUST wait. Signing the sweep before the gas has landed produces a
     // transaction the address cannot pay for, which fails to broadcast.
@@ -187,14 +217,30 @@ export async function executeSweep({ master, plan, onStep = () => {} }) {
     direction: "in",
   }).catch(() => null);
 
+  /**
+   * THE SAFETY NET THIS CATCH NAMED DOES NOT EXIST.
+   *
+   * The old comment said "the watcher and explorer remain the truth". The
+   * explorer does. The watcher does not: `runPaymentWatchPass` selects only
+   * `active` and `expired` addresses, so once an address is `paid`, `revoked` or
+   * `swept` nothing looks at it again (LW-003). And `accountedOnChain` subtracts
+   * `sweeps[].amountUsdc` from what has been seen, so a MISSING sweep row makes
+   * the grace watcher believe money is still sitting there — while a missing row
+   * on an address that is no longer watched means nothing reconciles it at all.
+   *
+   * The sweep is on chain and cannot be undone, so this still must not present
+   * as a failed sweep. It is carried back to the caller instead of dropped, and
+   * the screen says the money moved but the record did not.
+   */
+  let sweepRecorded = true;
   await recordSweep(plan.paymentAddressId, {
     txHash: txResp.hash,
     destination: plan.destination,
     amountUsdc: amount,
     gasFundedTxHash,
-  }).catch(() => {
-    /* the transfer is already on chain; a failed bookkeeping call must not
-       present as a failed sweep. The watcher and explorer remain the truth. */
+  }).catch((err) => {
+    sweepRecorded = false;
+    console.error("[sweep] the transfer is on chain but the sweep was not recorded:", err && err.message);
   });
 
   // Settle the status in the background, exactly as SendForm does — a testnet
@@ -206,7 +252,7 @@ export async function executeSweep({ master, plan, onStep = () => {} }) {
       .catch(() => {});
   }
 
-  return { txHash: txResp.hash, amount, gasFundedTxHash };
+  return { txHash: txResp.hash, amount, gasFundedTxHash, recorded: sweepRecorded };
 }
 
 /**
@@ -229,7 +275,14 @@ export async function executeSweepBatch({ master, plans, onRow = () => {} }) {
         plan,
         onStep: (step) => onRow(plan.paymentAddressId, { state: "working", step }),
       });
-      onRow(plan.paymentAddressId, { state: "done", txHash: res.txHash, amount: res.amount });
+      onRow(plan.paymentAddressId, {
+        state: "done",
+        txHash: res.txHash,
+        amount: res.amount,
+        // Carried to the row so a sweep whose bookkeeping failed does not show
+        // as an unqualified success. The money moved either way.
+        unrecorded: res.recorded === false,
+      });
       results.push({ plan, ok: true, ...res });
     } catch (err) {
       const message = friendlySweepError(err);

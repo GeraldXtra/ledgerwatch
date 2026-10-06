@@ -5,7 +5,7 @@ const User = require("../models/User");
 const { getChain } = require("../config/chains");
 const { GRACE_DAYS, GRACE_SCAN_MINUTES, blockTimeFor } = require("../config/derivation");
 const { confirmationsFor } = require("./cryptoSettings.service");
-const { recomputeDebtStatus } = require("./receivables.service");
+const { recomputeDebtStatus, paidForDebt } = require("./receivables.service");
 const { notifyUser } = require("./push.service");
 const { rpcCall, rpcCallTyped } = require("./rpc.service");
 const { onInvoiceSettled } = require("./settlement.service");
@@ -124,8 +124,63 @@ function spanFor(chain) {
  * pass, a ten fold margin, at six log queries per address instead of one.
  */
 const MAX_WINDOWS_PER_PASS = 6;
+
+/**
+ * The grace scan gets its own, much larger window budget, and it must.
+ *
+ * The active pass runs every minute, so six spans is a catch-up allowance and
+ * falling short only makes it slower. The grace pass runs ONCE AN HOUR per
+ * address and has to cover the whole hour since the last one, or a transfer
+ * landing in the uncovered minutes is never read at all.
+ *
+ * Capping the grace window at MAX_WINDOWS_PER_PASS quietly reintroduced exactly
+ * the hole LW-026 was raised for, on the two fastest chains: an hour of Arbitrum
+ * is 14,400 blocks, six spans of 2,000 is 12,000, so ten minutes of every hour
+ * on Arbitrum One — a live mainnet — was never read, and 22 minutes of every
+ * hour on Arbitrum Sepolia. The symptom is not lost money but a stuck invoice:
+ * the balance check sees the funds, the log scan cannot find the transfer that
+ * explains them, so the address is flagged with an unidentified balance and
+ * never settles by itself.
+ *
+ * 24 spans covers an hour on every chain in the registry even at the 1,500 block
+ * floor (36,000 blocks, against the 14,450 the fastest chain needs). It is only
+ * ever spent on an address whose balance check has ALREADY shown unaccounted
+ * money, which is rare, so the extra queries cost nothing in the ordinary case.
+ */
+const GRACE_MAX_WINDOWS = 24;
+
 /** Blocks re-read either side of a window boundary so a reorg at the edge is not missed. */
 const GRACE_OVERLAP_BLOCKS = 50;
+
+/**
+ * How many addresses one pass may take on. These bound the RPC work of a single
+ * pass; they are NOT a statement that there will never be more. See the sort in
+ * runPaymentWatchPass, which is what makes exceeding them survivable.
+ */
+const ACTIVE_LIMIT = 200;
+const GRACE_LIMIT = 50;
+
+/**
+ * A TIME BUDGET FOR ONE PASS, because nothing else bounded it.
+ *
+ * All three passes run behind a single overlap guard and only the AI call had a
+ * deadline. This pass can take on 250 addresses, each making up to six log
+ * queries plus a receipt check, and every one of those can spend RPC_TIMEOUT_MS
+ * (12s by default) on an endpoint before falling through to the next. A bad
+ * period on one chain therefore held the guard for as long as it lasted, and
+ * every tick underneath logged "pass skipped (previous pass still running)" —
+ * reassuring wording for a state in which no reminder is sent and no payment is
+ * detected. That is the same unbounded shape LW-010 was raised for on the AI
+ * client, on work that is far slower and far more numerous.
+ *
+ * The budget is cooperative rather than a race: the loop stops handing out new
+ * addresses once it is spent, and never abandons one part way, so nothing is
+ * left half written. Addresses are ordered least recently watched first, so the
+ * ones deferred are exactly the ones the next pass picks up.
+ */
+const PASS_BUDGET_MS = Number(process.env.PAYMENT_WATCH_PASS_BUDGET_MS) > 0
+  ? Number(process.env.PAYMENT_WATCH_PASS_BUDGET_MS)
+  : 45000;
 
 // ---- shared caches / single-flight -----------------------------------------
 const blockCache = new Map(); // chainId -> { block, ts }
@@ -146,12 +201,39 @@ function singleFlight(key, fn) {
   return p;
 }
 
-let lastErrorLogAt = 0;
+/**
+ * PER SCOPE, NOT ONE TIMESTAMP FOR THE WHOLE FILE.
+ *
+ * This was a single `lastErrorLogAt`, so whichever error happened first in a
+ * minute was the only one printed and every other kind was dropped without
+ * even a count. One badly configured address throwing on every pass therefore
+ * masked "load addresses" — a database failure that stops the money path
+ * entirely — for as long as it kept throwing. The two look identical from the
+ * log, which is the only diagnostic this deployment has.
+ *
+ * Each scope now gets its own minute, and the suppressed count is printed when
+ * the scope next speaks, so a storm is visible as a storm rather than as one
+ * line. The map is swept because `address <id>` makes a new key per address.
+ */
+const lastErrorLogAt = new Map(); // scope -> { at, suppressed }
+const LOG_THROTTLE_MS = 60000;
+const MAX_LOG_SCOPES = 500;
+
 function logOnce(scope, err) {
   const now = Date.now();
-  if (now - lastErrorLogAt < 60000) return;
-  lastErrorLogAt = now;
-  console.error(`[paymentWatch] ${scope}:`, (err && err.message) || err);
+  const prev = lastErrorLogAt.get(scope);
+  if (prev && now - prev.at < LOG_THROTTLE_MS) {
+    prev.suppressed++;
+    return;
+  }
+  if (lastErrorLogAt.size > MAX_LOG_SCOPES) {
+    for (const [key, entry] of lastErrorLogAt) {
+      if (now - entry.at > LOG_THROTTLE_MS) lastErrorLogAt.delete(key);
+    }
+  }
+  const alsoSuppressed = prev && prev.suppressed ? ` (+${prev.suppressed} suppressed)` : "";
+  lastErrorLogAt.set(scope, { at: now, suppressed: 0 });
+  console.error(`[paymentWatch] ${scope}${alsoSuppressed}:`, (err && err.message) || err);
 }
 
 /**
@@ -386,14 +468,51 @@ async function settleIfDue(pa, chain) {
   const settledNgn = unsettledUsdc * pa.ngnPerUsd;
 
   const debt = await Debt.findById(pa.debtId);
-  if (!debt) return null;
+  if (!debt) {
+    /**
+     * An address that has outlived its invoice. This was `return null` — the
+     * fourth outcome that ARCHITECTURE.md section 4.4 says does not exist, on
+     * the one path where silence costs funds: confirmed money at a derived
+     * address, no payment, no flag, no log, nothing for anyone to find. It is
+     * reachable whenever the invoice goes away between the address being loaded
+     * and settlement running, and by any row seeded or repaired without its
+     * invoice.
+     *
+     * The money is real and it is still at an address the owner can sweep, so it
+     * is recorded exactly as any other unattributable arrival is, and said out
+     * loud. Assigned rather than accumulated, for the same reason as the branch
+     * below: this runs again on every pass and must converge.
+     */
+    pa.unattributedUsdc = unsettledUsdc;
+    pa.unattributedAt = new Date();
+    pa.receivedUsdc = totalUsdc;
+    pa.unidentifiedBalanceAt = pa.unidentifiedBalanceAt || new Date();
+    await pa.save().catch((err) =>
+      console.error(`[paymentWatch] could not record orphaned receipt on ${pa.address}: ${err.message}`)
+    );
+    console.error(
+      `[paymentWatch] ORPHANED ${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} at ${pa.address} ` +
+        `on ${chain.name}: invoice ${pa.debtId} no longer exists. Recorded as unattributed ` +
+        `against the address; the funds are still there and can be swept.`
+    );
+    await notifyUser(
+      pa.userId,
+      {
+        title: "Money arrived on a deleted invoice",
+        body:
+          `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} reached a payment address whose ` +
+          `invoice no longer exists. It is safe in your derived address and can be swept.`,
+        type: "tx",
+      },
+      "txUpdates"
+    ).catch(() => {
+      /* the record above is durable whether or not the push lands */
+    });
+    return { outcome: "ORPHANED_INVOICE", unattributedUsdc: unsettledUsdc };
+  }
 
   // What is still open right now, independent of this address.
-  const rows = await Payment.aggregate([
-    { $match: { debtId: debt._id } },
-    { $group: { _id: null, paid: { $sum: "$amount" } } },
-  ]);
-  const alreadyPaid = rows.length ? rows[0].paid : 0;
+  const alreadyPaid = await paidForDebt(debt._id);
   const remainingNgn = Math.max(0, (debt.amount || 0) - alreadyPaid);
 
   /**
@@ -464,11 +583,31 @@ async function settleIfDue(pa, chain) {
   // what actually arrived. Neither can exceed the remainder, so the balance can
   // never go negative.
   const creditNgn = fullyPaid ? remainingNgn : Math.min(settledNgn, remainingNgn);
-  if (creditNgn <= 0) return null;
+  if (creditNgn <= 0) {
+    // Money arrived, something is still owed, and yet nothing is creditable:
+    // arithmetic that should not be reachable, so it is reported rather than
+    // returned as silence. Both figures are printed because whichever of them
+    // is wrong is the defect.
+    console.error(
+      `[paymentWatch] ${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} at ${pa.address} on ` +
+        `${chain.name} credits nothing against invoice ${debt._id}, which still owes ` +
+        `${Math.round(remainingNgn).toLocaleString("en-NG")} naira. Nothing was written.`
+    );
+    return { outcome: "NOTHING_CREDITABLE", unsettledUsdc, remainingNgn };
+  }
 
   // Idempotency key: the newest confirmed hash that has not yet settled.
   const unsettled = confirmed.filter((o) => !o.settledPaymentId);
-  if (unsettled.length === 0) return null;
+  if (unsettled.length === 0) {
+    // Unreachable while unsettledUsdc is derived from this same list, and so
+    // worth hearing about if it ever happens rather than exiting quietly.
+    console.error(
+      `[paymentWatch] ${pa.address}: ${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} is ` +
+        `unsettled but no transfer is unstamped. The two are derived from the same list, ` +
+        `so this means the address document is inconsistent.`
+    );
+    return { outcome: "NOTHING_CREDITABLE", unsettledUsdc, remainingNgn };
+  }
   const keyTx = unsettled[unsettled.length - 1];
 
   // Measured against the SAME remaining basis as fullyPaid. Using the cumulative
@@ -476,10 +615,29 @@ async function settleIfDue(pa, chain) {
   // triangle, on any address that had ever taken a part payment.
   const overpaidUsdc = fullyPaid ? Math.max(0, unsettledUsdc - pa.expectedUsdc) : 0;
   const isLate = unsettled.some((o) => o.late);
+  /**
+   * WHAT THE PAYER WAS ASKED FOR, ON THE PAYMENT ITSELF. (LW-005.)
+   *
+   * `pa.expectedUsdc` is what was still owed at the moment this settled, which
+   * moves. `pa.quote.expectedUsdc` is what this address was issued for, which
+   * does not. Recording the quote on the Payment means the answer to "did this
+   * person send what they were told to send?" survives in the ledger even if the
+   * address is later revoked or the invoice edited.
+   */
+  const quoted = pa.quote && pa.quote.expectedUsdc != null ? pa.quote.expectedUsdc : null;
+
   const noteParts = [
     `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} received on ${chain.name}`,
     `rate ${pa.ngnPerUsd.toLocaleString("en-NG")} naira per ${pa.tokenSymbol}`,
   ];
+  if (quoted != null && Math.abs(quoted - unsettledUsdc) > 0.004) {
+    // Only said when it differs from what arrived. When they match, the note
+    // already states the amount and repeating it adds nothing.
+    noteParts.push(
+      `quoted ${quoted.toFixed(2)} ${pa.tokenSymbol} at issue` +
+        (pa.quote.reconstructed ? " (reconstructed, not a record)" : "")
+    );
+  }
   if (isLate) {
     // Settled at the SNAPSHOT rate even though it is late: the payer sent exactly
     // the amount they were quoted, so honouring that quote is the defensible
@@ -584,6 +742,14 @@ async function settleIfDue(pa, chain) {
    * so a bank payment settled silently while a crypto payment emailed and
    * notified. One implementation, so the two can never disagree.
    */
+  /**
+   * The outcome is READ, not discarded. `onInvoiceSettled` reports whether the
+   * payer's receipt went out and why not — no address on file, a reserved
+   * domain, debounced, a delivery failure — and every caller used to throw that
+   * away, so a settlement whose receipt silently failed looked exactly like one
+   * that succeeded. The owner cannot pick up the phone about something they were
+   * never told about.
+   */
   await onInvoiceSettled({
     debt,
     payment,
@@ -594,7 +760,16 @@ async function settleIfDue(pa, chain) {
     chain,
     totalUsdc,
     isLate,
-  }).catch((err) => console.error("[paymentWatch] settlement event failed:", err.message));
+  })
+    .then((res) => {
+      if (res && res.emailed === false) {
+        console.warn(
+          `[paymentWatch] invoice ${debt._id} settled but no receipt reached ` +
+            `${debt.debtorName}: ${res.reason || "unknown reason"}`
+        );
+      }
+    })
+    .catch((err) => console.error("[paymentWatch] settlement event failed:", err.message));
 
   return { payment, fullyPaid, totalUsdc, creditNgn };
 }
@@ -649,7 +824,20 @@ async function scanAddress(pa, chain, head, mode = "active") {
        */
       const blockTime = blockTimeFor(chain.chainId);
       const needed = Math.ceil((GRACE_SCAN_MINUTES * 60) / blockTime) + GRACE_OVERLAP_BLOCKS;
-      const covered = Math.min(needed, span * MAX_WINDOWS_PER_PASS);
+      // GRACE_MAX_WINDOWS, not MAX_WINDOWS_PER_PASS: see the note on the
+      // constant. The active pass's six-span allowance is a catch-up rate; this
+      // one is a coverage guarantee, and six spans did not cover an hour of
+      // Arbitrum.
+      const covered = Math.min(needed, span * GRACE_MAX_WINDOWS);
+      if (covered < needed) {
+        // Say it rather than silently under scanning: this can only happen if a
+        // chain's measured span is tiny or GRACE_SCAN_MINUTES was raised.
+        console.warn(
+          `[paymentWatch] ${chain.name}: grace window covers ${covered} blocks of the ` +
+            `${needed} an hour needs (span ${span}). Transfers older than ` +
+            `${Math.round((covered * blockTime) / 60)} minutes will not be found this pass.`
+        );
+      }
       const oldest = Math.max(0, head - covered + 1);
       for (let lo = oldest; lo <= head; lo += span) {
         windows.push({ from: lo, to: Math.min(head, lo + span - 1) });
@@ -663,9 +851,45 @@ async function scanAddress(pa, chain, head, mode = "active") {
      * Each window is committed as it succeeds, so a failure part way leaves the
      * cursor at the last block actually read rather than at zero progress.
      */
-    let from = pa.lastScannedBlock > 0 ? pa.lastScannedBlock + 1 : Math.max(0, head - span);
+    /**
+     * THE FIRST SCAN STARTS FROM ISSUANCE, NOT FROM ONE SPAN AGO.
+     *
+     * An address has no cursor until its first successful scan, and this used to
+     * begin at `head - span`. One span is minutes of chain time on a fast chain
+     * — about eight on Arbitrum, fifty on Base — and the cursor is then written
+     * forward, so everything before that point was never read by the active pass
+     * again. The address is issued from the browser, which says nothing about
+     * whether the loop is running: a deploy, a restart, or a cold host between
+     * issuing the address and the first pass reaching it put a promptly paying
+     * customer outside the window. The transfer was then invisible until the
+     * address expired up to 72 hours later, and the grace scan could only flag it
+     * as an unexplained balance.
+     *
+     * No creation block is stored, so it is estimated from `createdAt` and the
+     * measured block time, with the overlap added. The estimate only has to be
+     * early, never exact — re-reading blocks is free of consequence because
+     * `observed` is deduplicated by transaction hash. The lookback is capped at
+     * the longest an address can live plus a day, so a clock skew or a bad
+     * timestamp cannot ask a chain for its entire history.
+     */
+    let from;
+    if (pa.lastScannedBlock > 0) {
+      from = pa.lastScannedBlock + 1;
+    } else {
+      const ageSec = Math.max(0, (Date.now() - new Date(pa.createdAt || Date.now()).getTime()) / 1000);
+      const MAX_FIRST_SCAN_SEC = 96 * 60 * 60;
+      const lookback =
+        Math.ceil(Math.min(ageSec, MAX_FIRST_SCAN_SEC) / blockTimeFor(chain.chainId)) +
+        GRACE_OVERLAP_BLOCKS;
+      from = Math.max(0, head - Math.max(lookback, span) + 1);
+    }
     for (let n = 0; n < MAX_WINDOWS_PER_PASS && from <= head; n++) {
-      const to = Math.min(head, from + span);
+      // `from + span - 1` is exactly `span` blocks. It was `from + span`, one
+      // block wider than the measured limit the registry certifies and wider
+      // than both the grace scan and the wallet history scan ask for. Nothing
+      // rejected it, but three scanners that must agree about what a chain will
+      // serve did not agree, and the one that was wider ran every minute.
+      const to = Math.min(head, from + span - 1);
       windows.push({ from, to });
       from = to + 1;
     }
@@ -742,6 +966,9 @@ async function scanAddress(pa, chain, head, mode = "active") {
     } else {
       pa.unidentifiedBalanceAt = null;
     }
+
+    // The one place a WRONG token can still be found. See scanForeignTokens.
+    await scanForeignTokens(pa, chain, windows);
   }
 
   // Advance detected -> confirmed, and catch reorgs. Depth honours the owner's
@@ -793,11 +1020,106 @@ async function scanAddress(pa, chain, head, mode = "active") {
   return { found, newlyConfirmed, late };
 }
 
+
+/**
+ * THE WRONG-TOKEN CASE, WHICH WAS MODELLED, RENDERED, AND NEVER WRITTEN. (A1-24.)
+ *
+ * `PaymentAddress.foreign[]` has existed since the model was written, and
+ * `CryptoPaymentPanel` renders a whole branch for it with an explorer link. No
+ * code has ever put a row in it. The reason is one line in the scan above:
+ *
+ *     address: pa.tokenContract,   // ONLY the configured stablecoin
+ *
+ * A payer who sends USDT to a USDC invoice address — or any other ERC-20, which
+ * is an ordinary mistake when someone copies an address between wallets — was
+ * therefore invisible three times over: the watcher never saw the transfer, the
+ * panel's section for it stayed permanently empty, and `sweep.js` moves only
+ * `pa.tokenContract`, so it could not be recovered through the product either.
+ * The funds are reachable only by deriving the key by hand.
+ *
+ * That is a hole in Hard Rule 9, "money that arrives is always recorded".
+ *
+ * WHY THIS RUNS ONLY IN THE GRACE PASS. Finding it needs a SECOND `eth_getLogs`
+ * per window with no contract filter, which doubles the query count on the
+ * hottest loop in the product. The grace pass already runs at a fraction of the
+ * rate (once per `GRACE_SCAN_MINUTES` per address) and already exists to catch
+ * exactly this shape of surprise. An hour's delay in noticing a wrong-token
+ * payment is immaterial: nothing settles from it, it is a notice to a human.
+ *
+ * It records and warns. It never settles: a token that is not the one quoted has
+ * no agreed rate, so crediting it would be inventing a price.
+ */
+async function scanForeignTokens(pa, chain, windows) {
+  if (!windows.length) return;
+
+  const expected = String(pa.tokenContract || "").toLowerCase();
+  const known = new Set((pa.foreign || []).map((f) => String(f.txHash).toLowerCase()));
+  let added = 0;
+
+  for (const w of windows) {
+    // No `address` filter: every ERC-20 Transfer INTO this address, whatever the
+    // contract. The same shape walletHistory uses to discover a new token.
+    const logs = await rpc(chain, "eth_getLogs", [
+      {
+        topics: [TRANSFER_TOPIC, null, addressTopic(pa.address)],
+        fromBlock: "0x" + w.from.toString(16),
+        toBlock: "0x" + w.to.toString(16),
+      },
+    ]);
+
+    // A node that refuses an unfiltered query is not an outage and must not be
+    // reported as one — the same distinction LW-084 drew for token discovery.
+    if (!Array.isArray(logs)) continue;
+
+    for (const log of logs) {
+      if (!log || log.removed) continue;
+      const contract = String(log.address || "").toLowerCase();
+      if (!contract || contract === expected) continue; // the quoted token; already handled
+      const hash = String(log.transactionHash || "").toLowerCase();
+      if (!hash || known.has(hash)) continue;
+
+      known.add(hash);
+      pa.foreign.push({
+        txHash: log.transactionHash,
+        contract: log.address,
+        // Raw units as a STRING. The token's decimals are unknown here and are
+        // NOT guessed: reading them is the panel's job, and a wrong guess would
+        // misreport the amount by orders of magnitude.
+        value: BigInt(log.data || "0x0").toString(),
+      });
+      added++;
+    }
+  }
+
+  if (added) {
+    console.warn(
+      `[paymentWatch] ${added} transfer(s) of a DIFFERENT token arrived at ${pa.address} ` +
+        `on ${chain.name}. Recorded on the invoice; they cannot settle it, and the sweep ` +
+        "moves only the quoted token, so recovering them needs the owner."
+    );
+    await notifyUser(
+      pa.userId,
+      {
+        title: "The wrong token arrived on an invoice",
+        body:
+          "Someone sent a token this invoice does not accept. It is safe at the invoice " +
+          "address and is shown on the invoice, but it cannot settle it.",
+        type: "tx",
+      },
+      "txUpdates"
+    ).catch(() => {
+      /* the record above is durable whether or not the push lands */
+    });
+  }
+}
+
 /**
  * One watch pass over every address that is still accepting payment.
  * @returns {Promise<{addressesChecked:number, detected:number, confirmed:number, settled:number}>}
  */
 async function runPaymentWatchPass({ userId } = {}) {
+  const passStartedAt = Date.now();
+
   // Close the window on anything past its expiry BEFORE selecting work, so an
   // address never sits in a state the rest of the app misreads.
   const expiredNow = await expireDueAddresses({ userId });
@@ -811,12 +1133,47 @@ async function runPaymentWatchPass({ userId } = {}) {
    * really is at that address — but it is neither urgent nor common, so each one
    * gets a cheap check an hour rather than one a minute for thirty days.
    */
+  /**
+   * `expiredAt` IS ALLOWED TO BE MISSING, and a range filter on a missing field
+   * matches nothing at all.
+   *
+   * The field was added after the status it stamps, so every row flipped to
+   * `expired` before then carries null — as do rows seeded or repaired by hand,
+   * which this database is known to contain. Those rows fell out of the grace
+   * query silently and were therefore never watched again for the rest of their
+   * existence, which is exactly the set most likely to be holding unswept funds.
+   * They fall back to `expiresAt`, which is required on every row and is within
+   * hours of the moment the address actually expired.
+   */
+  const graceCutoff = new Date(Date.now() - GRACE_DAYS * 24 * 60 * 60 * 1000);
+  const staleCutoff = new Date(Date.now() - GRACE_SCAN_MINUTES * 60 * 1000);
+  /**
+   * `paid` AND `revoked` ARE WATCHED TOO, for the grace window (LW-003).
+   *
+   * This selected `expired` alone, and the active pass selects `active` alone,
+   * so between them nothing ever looked at an address again once it closed. An
+   * invoice closes the moment a bank payment or a manual settlement clears the
+   * balance — `resyncActivePaymentAddress` sets it to `paid` — and a stablecoin
+   * transfer already in flight at that moment landed at an address the system
+   * had stopped reading. No detected row, no notification, no unattributed
+   * record: the exact fourth outcome hard rule 9 says does not exist, reached by
+   * the most ordinary action there is. The same is true of an address the owner
+   * revoked, where a payer may well already be mid-transfer.
+   *
+   * These cost one balance call an hour each and settle nothing: with the
+   * invoice already owing nothing, settleIfDue records what arrives as
+   * unattributed and tells the owner it is there to sweep.
+   */
   const graceQuery = {
-    status: "expired",
-    expiredAt: { $gte: new Date(Date.now() - GRACE_DAYS * 24 * 60 * 60 * 1000) },
-    $or: [
-      { lastWatchedAt: null },
-      { lastWatchedAt: { $lt: new Date(Date.now() - GRACE_SCAN_MINUTES * 60 * 1000) } },
+    status: { $in: ["expired", "paid", "revoked"] },
+    $and: [
+      {
+        $or: [
+          { expiredAt: { $gte: graceCutoff } },
+          { expiredAt: null, expiresAt: { $gte: graceCutoff } },
+        ],
+      },
+      { $or: [{ lastWatchedAt: null }, { lastWatchedAt: { $lt: staleCutoff } }] },
     ],
   };
 
@@ -826,26 +1183,75 @@ async function runPaymentWatchPass({ userId } = {}) {
   }
 
   let addresses;
+  let starved = 0;
   try {
+    /**
+     * ORDER BY LEAST RECENTLY WATCHED, or the cap is a permanent blind spot
+     * rather than a delay.
+     *
+     * These limits are here so one pass cannot make thousands of RPC calls. But
+     * an unordered `find().limit(200)` returns broadly the SAME 200 rows every
+     * time, so past 200 live addresses the rest were never scanned at all — no
+     * cursor advanced, no payment detected, the invoice never settling while the
+     * customer's money sat at an address the app had stopped reading. Note the
+     * query is not user scoped when the timer runs it, so the cap is a platform
+     * total, not a per account one.
+     *
+     * Oldest `lastWatchedAt` first (null, a never watched address, sorts before
+     * every date) turns starvation into slowness: everything is reached, just
+     * later. Both sorts are served by the existing {status, lastWatchedAt} index.
+     */
     const [live, grace] = await Promise.all([
-      PaymentAddress.find(activeQuery).limit(200),
-      PaymentAddress.find(graceQuery).limit(50),
+      PaymentAddress.find(activeQuery).sort({ lastWatchedAt: 1 }).limit(ACTIVE_LIMIT),
+      PaymentAddress.find(graceQuery).sort({ lastWatchedAt: 1 }).limit(GRACE_LIMIT),
     ]);
     addresses = [
       ...live.map((pa) => ({ pa, mode: "active" })),
       ...grace.map((pa) => ({ pa, mode: "grace" })),
     ];
+    // "200 addresses checked" and "200 of 340 addresses checked" used to read
+    // identically from outside. When a cap is reached the rest are a pass behind,
+    // and an operator needs to know the loop is no longer keeping up.
+    if (live.length >= ACTIVE_LIMIT || grace.length >= GRACE_LIMIT) {
+      starved = 1;
+      console.warn(
+        `[paymentWatch] address caps reached (active ${live.length}/${ACTIVE_LIMIT}, ` +
+          `grace ${grace.length}/${GRACE_LIMIT}). The remainder is deferred to later ` +
+          `passes, least recently watched first.`
+      );
+    }
   } catch (err) {
     logOnce("load addresses", err);
-    return { addressesChecked: 0, detected: 0, confirmed: 0, settled: 0, expired: expiredNow };
+    return {
+      addressesChecked: 0,
+      detected: 0,
+      confirmed: 0,
+      settled: 0,
+      expired: expiredNow,
+      capped: 0,
+    };
   }
 
   let detected = 0;
   let confirmed = 0;
   let settled = 0;
   let lateDetected = 0;
+  let checked = 0;
+  let deferred = 0;
 
   for (const { pa, mode } of addresses) {
+    // The pass's time budget. Checked between addresses, never inside one, so an
+    // address is either fully processed or not started. See PASS_BUDGET_MS.
+    if (Date.now() - passStartedAt > PASS_BUDGET_MS) {
+      deferred = addresses.length - checked;
+      console.warn(
+        `[paymentWatch] pass budget of ${Math.round(PASS_BUDGET_MS / 1000)}s spent after ` +
+          `${checked} address(es); ${deferred} deferred to the next pass, least recently ` +
+          `watched first. If this repeats, a chain is slow or an endpoint is timing out.`
+      );
+      break;
+    }
+    checked++;
     try {
       const chain = getChain(pa.chainId);
       if (!chain) continue;
@@ -882,7 +1288,14 @@ async function runPaymentWatchPass({ userId } = {}) {
       await pa.save();
 
       const outcome = await settleIfDue(pa, chain);
-      if (outcome) settled++;
+      // COUNT ONLY AN ACTUAL SETTLEMENT. This was `if (outcome) settled++`, and
+      // settleIfDue returns a truthy object in the ordinary do-nothing cases too
+      // ({outcome: "NOTHING_NEW"}, unattributed, orphaned), so the counter
+      // incremented every minute for every address that had ever received a
+      // confirmed transfer: an account with six settled invoices reported six
+      // settlements a minute, forever. A number that never falls to zero cannot
+      // signal the failure the operator's manual tells them to watch for.
+      if (outcome && outcome.payment) settled++;
     } catch (err) {
       // One bad address must never stop the pass, and never the whole loop.
       logOnce(`address ${pa._id}`, err);
@@ -890,12 +1303,16 @@ async function runPaymentWatchPass({ userId } = {}) {
   }
 
   return {
-    addressesChecked: addresses.length,
+    // What was actually looked at, not what was selected. Reporting the
+    // selection would have made a budget-truncated pass read as a complete one.
+    addressesChecked: checked,
     detected,
     confirmed,
     settled,
     expired: expiredNow,
     late: lateDetected,
+    capped: starved,
+    deferred,
   };
 }
 

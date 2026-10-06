@@ -47,9 +47,26 @@ export const DEFAULT_LIMITS = {
   },
 };
 
+/**
+ * The caps in force for a chain.
+ *
+ * OVERRIDES ARE NULL-FILTERED, and that is not defensive tidying. `User` has a
+ * `tradingLimits` field that no endpoint writes and `publicUser` does not
+ * publish, so `overrides` is undefined today and the defaults always win
+ * (LW-022). The moment somebody adds `tradingLimits` to publicUser without
+ * filtering, a stored `{ perTrade: null }` would spread straight over the
+ * default — and `spend > null` coerces to `spend > 0`, so EVERY live trade would
+ * be blocked with "That is over the null per trade cap". Only real numbers are
+ * allowed to replace a default.
+ */
 export function limitsFor(chain, overrides) {
   const base = chain && !chain.testnet ? DEFAULT_LIMITS.mainnet : DEFAULT_LIMITS.testnet;
-  return { ...base, ...(overrides || {}) };
+  const clean = {};
+  for (const [key, value] of Object.entries(overrides || {})) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) clean[key] = n;
+  }
+  return { ...base, ...clean };
 }
 
 // Per-session spend lives in memory only — a session ends when the tab does.
@@ -60,9 +77,13 @@ export function sessionSpent() {
 export function recordSessionSpend(amount) {
   sessionSpend += Number(amount) || 0;
 }
-export function resetSessionSpend() {
-  sessionSpend = 0;
-}
+/*
+ * A `resetSessionSpend()` was exported here and called by nothing, so the
+ * session cap could only ever be cleared by reloading the tab — which is what
+ * the block message below already tells the user. An exported reset for a
+ * SPENDING cap that nothing calls is worse than none: the next reader assumes
+ * something, somewhere, resets it.
+ */
 
 /**
  * Check a proposed trade against every cap.
@@ -81,8 +102,13 @@ export function checkTrade({ amount, limits, spentToday = 0, impactPct = 0, nati
   if (spend <= 0) blocks.push("Enter an amount greater than zero.");
 
   if (spend > limits.perTrade) {
+    // This said "or raise the cap in Settings". There is no such control in
+    // Settings, and the account field that would hold a raised cap is never sent
+    // to the browser, so the caps here are always the built-in ones (LW-022).
+    // Telling somebody to go and do something impossible is worse than saying
+    // nothing, so the message now describes what is actually true.
     blocks.push(
-      `That is over the ${limits.perTrade} per trade cap. Lower the amount, or raise the cap in Settings.`
+      `That is over the ${limits.perTrade} per trade cap, which is fixed for this network. Split it into smaller trades, or lower the amount.`
     );
   }
 

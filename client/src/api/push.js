@@ -184,23 +184,63 @@ export async function enablePush() {
   return { ok: true };
 }
 
+/**
+ * TURNING NOTIFICATIONS OFF USED TO REPORT SUCCESS WHATEVER HAPPENED (LW-028).
+ *
+ * There were three separate swallows in here — the browser unsubscribe, the
+ * server unsubscribe, and an outer catch — followed by an unconditional
+ * `{ ok: true }`. So when either half failed the settings screen said
+ * notifications were off while they went on arriving on the phone, and nothing
+ * anywhere recorded that the unsubscribe had not happened. The two halves fail
+ * for different reasons and matter differently, so they are reported
+ * separately: the server row is what actually causes a notification to be sent,
+ * so a failure there is the one that keeps them coming.
+ *
+ * This mirrors `enablePush` above, which already answers
+ * `{ ok, reason, detail }`. The caller must show what comes back; reporting a
+ * failure that nobody renders is the same silence one level up.
+ *
+ * @returns {Promise<{ok:boolean, reason?:string, detail?:string}>}
+ */
 export async function disablePush() {
   if (!pushSupported()) return { ok: true };
   try {
     const reg = await navigator.serviceWorker.getRegistration();
-    if (reg) {
-      const sub = await reg.pushManager.getSubscription();
-      if (sub) {
-        const endpoint = sub.endpoint;
-        await sub.unsubscribe().catch(() => {});
-        await http.post("/api/push/unsubscribe", { endpoint }).catch(() => {});
-        log("unsubscribed");
-      }
+    if (!reg) return { ok: true };
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return { ok: true };
+
+    const endpoint = sub.endpoint;
+
+    // The server row is what web-push actually sends to. If it survives, the
+    // notifications survive with it, whatever the browser did.
+    try {
+      await http.post("/api/push/unsubscribe", { endpoint });
+    } catch (err) {
+      warn("could not remove the subscription from the server", err);
+      return {
+        ok: false,
+        reason: "server-unsubscribe-failed",
+        detail: err?.response?.data?.error || err.message,
+      };
     }
+
+    try {
+      await sub.unsubscribe();
+    } catch (err) {
+      // The server will no longer send to this endpoint, so nothing more
+      // arrives, but the browser still holds a subscription this app cannot
+      // account for. Said rather than assumed away.
+      warn("the browser would not release the subscription", err);
+      return { ok: false, reason: "browser-unsubscribe-failed", detail: err.message };
+    }
+
+    log("unsubscribed");
+    return { ok: true };
   } catch (err) {
     warn("disable failed", err);
+    return { ok: false, reason: "disable-failed", detail: err.message };
   }
-  return { ok: true };
 }
 
 export async function sendTestNotification() {

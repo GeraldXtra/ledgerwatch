@@ -113,6 +113,31 @@ export function Block({ block }) {
         </figure>
       );
     default:
+      /**
+       * A BLOCK TYPE THIS RENDERER DOES NOT KNOW USED TO VANISH.
+       *
+       * `default: return null` is the canonical form of this project's
+       * documented failure mode, and these files are the guide, the privacy
+       * policy and the terms — a mistyped or newly invented type silently
+       * dropped a paragraph from a published legal document and nothing said so
+       * anywhere. Every current type is handled, so this is a guard rather than
+       * a fix for a live symptom.
+       *
+       * Logged always, so it is visible in a browser console on a deployed
+       * build, and shown on the page in development, where the writer who made
+       * the typo is the person looking.
+       */
+      console.error(
+        "[docs] a block type this renderer does not know was skipped, so its content is not on the page:",
+        block && block.type
+      );
+      if (import.meta.env?.DEV) {
+        return (
+          <p className="error-text">
+            This block has an unknown type ({String(block && block.type)}) and was not rendered.
+          </p>
+        );
+      }
       return null;
   }
 }

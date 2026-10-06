@@ -41,7 +41,29 @@ const alertSchema = new mongoose.Schema({
   executedPrice: { type: Number, default: null },
   actedAt: { type: Date, default: null },
 
+  /**
+   * The on-chain transaction that settled a LIVE alert.
+   *
+   * A paper alert is closed by `actOnAlert`, which writes a SimTrade. A live one
+   * is not: the browser signs a real swap and the alert had nothing to record it
+   * against, so it stayed `pending` — and the price pass refuses to raise a
+   * second alert on a watch that already has one waiting. Every live watch
+   * therefore alerted exactly once, ever, and then went quiet.
+   *
+   * `POST /api/alerts/:id/executed` writes these after the swap is broadcast.
+   */
+  txHash: { type: String, default: null },
+  chainId: { type: Number, default: null },
+
   createdAt: { type: Date, default: Date.now },
 });
+
+/**
+ * The dedup guard — "is an alert already pending on this watch?" — runs once per
+ * watch per pass, so it is the market side's equivalent of the payments sum.
+ * The list and history screens read by account, mode and recency.
+ */
+alertSchema.index({ watchId: 1, mode: 1, status: 1 });
+alertSchema.index({ userId: 1, mode: 1, status: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Alert", alertSchema);

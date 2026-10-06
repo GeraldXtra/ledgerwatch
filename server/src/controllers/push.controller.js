@@ -122,11 +122,48 @@ async function test(req, res) {
 }
 
 /**
+ * TOKENS ALREADY SPENT.
+ *
+ * The action token is signed with a fifteen minute life and carries no id, so
+ * nothing recorded that it had been used: whoever held one could press the
+ * button as often as they liked for a quarter of an hour, and "Send reminder"
+ * would mail and WhatsApp a real customer, from the business's own address,
+ * every single time — `force: true` below deliberately skips the once-per-
+ * cadence guard that would otherwise have absorbed it. SECURITY.md lists
+ * single-use action tokens as a MUST.
+ *
+ * The token's own signature is the key. It is the part that is unique per
+ * token, it is already opaque, and it means no change to how tokens are minted
+ * (push.service.js), which matters because a `jti` would have to be persisted
+ * somewhere and this server has no shared store.
+ *
+ * In process, like the rate limiter next door and for the same reason: one
+ * process, no Redis. A restart forgets which tokens were spent, which is a
+ * fifteen minute window at worst and is the same trade the rate limiter makes.
+ */
+const spentTokens = new Map(); // signature -> expiry in ms
+const TOKEN_TTL_MS = 15 * 60 * 1000;
+
+function spendToken(token) {
+  const now = Date.now();
+  // Pruned on every call: entries are worthless the moment the token expires,
+  // so the map can never grow past the tokens minted in one fifteen minutes.
+  for (const [sig, expiry] of spentTokens) {
+    if (expiry <= now) spentTokens.delete(sig);
+  }
+  const signature = String(token).split(".")[2] || String(token);
+  if (spentTokens.has(signature)) return false;
+  spentTokens.set(signature, now + TOKEN_TTL_MS);
+  return true;
+}
+
+/**
  * POST /api/push/action { token, action }
  *
  * Authenticated by the short-lived action token in the body, because a service
  * worker cannot attach the Bearer JWT. The token is bound to one action and one
- * resource, and is re-checked against the requested action here.
+ * resource, it is re-checked against the requested action here, and it is spent
+ * on first use.
  *
  * NOTE: buy/sell are deliberately NOT executable from a notification — those
  * deep-link into the app so the user still sets an amount and confirms.
@@ -141,6 +178,28 @@ async function action(req, res) {
       claims = verifyActionToken(token);
     } catch {
       return res.status(401).json({ error: "Invalid or expired action token" });
+    }
+
+    /**
+     * THE RE-CHECK THE COMMENT ABOVE HAS ALWAYS CLAIMED (LW-047).
+     *
+     * The service worker sends the action it thinks it is invoking alongside
+     * the token, and this handler read only the token's own claim and ignored
+     * it. Nothing unsafe followed, because the token is the authority either
+     * way — but a comment that describes a control which does not exist is how
+     * the control ends up genuinely missing after the next change. So the two
+     * are compared: they disagree only if a caller has paired a token with the
+     * wrong button, which is not a thing the app does.
+     */
+    const requested = req.body && req.body.action;
+    if (requested && String(requested) !== claims.act) {
+      return res.status(400).json({ error: "That button does not match its token" });
+    }
+
+    // Single use, BEFORE anything is sent. A second press of the same button, or
+    // a replay by anyone who copied the token, gets this and nothing else.
+    if (!spendToken(token)) {
+      return res.status(409).json({ error: "That notification action has already been used." });
     }
 
     const user = await User.findById(claims.sub).select("-passwordHash");

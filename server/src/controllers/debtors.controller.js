@@ -35,10 +35,27 @@ async function lookup(req, res) {
   }
 }
 
+/**
+ * EXPRESS HAS ALREADY DECODED `req.params`. DO NOT DECODE IT AGAIN.
+ *
+ * The client encodes the debtor key once, Express decodes it once, and both
+ * handlers below then decoded it a second time. For most names that is a no-op,
+ * which is why it survived. For a name carrying a percent sign — "Kemi 100%
+ * Pure Water", "50% Discount Stores", ordinary Nigerian business names — the
+ * second decode threw a URIError, the catch turned it into a 500 "Failed to
+ * load debtor", and the Profile and Statement buttons for that customer simply
+ * never worked, indistinguishable from a database outage. A name containing a
+ * sequence like %20 was worse: it decoded silently into a DIFFERENT name and the
+ * customer was reported as not found.
+ */
+function paramKey(req) {
+  return String(req.params.key || "");
+}
+
 // GET /api/debtors/:key  (full profile: debts + timeline)
 async function profile(req, res) {
   try {
-    const key = decodeURIComponent(req.params.key);
+    const key = paramKey(req);
     const data = await debtorProfile(req.user._id, key);
     if (!data) return res.status(404).json({ error: "Debtor not found" });
     return res.json(data);
@@ -51,7 +68,7 @@ async function profile(req, res) {
 // GET /api/debtors/:key/statement  (all debts + payments for one debtor)
 async function statement(req, res) {
   try {
-    const key = decodeURIComponent(req.params.key);
+    const key = paramKey(req);
     const data = await debtorProfile(req.user._id, key);
     if (!data) return res.status(404).json({ error: "Debtor not found" });
 

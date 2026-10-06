@@ -35,7 +35,7 @@ import PortfolioPanel from "./PortfolioPanel";
 import TradingModeToggle from "./TradingModeToggle";
 import LiveSwapModal from "./LiveSwapModal";
 import LivePortfolioPanel from "./LivePortfolioPanel";
-import { tradeability } from "./tradeability";
+import { resolveTradeable } from "./resolveTradeable";
 import { toSpendAmount } from "./amount";
 import { fetchChains, fetchSpend24h } from "../wallet/walletApi";
 import { getStoredAddress } from "../wallet/keystore";
@@ -74,6 +74,13 @@ function MarketWatch() {
   // each time a swap is opened. `null` means "not known", and the swap modal
   // waits for a number rather than assuming zero.
   const [spentToday, setSpentToday] = useState(null);
+  // Why that figure is missing, when it is. `spentToday === null` on its own
+  // means two different things — "not asked yet" and "asked and it failed" — and
+  // the swap modal used to render the loading state for both, forever. See the
+  // effect below.
+  const [spendError, setSpendError] = useState("");
+  // Bumped to ask the server for the daily spend again after a failure.
+  const [spendReload, setSpendReload] = useState(0);
   // Which dollar funds live trades. Remembered per browser.
   const [cashSymbol, setCashSymbol] = useState(() => {
     try {
@@ -185,9 +192,12 @@ function MarketWatch() {
       setError(err?.response?.data?.error || "Failed to load market data");
     }
     // `mode` is a dependency because the server now scopes watches, alerts and
-    // the portfolio to the book you are in. Without it the paper rows stayed on
-    // screen after switching to live, so the live wallet showed watches nobody
-    // had added to it.
+    // the portfolio to the book you are in — it is read from the session, not
+    // from this closure, which is why the linter cannot see the link. Without it
+    // the paper rows stayed on screen after switching to live, so the live
+    // wallet showed watches nobody had added to it. Suppressed deliberately
+    // rather than left as a standing warning.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toast, mode]);
 
   useEffect(() => {
@@ -243,18 +253,37 @@ function MarketWatch() {
    * sums every swap this account signed in the last twenty four hours across
    * every chain, and is refetched every time a swap is opened.
    */
+  /**
+   * AND A FIGURE THAT COULD NOT BE READ SAYS SO (LW-037's shape, again).
+   *
+   * The catch here set `spentToday` back to null, which is also its value while
+   * the request is in flight. The swap modal refuses to plan without the number
+   * — correctly — and rendered four grey bars while it waited, so a failed
+   * request left the money dialog on the loading state permanently: no error, no
+   * retry, no explanation, and nothing to press but the close cross. The reason
+   * is now carried separately from the value, so "we are asking" and "we asked
+   * and it failed" are two different states on screen.
+   */
   useEffect(() => {
     if (!liveSwap) return undefined;
     let alive = true;
     setSpentToday(null);
+    setSpendError("");
     fetchSpend24h()
       .then((n) => alive && setSpentToday(n))
-      // Unknown is not zero. Leave it null; the modal refuses to plan without it.
-      .catch(() => alive && setSpentToday(null));
+      // Unknown is not zero. The value stays null so nothing plans against an
+      // assumed zero, and the reason is what the modal shows instead.
+      .catch((err) => {
+        if (!alive) return;
+        setSpentToday(null);
+        setSpendError(
+          err?.response?.data?.error || err?.message || "the server did not answer"
+        );
+      });
     return () => {
       alive = false;
     };
-  }, [liveSwap]);
+  }, [liveSwap, spendReload]);
 
   /**
    * A foreground push has already been toasted by the shell-level bridge, so this
@@ -394,9 +423,27 @@ function MarketWatch() {
   }, [watches, markets]);
 
   // ---- actions ----
+  /**
+   * A REFUSED DELETE USED TO LOOK LIKE A DEAD BUTTON (LW-028).
+   *
+   * This had no catch, and both call sites — the cross in the watch list and the
+   * bin in the coin detail dialog — invoke it from a raw onClick that throws the
+   * promise away. So with the server down or the session expired the row simply
+   * stayed where it was, with nothing said anywhere, and the natural response is
+   * to press it again. The neighbouring edit-watch button already reported its
+   * reason; this one now does too.
+   */
   async function removeWatch(watch) {
-    await http.delete(`/api/watches/${watch._id}`);
-    await loadData();
+    try {
+      await http.delete(`/api/watches/${watch._id}`);
+      await loadData();
+    } catch (err) {
+      toast(
+        err?.response?.data?.error ||
+          `${watch.symbol} could not be removed from your watchlist. It is still being watched.`,
+        { type: "error", duration: 9000 }
+      );
+    }
   }
   async function editWatch(watch, payload) {
     await http.patch(`/api/watches/${watch._id}`, payload);
@@ -414,20 +461,66 @@ function MarketWatch() {
    * The amount panel is identical in both modes — this is the ONLY place the two
    * diverge. Paper posts to the simulated portfolio; live hands off to the swap
    * modal, which quotes, checks and asks for a signature.
+   *
+   * A REFUSAL IS RETURNED, NOT JUST TOASTED. Every "no" below used to `return`
+   * plainly, which resolved the promise TradePanel was awaiting exactly as a
+   * success does. TradePanel only cleared its busy flag in its catch, so the
+   * dialog froze on "Checking the contract…" with Back greyed out as well: the
+   * user was left with a stuck box and a toast that vanished. The reason now
+   * comes back to the panel, which shows it where the user is already looking
+   * and hands them their typed amount back.
    */
   async function submitTrade({ action, amount, denom }) {
     const alert = trade.alert;
 
     if (mode === "live") {
-      const t = tradeability(
-        liveChain,
-        { coinId: alert.coinId, symbol: alert.symbol },
-        user?.customTokens,
-        cashSymbol // the dollar the owner chose to fund trades with
-      );
+      /**
+       * THE TWO THINGS THE SWAP DIALOG CANNOT BE DRAWN WITHOUT.
+       *
+       * The dialog is rendered only when both a mainnet and a readable wallet
+       * address exist, but this function set it up and closed the amount panel
+       * unconditionally. Trading mode is stored on the account, so the page can
+       * open in live mode in a browser whose keystore was cleared or corrupted —
+       * `hasWallet()` only checks the raw string is there while
+       * `getStoredAddress()` returns null if it will not parse. Pressing Confirm
+       * then closed the panel and nothing else happened at all: the button that
+       * spends money did nothing, silently, which invites a second press.
+       */
+      if (!walletAddress) {
+        return {
+          ok: false,
+          message:
+            "This browser does not hold your wallet keys, so a live trade cannot be signed here. " +
+            "Import your wallet with its recovery phrase on the Wallet page, or switch back to paper.",
+        };
+      }
+      if (!liveChain) {
+        return {
+          ok: false,
+          message:
+            "No real network is selected, so there is nothing to trade on. Pick one in Live positions above.",
+        };
+      }
+      /**
+       * AWAITED, BECAUSE THE ANSWER IS NO LONGER ONLY LOCAL.
+       *
+       * This used to be a synchronous lookup against the registry, which holds
+       * about a dozen assets, so almost every coin a person searched for came
+       * back "paper only". `resolveTradeable` still answers instantly from the
+       * registry and from the user's own tokens; only when neither knows the
+       * coin does it ask the server, which finds the contract in the coin index
+       * and reads `symbol()` and `decimals()` off the chain before agreeing it
+       * is real. TradePanel is already awaiting this call, so the wait shows as
+       * its own busy state rather than as a frozen button.
+       */
+      const t = await resolveTradeable({
+        chain: liveChain,
+        coin: { coinId: alert.coinId, symbol: alert.symbol },
+        customTokens: user?.customTokens,
+        preferredCash: cashSymbol, // the dollar the owner chose to fund trades with
+      });
       if (!t.live) {
-        toast(t.reason, { type: "info", duration: 9000 });
-        return;
+        return { ok: false, message: t.reason };
       }
       // LW-008. The conversion lives in ./amount so it can be tested; it was
       // inline here as a ternary with two identical branches, which is exactly
@@ -439,13 +532,13 @@ function MarketWatch() {
         price: Number(alert.priceAtAlert) || 0,
       });
       if (!conv.ok) {
-        toast(
-          conv.reason === "no-price"
-            ? "No live price for that coin right now, so the amount cannot be converted safely."
-            : "That amount could not be worked out. Please enter it again.",
-          { type: "error", duration: 9000 }
-        );
-        return;
+        return {
+          ok: false,
+          message:
+            conv.reason === "no-price"
+              ? "No live price for that coin right now, so the amount cannot be converted safely."
+              : "That amount could not be worked out. Please enter it again.",
+        };
       }
 
       setLiveSwap({
@@ -459,6 +552,19 @@ function MarketWatch() {
         // number from the one they entered.
         typed: { amount: Number(amount), denom, price: Number(alert.priceAtAlert) || 0 },
         alertId: alert._id,
+        /**
+         * WHERE THE ADDRESS CAME FROM TRAVELS WITH THE ADDRESS.
+         *
+         * These were raised as toasts here instead — eleven seconds of pop-up,
+         * fired before the confirm screen had even opened, saying that this
+         * contract calls itself something other than the listing does or shares
+         * its ticker with a different verified token. By the time the owner was
+         * actually looking at the address and deciding whether to tick the box,
+         * the sentence explaining why they should look had gone. It is carried
+         * to the confirm screen and shown beside the address, which is what
+         * `resolveTradeable` always said happened.
+         */
+        warnings: t.warnings || [],
       });
       setTrade(null);
       return;
@@ -481,11 +587,19 @@ function MarketWatch() {
       setBusyId(null);
     }
   }
+  // try/finally with no catch is the same silence as no handler at all: the
+  // spinner stopped and the alert stayed on the list with nothing said (LW-028).
   async function dismiss(alert) {
     setBusyId(alert._id);
     try {
       await http.patch(`/api/alerts/${alert._id}/dismiss`);
       await loadData();
+    } catch (err) {
+      toast(
+        err?.response?.data?.error ||
+          `That alert could not be dismissed, so it is still waiting for your decision.`,
+        { type: "error", duration: 9000 }
+      );
     } finally {
       setBusyId(null);
     }
@@ -525,14 +639,34 @@ function MarketWatch() {
    * other token with a quantity, valued at the live price where one exists.
    * There is no P&L: this book records what is held now, not what was paid.
    */
+  /**
+   * A BALANCE THAT COULD NOT BE READ IS NOT A BALANCE OF ZERO — INCLUDING THE
+   * DOLLAR ONE (hard rule 4).
+   *
+   * The panel above goes to some trouble to keep the distinction: a token whose
+   * `balanceOf` failed comes back as `{ qty: null, unknown: true }` with the
+   * reason on it. This function then dropped every unknown row and, when the
+   * stablecoin was one of them, recorded the ceiling as `0`. The trade panel
+   * showed "Available: $0" and refused every buy with "That is more than your
+   * available cash ($0)" — a flat statement that the owner has no money, made
+   * because one RPC call did not answer. Blocking is the right direction;
+   * saying why is the part that was missing.
+   *
+   * `cashBalance` is now null when it is not known, and `cashUnknown` carries
+   * the reason. `liveRows === null` — the panel has not reported yet, or its
+   * whole read failed — is the same kind of not-known and is treated the same.
+   */
   const livePortfolioReal = useMemo(() => {
     if (mode !== "live") return null;
-    const rows = (liveRows || []).filter((r) => !r.unknown && Number(r.qty) > 0);
+    const all = liveRows || [];
+    const rows = all.filter((r) => !r.unknown && Number(r.qty) > 0);
     const isCash = (sym) =>
       cashSymbol === "USDT"
         ? /^(USDT|USD₮0|USDT0|USDt)$/i.test(sym)
         : /^USDC$/i.test(sym);
-    const cashRow = rows.find((r) => isCash(r.symbol));
+    // Searched across EVERY row, not only the readable ones, so an unreadable
+    // stablecoin is found rather than looking like an absent one.
+    const cashRowAny = all.find((r) => isCash(r.symbol));
     let holdingsValue = 0;
     const holdings = rows
       .filter((r) => !isCash(r.symbol))
@@ -547,14 +681,23 @@ function MarketWatch() {
         if (value != null) holdingsValue += value;
         return { coinId, symbol: r.symbol, qty, price, value, avgBuyPrice: null };
       });
-    const cashBalance = cashRow ? Number(cashRow.qty) : 0;
+    // Not known: the panel has reported nothing yet, or the dollar's own
+    // balance call failed. Zero is only claimed when a read actually returned it.
+    const cashUnknown = liveRows == null || Boolean(cashRowAny && cashRowAny.unknown);
+    const cashBalance = cashUnknown ? null : cashRowAny ? Number(cashRowAny.qty) : 0;
     return {
       real: true,
       cashSymbol,
       cashBalance,
+      cashUnknown,
+      cashUnknownReason:
+        (cashRowAny && cashRowAny.reason) ||
+        (liveRows == null ? "the balances on this network have not been read yet" : null),
       holdings,
       holdingsValue,
-      totalValue: cashBalance + holdingsValue,
+      // An unknown dollar balance makes the total an understatement rather than
+      // a figure, so it is not asserted either.
+      totalValue: cashUnknown ? null : cashBalance + holdingsValue,
       totalPnl: null,
     };
   }, [mode, liveRows, cashSymbol, coinIdBySymbol, markets]);
@@ -776,6 +919,7 @@ function MarketWatch() {
               reloadKey={liveReloadKey}
               cashSymbol={cashSymbol}
               onCashSymbol={chooseCash}
+              customTokens={user?.customTokens}
             />
           )}
 
@@ -853,9 +997,14 @@ function MarketWatch() {
           what the wallet actually holds on the selected mainnet. */}
       {trade && (
         <TradePanel
+          busyLabel={mode === "live" ? "Checking the contract…" : undefined}
           side={trade.side}
           alert={trade.alert}
           portfolio={pf}
+          // The price NOW, from the same feed the table renders. Without it the
+          // panel priced the trade at whatever the coin cost when the alert
+          // fired, which may be hours old. See the note in TradePanel.
+          currentPrice={markets?.[trade.alert.coinId]?.current_price}
           onClose={() => setTrade(null)}
           onSubmit={submitTrade}
         />
@@ -874,6 +1023,9 @@ function MarketWatch() {
           amountDisplay={liveSwap.amountDisplay}
           alertId={liveSwap.alertId}
           spentToday={spentToday}
+          spentTodayError={spendError}
+          onRetrySpentToday={() => setSpendReload((n) => n + 1)}
+          resolveWarnings={liveSwap.warnings}
           limitOverrides={user?.tradingLimits}
           onClose={() => setLiveSwap(null)}
           onDone={() => {

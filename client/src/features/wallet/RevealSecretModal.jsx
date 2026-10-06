@@ -35,6 +35,12 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
   const [password, setPassword] = useState("");
   const [answers, setAnswers] = useState({});
   const [questions, setQuestions] = useState(null);
+  // Why the extra-verification check could not be made, when it could not, plus
+  // the owner's explicit decision to go on without it. Both are needed: a null
+  // `questions` alone cannot tell "none configured" from "could not ask".
+  const [questionsError, setQuestionsError] = useState("");
+  const [skipQuestions, setSkipQuestions] = useState(false);
+  const [retryQuestions, setRetryQuestions] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -63,19 +69,46 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
     setAnswers({});
     setError("");
     setCopied(false);
+    setSkipQuestions(false);
     onClose();
   }, [onClose, wipe]);
 
   // Clear on unmount — navigating away must not leave a phrase in memory.
   useEffect(() => () => wipe(), [wipe]);
 
-  // Whether this account added the optional extra questions.
+  /**
+   * Whether this account added the optional extra questions.
+   *
+   * A FAILED CHECK IS NOT "NO QUESTIONS". This recorded `null` on any error,
+   * which is the same value as "this account configured none", so the dialog
+   * went straight to password-only — silently. A server outage, a dropped
+   * connection, or anybody with local access blocking one request removed the
+   * layer the owner had switched on, on the path that hands over the recovery
+   * phrase for a wallet holding real mainnet funds, and nothing on screen said
+   * the check had not run.
+   *
+   * It still does not hard-block: this wallet is non-custodial, and a server
+   * that is down must not be able to lock an owner out of their own backup. But
+   * the failure is now stated, retryable, and skipping it costs a deliberate
+   * click, so what happens is at least the owner's decision.
+   */
   useEffect(() => {
     if (!open) return;
+    setQuestionsError("");
     getSecurityQuestions()
-      .then((d) => setQuestions(d.enabled ? d.questions : null))
-      .catch(() => setQuestions(null)); // absent extra layer must not block backup
-  }, [open]);
+      .then((d) => {
+        setQuestions(d.enabled ? d.questions : null);
+        setQuestionsError("");
+      })
+      .catch((err) => {
+        setQuestions(null);
+        setQuestionsError(
+          err?.response?.data?.error ||
+            err.message ||
+            "the server did not answer"
+        );
+      });
+  }, [open, retryQuestions]);
 
   /** Auto-hide countdown. */
   useEffect(() => {
@@ -97,6 +130,11 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
     e.preventDefault();
     setError("");
     if (!password) return setError("Enter your wallet password.");
+    if (questionsError && !skipQuestions) {
+      return setError(
+        "Whether this account asks extra questions could not be checked. Try again, or say explicitly that you want to continue without that check."
+      );
+    }
 
     setBusy(true);
     try {
@@ -249,6 +287,39 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
             </>
           )}
 
+          {/* The extra layer could not be checked. Said out loud, because the
+              alternative — quietly falling through to password-only — is a
+              security control the owner configured failing open with no trace. */}
+          {questionsError && (
+            <div className="against-note">
+              <TriangleAlert size={15} />
+              <span>
+                Whether this account asks extra questions could not be checked:{" "}
+                {questionsError}. If you set questions up, they are not being asked right now.
+                <span className="row" style={{ marginTop: 8 }}>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setSkipQuestions(false);
+                      setRetryQuestions((n) => n + 1);
+                    }}
+                    disabled={busy}
+                  >
+                    Try the check again
+                  </Button>
+                  <label className="toggle-inline">
+                    <input
+                      type="checkbox"
+                      checked={skipQuestions}
+                      onChange={(e) => setSkipQuestions(e.target.checked)}
+                    />
+                    <span className="muted small">Continue without it</span>
+                  </label>
+                </span>
+              </span>
+            </div>
+          )}
+
           {error && <p className="error-text">{error}</p>}
 
           <div className="row" style={{ justifyContent: "flex-end" }}>
@@ -349,6 +420,3 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
     </Modal>
   );
 }
-
-/** The key icon used by the Settings entry points. */
-export { KeyRound as RevealIcon };

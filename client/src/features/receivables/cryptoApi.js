@@ -12,9 +12,13 @@ export async function fetchChains() {
  * What issuing an address would ask for — balance, USDC amount, rate and the
  * rate's real age. Reserves nothing, so it is safe to call on every chain change.
  */
-export async function fetchQuote({ debtId, chainId }) {
+export async function fetchQuote({ debtId, chainId, tokenSymbol }) {
   const { data } = await http.get("/api/payment-addresses/quote", {
-    params: { debtId, chainId },
+    // `tokenSymbol` is optional and was never sent, so every quote came back for
+    // whichever stablecoin happened to be first in the registry for that chain
+    // and the server's own USDT support was unreachable from the interface. The
+    // server still defaults to the first when this is absent.
+    params: tokenSymbol ? { debtId, chainId, tokenSymbol } : { debtId, chainId },
   });
   return data;
 }
@@ -31,13 +35,21 @@ export async function allocateIndex(chainId) {
   return data;
 }
 
-/** Record the browser-derived address against the invoice. */
-export async function createPaymentAddress({ debtId, chainId, address, derivationIndex }) {
+/**
+ * Record the browser-derived address against the invoice.
+ *
+ * `tokenSymbol` is the stablecoin the payer will be told to send. It must be the
+ * one the quote was priced in: the server validates it against the chain's
+ * verified list and refuses anything else by name, so a mismatch is a refusal
+ * rather than an address that quietly accepts a different token.
+ */
+export async function createPaymentAddress({ debtId, chainId, address, derivationIndex, tokenSymbol }) {
   const { data } = await http.post("/api/payment-addresses", {
     debtId,
     chainId,
     address,
     derivationIndex,
+    tokenSymbol,
   });
   return data;
 }

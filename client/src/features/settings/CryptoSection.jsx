@@ -8,19 +8,71 @@ import { getStoredAddress } from "../wallet/keystore";
 
 // Mirrors the clamps in server/src/services/cryptoSettings.service.js.
 const MIN_CONFIRMATIONS = 1;
-const MAX_CONFIRMATIONS = 200;
+/**
+ * 300, WHICH IS WHAT THE SERVER ACTUALLY ACCEPTS.
+ *
+ * This said 200 under a comment claiming to mirror the server, and the server
+ * had already been raised to 300 for a stated reason: Arbitrum One's own
+ * recommended depth is 240, and at a cap of 200 an owner who "confirmed" the
+ * default by typing it was silently clamped to something shallower than the
+ * default. On the client the consequence was worse than a clamp — a browser
+ * enforces a number field's max before it will submit at all, so typing 240 for
+ * Arbitrum stopped the WHOLE crypto settings form from saving, with a small
+ * browser tooltip and no other explanation, taking every other change on the
+ * page down with it.
+ */
+const MAX_CONFIRMATIONS = 300;
 const MIN_EXPIRY_HOURS = 1;
 const MAX_EXPIRY_HOURS = 720;
 
-// The per-chain defaults, so the field can say what it is overriding rather than
-// showing a bare empty box. Mirrors server/src/config/derivation.js.
+/**
+ * The per-chain defaults, so the field can say what it is overriding rather than
+ * showing a bare empty box, and so the "you have gone below the recommended
+ * depth" warning has something true to compare against.
+ *
+ * EVERY REAL NETWORK WAS MISSING FROM THIS TABLE. Only the five testnets were
+ * listed, and the fallback for anything else was 12. So BNB Chain's box read
+ * "12 (recommended)" when the depth the server actually uses is 135 — an
+ * elevenfold understatement — and because the red warning compared against the
+ * same 12, an owner who typed 20 for BNB Chain (about nine seconds of chain
+ * time, on a network where money is real) was told nothing at all. CLAUDE.md
+ * gotcha 2 is explicit that depths come from measured block times and are raised
+ * and never lowered; this screen was quietly inviting the opposite.
+ *
+ * Mirrors DEFAULT_CONFIRMATIONS in server/src/config/derivation.js. The server
+ * is the authority and does not publish these on /api/wallet/chains yet, so this
+ * copy has to be kept in step by hand until it does.
+ */
 const DEFAULT_CONFIRMATIONS = {
-  11155111: 12,
-  84532: 5,
-  421614: 5,
-  11155420: 5,
-  80002: 5,
+  // ---- testnets ----
+  11155111: 12, // Ethereum Sepolia
+  84532: 5, // Base Sepolia
+  421614: 5, // Arbitrum Sepolia
+  11155420: 5, // Optimism Sepolia
+  80002: 5, // Polygon Amoy
+
+  // ---- mainnets: real money, measured block times ----
+  1: 12, // Ethereum
+  8453: 30, // Base
+  10: 30, // OP Mainnet
+  42161: 240, // Arbitrum One
+  137: 135, // Polygon
+  56: 135, // BNB Chain, at the measured 0.45s block
+  43114: 60, // Avalanche C-Chain
 };
+
+/**
+ * The recommended depth for a chain.
+ *
+ * A chain this table does not know is not given a made up 12: an unknown
+ * mainnet default is far likelier to be deeper than 12 than shallower, so
+ * inventing one would understate it and suppress the warning. Unknown means the
+ * hint and the warning both stand down and say nothing.
+ */
+function recommendedDepth(chainId) {
+  const v = DEFAULT_CONFIRMATIONS[chainId];
+  return Number.isFinite(v) ? v : null;
+}
 
 export default function CryptoSection() {
   const { user, updateProfile } = useAuth();
@@ -74,8 +126,10 @@ export default function CryptoSection() {
   }
 
   const lowered = chains.filter((ch) => {
+    const recommended = recommendedDepth(ch.chainId);
+    if (recommended == null) return false;
     const v = Number(overrides[ch.chainId]);
-    return Number.isFinite(v) && v > 0 && v < (DEFAULT_CONFIRMATIONS[ch.chainId] || 12);
+    return Number.isFinite(v) && v > 0 && v < recommended;
   });
 
   return (
@@ -198,7 +252,11 @@ export default function CryptoSection() {
                 min={MIN_CONFIRMATIONS}
                 max={MAX_CONFIRMATIONS}
                 value={overrides[ch.chainId] ?? ""}
-                placeholder={`${DEFAULT_CONFIRMATIONS[ch.chainId] || 12} (recommended)`}
+                placeholder={
+                  recommendedDepth(ch.chainId) != null
+                    ? `${recommendedDepth(ch.chainId)} (recommended)`
+                    : "the recommended depth"
+                }
                 onChange={(e) =>
                   setOverrides((o) => ({ ...o, [ch.chainId]: e.target.value }))
                 }

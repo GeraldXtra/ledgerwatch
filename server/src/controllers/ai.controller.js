@@ -5,6 +5,7 @@ const {
   marketChat,
 } = require("../services/anthropic.service");
 const { formatAmount } = require("../utils/reminderTemplate");
+const { attachTotals } = require("../services/receivables.service");
 const {
   createWatch,
   getPortfolio,
@@ -22,48 +23,75 @@ const MAX_PROMPT_CHARS = 2000;
 
 /**
  * Deterministic, no-AI answer over the user's debts. Never crashes.
- * Summarizes top debtor, total outstanding, and the most overdue pending debt.
+ * Summarizes top debtor, total outstanding, and the most overdue open debt.
+ *
+ * WHAT WAS WRONG WITH IT, AND WHY IT MATTERED (LW-011).
+ *
+ * It did three things, and all three understated or overstated what the owner
+ * is actually owed:
+ *
+ *  1. It filtered on `status === "pending"`, so every PARTLY PAID invoice was
+ *     dropped from the answer entirely. Those are precisely the ones somebody
+ *     asks about.
+ *  2. It summed `d.amount`, the GROSS invoice value, as though it were the
+ *     balance. A one million naira invoice with nine hundred thousand already
+ *     paid contributed either nothing (dropped by 1) or a million (if still
+ *     pending) — never the hundred thousand actually outstanding. CLAUDE.md
+ *     names this exact pattern: never treat a stored gross figure as a net one.
+ *  3. It added figures in different currencies together and labelled the sum
+ *     with whichever single invoice happened to be largest.
+ *
+ * The analytics page computed the same number correctly, so the two screens
+ * gave irreconcilable answers to the same question and neither said why.
+ *
+ * `debts` here are the plain objects `attachTotals` produces, which carry
+ * `balance` — the one figure that means "still owed".
  */
 function computeFallback(debts) {
-  const pending = debts.filter((d) => d.status === "pending");
+  const open = debts.filter((d) => (d.balance || 0) > 0 && d.status !== "paid");
 
-  if (pending.length === 0) {
-    return "You have no pending debts. Everyone is settled up.";
+  if (open.length === 0) {
+    return "You have no outstanding invoices. Everyone is settled up.";
   }
 
-  const totalOutstanding = pending.reduce((sum, d) => sum + (d.amount || 0), 0);
+  // Totalled PER CURRENCY. Adding naira to dollars produces a number that is
+  // not an amount of anything.
+  const byCurrency = new Map();
+  for (const d of open) {
+    const cur = d.currency || "NGN";
+    byCurrency.set(cur, (byCurrency.get(cur) || 0) + (d.balance || 0));
+  }
+  const totals = [...byCurrency.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([cur, sum]) => formatAmount(sum, cur))
+    .join(" and ");
 
-  const topByAmount = [...pending].sort((a, b) => b.amount - a.amount)[0];
+  const topByBalance = [...open].sort((a, b) => (b.balance || 0) - (a.balance || 0))[0];
 
   const now = Date.now();
-  const overdue = pending
+  const overdue = open
     .filter((d) => new Date(d.dueDate).getTime() < now)
     .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
 
   const lines = [];
+  lines.push(`You have ${open.length} unpaid invoice(s) with ${totals} still outstanding.`);
   lines.push(
-    `You have ${pending.length} pending debt(s) totalling ${formatAmount(
-      totalOutstanding,
-      topByAmount.currency
-    )}.`
-  );
-  lines.push(
-    `Owes the most: ${topByAmount.debtorName} — ${formatAmount(
-      topByAmount.amount,
-      topByAmount.currency
-    )}.`
+    `Owes the most: ${topByBalance.debtorName} — ${formatAmount(
+      topByBalance.balance,
+      topByBalance.currency
+    )} of ${formatAmount(topByBalance.amount, topByBalance.currency)}.`
   );
   if (overdue.length) {
     const worst = overdue[0];
     const days = Math.floor((now - new Date(worst.dueDate).getTime()) / DAY_MS);
     lines.push(
       `Most overdue: ${worst.debtorName} (${days} day(s) past due, ${formatAmount(
-        worst.amount,
+        worst.balance,
         worst.currency
-      )}).`
+      )} outstanding).`
     );
   } else {
-    lines.push("None of your pending debts are overdue yet.");
+    lines.push("None of your unpaid invoices are overdue yet.");
   }
 
   return lines.join(" ");
@@ -77,15 +105,27 @@ async function receivablesQuery(req, res) {
       return res.status(400).json({ error: "question is required" });
     }
 
-    const debts = await Debt.find({ userId: req.user._id });
+    const raw = await Debt.find({ userId: req.user._id });
+    /**
+     * THE BALANCE, NOT JUST THE INVOICE VALUE.
+     *
+     * `Debt` stores the gross amount and a status; what is still owed is derived
+     * at read time and lives nowhere on the document. The summary handed to the
+     * model carried `amount` and `status` and nothing else, so the model was
+     * being asked what the owner is owed while being shown only what the owner
+     * once invoiced. It could not answer correctly, and it answered anyway.
+     */
+    const debts = await attachTotals(req.user._id, raw);
 
     // Compact summary for the AI (avoid leaking internal fields).
     const summary = debts.map((d) => ({
       debtorName: d.debtorName,
       amount: d.amount,
+      amountPaid: d.amountPaid,
+      balance: d.balance,
       currency: d.currency,
       dueDate: d.dueDate,
-      status: d.status,
+      status: d.displayStatus || d.status,
       remindedCount: (d.history || []).filter((h) => h.event === "reminded").length,
     }));
 

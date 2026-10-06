@@ -40,6 +40,15 @@ export default function ReminderPanel({ debt, result, onClose }) {
   const [reminders, setReminders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(null); // which channel-set is in flight
+  /**
+   * A FAILED LOAD USED TO CLAIM THERE IS NO HISTORY (LW-029).
+   *
+   * Both loaders below emptied the list on a failure, and an empty list renders
+   * "No reminders generated yet." — a statement about this invoice, produced by
+   * a dropped connection. The owner then resends a reminder they have already
+   * sent today. The list is left alone now and the failure is reported.
+   */
+  const [logError, setLogError] = useState("");
 
   const hasEmail = Boolean(debt.debtorEmail);
   /**
@@ -51,13 +60,17 @@ export default function ReminderPanel({ debt, result, onClose }) {
   const emailUndeliverable =
     hasEmail && /@([^@]*\.)?(example|test|invalid|localhost)(\.[a-z]{2,})?$/i.test(debt.debtorEmail);
 
+  const LOG_LOAD_FAILED =
+    "The reminder history could not be loaded, so what is shown below may be incomplete. This is a connection problem, not a statement that no reminder has been sent.";
+
   async function loadReminders() {
     setLoading(true);
     try {
       const { data } = await http.get(`/api/debts/${debt._id}/reminders`);
       setReminders(data.reminders);
-    } catch {
-      setReminders([]);
+      setLogError("");
+    } catch (err) {
+      setLogError(err?.response?.data?.error || LOG_LOAD_FAILED);
     } finally {
       setLoading(false);
     }
@@ -69,9 +82,12 @@ export default function ReminderPanel({ debt, result, onClose }) {
       setLoading(true);
       try {
         const { data } = await http.get(`/api/debts/${debt._id}/reminders`);
-        if (active) setReminders(data.reminders);
-      } catch {
-        if (active) setReminders([]);
+        if (active) {
+          setReminders(data.reminders);
+          setLogError("");
+        }
+      } catch (err) {
+        if (active) setLogError(err?.response?.data?.error || LOG_LOAD_FAILED);
       } finally {
         if (active) setLoading(false);
       }
@@ -220,11 +236,12 @@ export default function ReminderPanel({ debt, result, onClose }) {
 
       <div>
         <div className="overline">Reminder log</div>
+        {logError && <p className="error-text">{logError}</p>}
         {loading ? (
           <div className="mt">
             <SkeletonLines count={2} />
           </div>
-        ) : reminders.length === 0 ? (
+        ) : reminders.length === 0 && logError ? null : reminders.length === 0 ? (
           <p className="muted small">No reminders generated yet.</p>
         ) : (
           <ul className="log">

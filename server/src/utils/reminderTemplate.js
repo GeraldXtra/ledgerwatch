@@ -56,9 +56,17 @@ function buildReminderMessage(p) {
 
   if (daysOverdue > 0) {
     const dayWord = daysOverdue === 1 ? "day" : "days";
+    // The word "gentle" was written into this sentence regardless of tone, so a
+    // FIRM reminder about an overdue invoice still opened "this is a gentle
+    // reminder" and only the closing line changed. The overdue branch is the one
+    // a firm tone is ever chosen for, so the setting had no visible effect
+    // exactly where it was meant to.
+    const opener =
+      tone === "firm"
+        ? `I hope you are doing well. I am following up on your ${partWord}`
+        : `I hope you are doing well. This is a gentle reminder about your ${partWord}`;
     lines.push(
-      `I hope you are doing well. This is a gentle reminder about your ${partWord}` +
-        `${amountStr}, which was due on ${dueStr} and is now ${daysOverdue} ${dayWord} past due.`
+      `${opener}${amountStr}, which was due on ${dueStr} and is now ${daysOverdue} ${dayWord} past due.`
     );
   } else {
     lines.push(

@@ -1,7 +1,27 @@
 import { AlertCircle } from "lucide-react";
 import { Card, SkeletonBlock } from "../../components/ui";
-import OwedCollectedChart from "./OwedCollectedChart";
-import AgingChart from "./AgingChart";
+/**
+ * THE CHARTS ARE SPLIT OUT. (LW-046, BUILD_PLAN P7-3.)
+ *
+ * These two are the only thing pulling recharts into the main bundle, and
+ * recharts is the single largest dependency left in it. Receivables is the app's
+ * default route, so the page itself must stay static — but the charts sit below
+ * the figures, are not what anybody opens the page for, and render from data
+ * that arrives over the network anyway. Deferring them takes recharts out of the
+ * download every visitor to the front page pays for.
+ */
+import { Suspense, lazy } from "react";
+
+const OwedCollectedChart = lazy(() => import("./OwedCollectedChart"));
+const AgingChart = lazy(() => import("./AgingChart"));
+
+/**
+ * A plain block at the chart's own height, so the figures above it do not jump
+ * when the chunk lands. An empty fallback would reflow the page.
+ */
+function ChartPlaceholder() {
+  return <div className="chart-placeholder" aria-hidden="true" />;
+}
 
 /**
  * The two charts: six months of invoiced against collected, and how overdue the
@@ -46,13 +66,17 @@ export default function ReceivablesOverview({ data, error }) {
         title="Invoiced against collected"
         subtitle="The last six months of money owed set against money that actually arrived."
       >
-        <OwedCollectedChart data={data.monthly} />
+        <Suspense fallback={<ChartPlaceholder />}>
+          <OwedCollectedChart data={data.monthly} />
+        </Suspense>
       </Card>
       <Card
         title="How old the money is"
         subtitle="The longer a balance sits in a later bucket, the less likely it is to arrive."
       >
-        <AgingChart aging={data.aging} />
+        <Suspense fallback={<ChartPlaceholder />}>
+          <AgingChart aging={data.aging} />
+        </Suspense>
         {overdue > 0 && (
           <p className="muted small" style={{ marginTop: 10 }}>
             <AlertCircle size={13} style={{ verticalAlign: "-2px" }} /> {overdue} account

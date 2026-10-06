@@ -3,12 +3,15 @@ import { TriangleAlert } from "lucide-react";
 import http from "../../api/http";
 import { Button, Input, useToast } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
+import { clearWallet, hasWallet } from "../wallet/keystore";
+import { clearBitcoinAddressCache } from "../wallet/bitcoin/addressCache";
+import { clearPendingSends } from "../wallet/bitcoin/pendingSend";
 
 /**
  * Destructive actions, each gated behind typing an exact confirmation word, so
  * a misclick can never wipe a ledger.
  */
-function DangerAction({ title, body, phrase, confirmLabel, disabled, onConfirm }) {
+function DangerAction({ title, body, extra, phrase, confirmLabel, disabled, onConfirm }) {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -34,6 +37,7 @@ function DangerAction({ title, body, phrase, confirmLabel, disabled, onConfirm }
         <p className="muted small" style={{ margin: "4px 0 12px" }}>
           {body}
         </p>
+        {!disabled && extra}
         {!disabled && (
           <>
             <label className="muted small" htmlFor={`confirm-${phrase}`}>
@@ -67,6 +71,8 @@ export default function DangerSection() {
   const { user, logout } = useAuth();
   const toast = useToast();
   const isDemo = user.email === "demo@ledgerwatch.app";
+  const walletHere = hasWallet();
+  const [alsoWipeWallet, setAlsoWipeWallet] = useState(false);
 
   async function clearData() {
     await http.post("/api/auth/me/clear-data");
@@ -75,8 +81,32 @@ export default function DangerSection() {
     setTimeout(() => window.location.assign("/app"), 700);
   }
 
+  /**
+   * DELETING THE ACCOUNT LEFT THE ENCRYPTED WALLET IN THIS BROWSER.
+   *
+   * The confirmation says "permanently deletes your account and everything in
+   * it", and everything server-side did go. Nothing in the browser was touched:
+   * the encrypted keystore stayed in localStorage under the old account id,
+   * along with the remembered Bitcoin address, so on a shared or borrowed
+   * machine that ciphertext outlived the account the person believed they had
+   * erased.
+   *
+   * It is NOT cleaned up silently, and it is not the default. The keystore is
+   * the only copy of a wallet that may hold real mainnet funds, and an owner who
+   * never wrote down their phrase would lose them with no way back. So the
+   * choice is put in front of them, off unless they tick it, with what it costs
+   * stated next to it.
+   */
   async function deleteAccount() {
     await http.delete("/api/auth/me");
+    if (alsoWipeWallet) {
+      // Before logout: both of these resolve the storage key from the JWT that
+      // is still in this tab, and after signing out there is no account id to
+      // scope them to.
+      clearWallet();
+      clearBitcoinAddressCache(user?._id);
+      clearPendingSends(user?._id);
+    }
     toast("Your account has been deleted.", { type: "success" });
     setTimeout(logout, 700);
   }
@@ -113,6 +143,34 @@ export default function DangerSection() {
           phrase="DELETE"
           confirmLabel="Delete account"
           disabled={isDemo}
+          extra={
+            walletHere ? (
+              <div className="stack-sm" style={{ marginBottom: 12 }}>
+                <p className="settings-note danger" style={{ margin: 0 }}>
+                  <TriangleAlert size={15} />
+                  There is an encrypted wallet for this account in this browser. Deleting the
+                  account does not remove it, so it stays on this device unless you say otherwise.
+                </p>
+                <label className="toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={alsoWipeWallet}
+                    onChange={(e) => setAlsoWipeWallet(e.target.checked)}
+                  />
+                  <span>
+                    <span className="toggle-title">
+                      Also remove the encrypted wallet from this browser
+                    </span>
+                    <span className="muted small">
+                      Only tick this if your recovery phrase is written down. Nothing on the
+                      blockchain is deleted, but without the phrase this browser is the only way
+                      back to those funds and there is no undo.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            ) : null
+          }
           onConfirm={deleteAccount}
         />
       </div>

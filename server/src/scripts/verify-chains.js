@@ -20,7 +20,9 @@
  *   2. every token contract's own symbol() and decimals() match what is written
  *   3. every router and quoter has real bytecode at its address
  *   4. a filtered eth_getLogs at the configured span is accepted, within the
- *      timeout the watchers actually use
+ *      timeout the watchers actually use — BOTH shapes: with a contract address,
+ *      which is what the payment watcher asks for, and without one, which is the
+ *      only query that can find a token nobody has told the wallet about
  *
  * Usage:
  *   node src/scripts/verify-chains.js                 all chains
@@ -309,6 +311,51 @@ async function verifyChain(chain) {
   );
 
   /**
+   * THE SECOND LOG SHAPE: a topic filter with NO contract address.
+   *
+   * The probe above always names a token contract, which is the query the
+   * payment watcher makes. The wallet's inbound scan makes a different one — no
+   * `address` at all, filtered on the recipient topic only — because that is the
+   * ONLY way to see a token nobody has told the wallet about, which is what
+   * token discovery is. Some nodes refuse an address-less log query outright,
+   * and walletHistory.service carries a whole fallback path for them.
+   *
+   * Without this, a chain could be reported as fully passing while token
+   * discovery on it was impossible, which is how LW-084 reached production on
+   * Ethereum Sepolia. The wallet scan's own span cap is applied too, since a
+   * narrowing of WALLET_HISTORY_BLOCK_SPAN was never verified either.
+   */
+  const walletCap = Number(process.env.WALLET_HISTORY_BLOCK_SPAN);
+  const walletSpan =
+    Number.isFinite(walletCap) && walletCap > 0 ? Math.min(measured, walletCap) : measured;
+  const walletFrom = Math.max(0, head - walletSpan);
+
+  const openProbes = await pool(endpoints.filter((e) => e.ok), 3, async (e) => {
+    const started = Date.now();
+    const r = await rpc(e.url, "eth_getLogs", [
+      {
+        fromBlock: `0x${walletFrom.toString(16)}`,
+        toBlock: `0x${head.toString(16)}`,
+        // Deliberately NO `address`: this is the discovery query.
+        topics: [TRANSFER_TOPIC, null, NOBODY],
+      },
+    ]);
+    return { host: host(e.url), ok: r.ok, reason: r.reason, ms: Date.now() - started };
+  });
+
+  const openServing = openProbes.filter((p) => p.ok);
+  add(
+    openServing.length > 0,
+    `eth_getLogs with no contract filter over ${walletSpan} blocks (token discovery)`,
+    openServing.length
+      ? `${openServing.length} of ${openProbes.length} endpoint(s) served it: ${openServing
+          .map((p) => `${p.host} ${p.ms}ms`)
+          .join(", ")}`
+      : `NO endpoint served it, so a token arriving uninvited cannot be discovered on this ` +
+        `chain: ${openProbes.map((p) => `${p.host} ${p.reason}`).join("; ")}`
+  );
+
+  /**
    * EVERY ENDPOINT MUST SERVE eth_call, not just the first one that answers.
    *
    * This check exists because rpc.flashbots.net passed every other check in this
@@ -397,58 +444,72 @@ async function verifyChain(chain) {
   return { chain, findings, reachable: true };
 }
 
-(async () => {
-  let chains = allChains();
-  if (ONE) chains = chains.filter((c) => c.chainId === Number(ONE));
-  else if (WANT_MAINNET) chains = chains.filter((c) => !c.testnet);
-  else if (WANT_TESTNET) chains = chains.filter((c) => c.testnet);
+/**
+ * ONLY WHEN RUN DIRECTLY.
+ *
+ * This ran on `require`. Anything that loaded the scripts directory — a test
+ * sweep, a tooling pass that requires every module to check it parses —
+ * connected to whatever MONGO_URI pointed at and did the work. During this
+ * audit exactly that happened: a module-load check ran dedupe-alerts against
+ * the development database and dismissed eight duplicate pending alerts.
+ *
+ * `require.main === module` is true for `node src/scripts/<name>.js` and false
+ * for every require, which is the distinction that was missing.
+ */
+if (require.main === module) {
+  (async () => {
+    let chains = allChains();
+    if (ONE) chains = chains.filter((c) => c.chainId === Number(ONE));
+    else if (WANT_MAINNET) chains = chains.filter((c) => !c.testnet);
+    else if (WANT_TESTNET) chains = chains.filter((c) => c.testnet);
 
-  if (!chains.length) {
-    console.error("No chains matched.");
-    process.exit(1);
-  }
-
-  const results = [];
-  for (const chain of chains) {
-    if (!AS_JSON) process.stdout.write(`\n${chain.name} (${chain.chainId})\n`);
-    const r = await verifyChain(chain);
-    results.push(r);
-    if (!AS_JSON) {
-      r.findings.forEach((f) => {
-        process.stdout.write(`  ${f.ok ? "PASS" : "FAIL"}  ${f.what.padEnd(34)} ${f.detail || ""}\n`);
-      });
+    if (!chains.length) {
+      console.error("No chains matched.");
+      process.exit(1);
     }
-  }
 
-  const failed = results.filter((r) => r.findings.some((f) => !f.ok));
+    const results = [];
+    for (const chain of chains) {
+      if (!AS_JSON) process.stdout.write(`\n${chain.name} (${chain.chainId})\n`);
+      const r = await verifyChain(chain);
+      results.push(r);
+      if (!AS_JSON) {
+        r.findings.forEach((f) => {
+          process.stdout.write(`  ${f.ok ? "PASS" : "FAIL"}  ${f.what.padEnd(34)} ${f.detail || ""}\n`);
+        });
+      }
+    }
 
-  if (AS_JSON) {
-    console.log(
-      JSON.stringify(
-        results.map((r) => ({
-          chainId: r.chain.chainId,
-          name: r.chain.name,
-          testnet: r.chain.testnet,
-          findings: r.findings,
-        })),
-        null,
-        2
-      )
-    );
-  } else {
-    const total = results.reduce((n, r) => n + r.findings.length, 0);
-    const bad = results.reduce((n, r) => n + r.findings.filter((f) => !f.ok).length, 0);
-    process.stdout.write(`\n${total - bad} of ${total} checks passed across ${results.length} chain(s).\n`);
-    if (failed.length) {
-      process.stdout.write(`FAILING: ${failed.map((r) => r.chain.name).join(", ")}\n`);
-      process.stdout.write(
-        "An address that cannot be verified must be ABSENT rather than guessed.\n"
+    const failed = results.filter((r) => r.findings.some((f) => !f.ok));
+
+    if (AS_JSON) {
+      console.log(
+        JSON.stringify(
+          results.map((r) => ({
+            chainId: r.chain.chainId,
+            name: r.chain.name,
+            testnet: r.chain.testnet,
+            findings: r.findings,
+          })),
+          null,
+          2
+        )
       );
+    } else {
+      const total = results.reduce((n, r) => n + r.findings.length, 0);
+      const bad = results.reduce((n, r) => n + r.findings.filter((f) => !f.ok).length, 0);
+      process.stdout.write(`\n${total - bad} of ${total} checks passed across ${results.length} chain(s).\n`);
+      if (failed.length) {
+        process.stdout.write(`FAILING: ${failed.map((r) => r.chain.name).join(", ")}\n`);
+        process.stdout.write(
+          "An address that cannot be verified must be ABSENT rather than guessed.\n"
+        );
+      }
     }
-  }
 
-  process.exit(failed.length ? 1 : 0);
-})().catch((err) => {
-  console.error("verify-chains crashed:", err.message);
-  process.exit(1);
-});
+    process.exit(failed.length ? 1 : 0);
+  })().catch((err) => {
+    console.error("verify-chains crashed:", err.message);
+    process.exit(1);
+  });
+}

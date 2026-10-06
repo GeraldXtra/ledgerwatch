@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { FlaskConical, Lock, Wallet } from "lucide-react";
-import { Button, useToast } from "../../components/ui";
+import { useToast } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { hasWallet } from "../wallet/keystore";
 import { setTradingMode } from "../wallet/walletApi";

@@ -13,7 +13,13 @@ import { Button, Field, Input, Modal, Select, SkeletonLines } from "../../compon
 import { useAuth } from "../../context/AuthContext";
 import { hasWallet, unlockWallet } from "../wallet/keystore";
 import { canDerive, deriveAddressFromWallet } from "../wallet/derivation";
-import { allocateIndex, createPaymentAddress, fetchChains, fetchQuote } from "./cryptoApi";
+import {
+  allocateIndex,
+  createPaymentAddress,
+  fetchChains,
+  fetchQuote,
+  revokePaymentAddress,
+} from "./cryptoApi";
 import { agoLabel, ngn, usdc } from "./format";
 
 /**
@@ -30,7 +36,12 @@ import { agoLabel, ngn, usdc } from "./format";
 export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
   const { user } = useAuth();
   const [chains, setChains] = useState(null); // null = still loading
+  // "we could not ask" is not "there is none" — see the note on the load below.
+  const [chainsError, setChainsError] = useState("");
   const [chainId, setChainId] = useState(null);
+  // Which stablecoin the payer will be told to send. Null means "the chain's
+  // first", which is what the server does with no symbol.
+  const [tokenSymbol, setTokenSymbol] = useState(null);
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState("");
   const [password, setPassword] = useState("");
@@ -49,7 +60,10 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
       .then((list) => {
         if (!active) return;
         // Only chains with a configured stablecoin can accept an invoice payment.
-        const usable = list.filter((c) => (c.tokens || []).length > 0);
+        // `tokens` also carries the wrapped native and the tradeable assets, so
+        // it was the wrong list to test: an invoice can only be denominated in a
+        // stablecoin, which is what `stables` is.
+        const usable = list.filter((c) => (c.stables || []).length > 0);
         setChains(usable);
         // The account's chosen default from Settings, then Base Sepolia (the app
         // default and cheapest to test on), then whatever is enabled. Hardcoding
@@ -61,20 +75,52 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
           usable[0];
         if (preferred) setChainId(preferred.chainId);
       })
-      .catch(() => setChains([]));
+      .catch((err) => {
+        if (!active) return;
+        /**
+         * A DROPPED REQUEST USED TO READ AS A CONFIGURATION FACT.
+         *
+         * This was `.catch(() => setChains([]))`, and an empty list renders "No
+         * network with a configured stablecoin is enabled, so an address cannot
+         * be issued" — a definite statement about how the server is set up,
+         * produced by a connection that failed. The owner concludes the feature
+         * is switched off and stops trying. The list is left unknown and the
+         * failure is reported as a failure.
+         */
+        setChainsError(
+          err?.response?.data?.error ||
+            "The list of networks could not be loaded, so no address can be issued right now. This is a connection problem, not a setting. Close this and try again."
+        );
+      });
     return () => {
       active = false;
     };
   }, [user?.crypto?.defaultChainId]);
 
-  // Re-quote whenever the chain changes. This reserves nothing, so switching
-  // networks to compare is free.
+  const chain = useMemo(
+    () => (chains || []).find((c) => c.chainId === chainId) || null,
+    [chains, chainId]
+  );
+
+  // Every stablecoin this chain is verified to accept. The registry ships it on
+  // the chain record, so offering the choice costs no extra request.
+  const tokens = useMemo(() => (chain && chain.stables) || [], [chain]);
+
+  // A token chosen on one network does not exist on the next. Reset to that
+  // chain's first stablecoin whenever the network changes, so the quote and the
+  // address can never be issued in a token the chain does not carry.
+  useEffect(() => {
+    setTokenSymbol(tokens.length ? tokens[0].symbol : null);
+  }, [tokens]);
+
+  // Re-quote whenever the chain or the token changes. This reserves nothing, so
+  // switching networks to compare is free.
   useEffect(() => {
     if (!chainId || !walletPresent) return;
     let active = true;
     setQuote(null);
     setQuoteError("");
-    fetchQuote({ debtId: debt._id, chainId })
+    fetchQuote({ debtId: debt._id, chainId, tokenSymbol })
       .then((q) => {
         if (active) setQuote(q);
       })
@@ -84,12 +130,7 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
     return () => {
       active = false;
     };
-  }, [chainId, debt._id, walletPresent]);
-
-  const chain = useMemo(
-    () => (chains || []).find((c) => c.chainId === chainId) || null,
-    [chains, chainId]
-  );
+  }, [chainId, tokenSymbol, debt._id, walletPresent]);
 
   async function issue(e) {
     e.preventDefault();
@@ -140,12 +181,18 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
       const address = deriveAddressFromWallet(master, alloc.derivationIndex);
 
       // 4. Send the PUBLIC address up to be recorded against the invoice.
+      //    `tokenSymbol` goes with it: the quote above was priced in this token,
+      //    and without it the server falls back to the chain's FIRST stablecoin.
+      //    On a mainnet that meant a USDT quote could be recorded as a USDC
+      //    address — the payer would be told the USDT figure and the watcher
+      //    would be looking for USDC, so the invoice would never settle.
       setBusy("Saving the address");
       const saved = await createPaymentAddress({
         debtId: debt._id,
         chainId: chain.chainId,
         address,
         derivationIndex: alloc.derivationIndex,
+        tokenSymbol: tokenSymbol || undefined,
       });
 
       /**
@@ -154,6 +201,17 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
        *    reminder. If any layer between here and the database changed a
        *    character, money sent to it would be unreachable by anyone, so it
        *    is compared before it is ever displayed, and the mismatch is said.
+       *
+       *    THE CHECK USED TO LEAVE THE DANGEROUS ROW IN PLACE. It threw, and the
+       *    message said "Nothing has been shown to the payer. Revoke it and try
+       *    again" — but the row was already saved with status `active`, so
+       *    `generateReminderForDebt` picked it up and printed it, with the
+       *    amount and the network, in the very next reminder. A mismatched
+       *    address is one nobody holds the key to, so that reminder would have
+       *    sent a real payer's money somewhere unrecoverable. The row is now
+       *    revoked HERE, before anything is said, and the message reports
+       *    whether that succeeded rather than asserting a safety that was never
+       *    performed.
        */
       const stored = saved && saved.paymentAddress;
       if (
@@ -161,8 +219,20 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
         String(stored.address).toLowerCase() !== address.toLowerCase() ||
         Number(stored.derivationIndex) !== alloc.derivationIndex
       ) {
+        setBusy("Revoking the mismatched address");
+        let revoked = false;
+        if (stored && stored._id) {
+          try {
+            await revokePaymentAddress(stored._id);
+            revoked = true;
+          } catch {
+            /* reported in the message below, never swallowed */
+          }
+        }
         throw new Error(
-          "The address that was saved does not match the one this wallet derived. Nothing has been shown to the payer. Revoke it and try again."
+          revoked
+            ? "The address that was saved does not match the one this wallet derived, so it has been revoked and will not be shown to the payer or attached to any reminder. Try again."
+            : "The address that was saved does not match the one this wallet derived, and it could NOT be revoked automatically. It may still be attached to reminders for this invoice. Open the crypto section on this invoice and revoke it by hand before sending anything to your client."
         );
       }
 
@@ -243,7 +313,7 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
   const noChains = chains && chains.length === 0;
   const nothingOwed = quote && quote.balanceNgn <= 0;
   const alreadyActive = quote && quote.hasActiveAddress;
-  const blocked = Boolean(noChains || nothingOwed || alreadyActive || quoteError);
+  const blocked = Boolean(noChains || chainsError || nothingOwed || alreadyActive || quoteError);
 
   return (
     <Modal label="Crypto payment" onClose={onClose}>
@@ -278,6 +348,30 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
           </Select>
         </Field>
 
+        {/* Only offered where there is a real choice. On a testnet there is one
+            verified stablecoin, and a select with a single option is noise. */}
+        {tokens.length > 1 && (
+          <Field label="Token the payer sends">
+            <Select
+              value={tokenSymbol || ""}
+              onChange={(e) => setTokenSymbol(e.target.value)}
+              disabled={Boolean(busy)}
+            >
+              {tokens.map((t) => (
+                <option key={t.symbol} value={t.symbol}>
+                  {t.symbol} · {t.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+
+        {chainsError && (
+          <p className="error-text" style={{ margin: 0 }}>
+            {chainsError}
+          </p>
+        )}
+
         {noChains && (
           <p className="error-text" style={{ margin: 0 }}>
             No network with a configured stablecoin is enabled, so an address cannot be issued.
@@ -290,7 +384,7 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
           </p>
         )}
 
-        {!quote && !quoteError && !noChains ? (
+        {!quote && !quoteError && !noChains && !chainsError ? (
           <SkeletonLines count={3} />
         ) : quote ? (
           <>
@@ -306,8 +400,20 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
               <div>
                 <dt>Rate used</dt>
                 <dd className="num">
-                  {ngn(quote.ngnPerUsd)} per USDC
-                  <span className="quote-sub">{agoLabel(quote.rateTimestamp)}</span>
+                  {/* The token the quote is actually priced in, never the
+                      literal "USDC": this dialog can now issue a USDT address,
+                      and a rate labelled with the wrong token is the first step
+                      towards a payer sending the wrong one. */}
+                  {ngn(quote.ngnPerUsd)} per {(quote.token && quote.token.symbol) || "USDC"}
+                  {/* A FALLBACK RATE IS NOT A FRESH ONE. When the price feed is
+                      unreachable the server quotes from NGN_PER_USD_FALLBACK and
+                      stamps the timestamp `now`, so this line used to read "just
+                      now" for a hardcoded constant. The quote is then frozen into
+                      the invoice for life, so the whole gap between that constant
+                      and the market is absorbed by the business. Say which it is. */}
+                  <span className="quote-sub">
+                    {quote.rateStale ? "fallback rate, not live" : agoLabel(quote.rateTimestamp)}
+                  </span>
                 </dd>
               </div>
               <div>
@@ -328,10 +434,10 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
             </dl>
 
             <p className="muted small" style={{ margin: 0 }}>
-              The USDC figure is rounded up to the cent, so a payer who sends exactly this
-              amount always clears the invoice in full. It is locked to the rate above when you
-              create the address, so a later move in the rate cannot leave this debtor still
-              owing money.
+              The {(quote.token && quote.token.symbol) || "stablecoin"} figure is rounded up to
+              the cent, so a payer who sends exactly this amount always clears the invoice in
+              full. It is locked to the rate above when you create the address, so a later move
+              in the rate cannot leave this debtor still owing money.
             </p>
           </>
         ) : null}

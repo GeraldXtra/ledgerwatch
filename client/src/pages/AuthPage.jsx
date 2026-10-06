@@ -192,7 +192,25 @@ export default function AuthPage() {
     const errs = {};
     if (isRegister && !form.name.trim()) errs.name = "Enter your name";
     if (!EMAIL_RE.test(form.email.trim())) errs.email = "Enter a valid email address";
-    if (form.password.length < 6) errs.password = "Must be at least 6 characters";
+    /**
+     * EIGHT ON THE WAY IN, NOTHING ON THE WAY BACK.
+     *
+     * This asked for six on both forms. The server has required eight at
+     * registration for a while — see the note in `register` in
+     * auth.controller.js — so a seven character password passed here and came
+     * back as a server error, and the reset flow then demanded eight from
+     * somebody who had been let in with six. The floor also applies to an
+     * account that can switch on live mainnet trading.
+     *
+     * Registration ONLY. Accounts created before the server changed still have
+     * short passwords, and a minimum applied to sign in would lock them out of
+     * their own wallet over a rule about choosing a password.
+     */
+    if (isRegister && form.password.length < 8) {
+      errs.password = "Must be at least 8 characters";
+    } else if (!isRegister && !form.password) {
+      errs.password = "Enter your password";
+    }
     return errs;
   }
 

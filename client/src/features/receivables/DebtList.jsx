@@ -29,9 +29,9 @@ export default function DebtList({
   onRemind,
   onRecordPayment,
   onAdd,
-  // Debt ids with a live crypto payment address. Shown as a chip so the ledger
-  // answers "which invoices are awaiting a stablecoin payment" at a glance,
-  // rather than requiring each row to be opened.
+  // Map of debt id -> the stablecoin its live payment address accepts. Shown as
+  // a chip so the ledger answers "which invoices are awaiting a stablecoin
+  // payment" at a glance, rather than requiring each row to be opened.
   cryptoIds,
 }) {
   if (!debts.length) {
@@ -89,6 +89,12 @@ export default function DebtList({
             const balance = debt.balance != null ? debt.balance : debt.amount;
             const isSel = selected && selected.has(debt._id);
             const hasCrypto = cryptoIds && cryptoIds.has(String(debt._id));
+            // The token this invoice's address actually accepts. The chip used
+            // to read "USDC" on every row, including invoices issued in USDT,
+            // and this is the marker an owner glances at across a whole list.
+            // When the symbol is missing the chip says "Crypto" rather than
+            // naming a token that may be the wrong one.
+            const cryptoSymbol = hasCrypto ? cryptoIds.get(String(debt._id)) : null;
             return (
               <tr key={debt._id} className={`clickable-row ${isSel ? "row-selected" : ""}`}>
                 <td data-label="" className="check-col" onClick={(e) => e.stopPropagation()}>
@@ -107,8 +113,15 @@ export default function DebtList({
                       <div className="lead-sub num">
                         {debt.debtorPhone || "no phone on file"}
                         {hasCrypto && (
-                          <span className="crypto-chip" title="Awaiting a crypto payment">
-                            <Coins size={11} /> USDC
+                          <span
+                            className="crypto-chip"
+                            title={
+                              cryptoSymbol
+                                ? `Awaiting a ${cryptoSymbol} payment`
+                                : "Awaiting a crypto payment"
+                            }
+                          >
+                            <Coins size={11} /> {cryptoSymbol || "Crypto"}
                           </span>
                         )}
                       </div>

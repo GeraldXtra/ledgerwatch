@@ -8,7 +8,10 @@ import TokenLogo from "../../components/TokenLogo";
 import { getProvider, ERC20_ABI, rpcErrorReason } from "../wallet/provider";
 import { coinIdForSymbol, stableUsdPrice } from "../wallet/usdValue";
 import { fetchTxs } from "../wallet/walletApi";
-import { usd, signedUsd } from "./format";
+// `usd` for totals and money figures, `fmtPrice` for a COIN PRICE: `usd` caps at
+// two decimals, so a real holding of a sub-cent coin was priced at "$0" in the
+// table below while its value column showed the correct figure.
+import { usd, signedUsd, price as fmtPrice } from "./format";
 import { tokensForChain, CASH_CHOICES, cashTokenFor, cashChoiceOf } from "./tradeability";
 
 /**
@@ -39,6 +42,13 @@ export default function LivePortfolioPanel({
   reloadKey = 0,
   cashSymbol = "USDC",
   onCashSymbol,
+  /**
+   * The user's own added tokens. Without these the panel listed ONLY the dozen
+   * assets the registry carries, so anything bought through the universal
+   * resolver — which is the entire point of that feature — was invisible here
+   * the moment it was bought: no balance, no value, and no row to sell from.
+   */
+  customTokens = [],
 }) {
   const [rows, setRows] = useState(null);
   const [txs, setTxs] = useState([]);
@@ -46,6 +56,16 @@ export default function LivePortfolioPanel({
   // Why the whole read failed, when it did. Live mode must never fall back to a
   // paper figure, so the honest alternative is to say what went wrong.
   const [loadError, setLoadError] = useState(null);
+  /**
+   * WHY THE TRADE HISTORY IS EMPTY, WHEN IT IS (LW-029).
+   *
+   * The history fetch was `.catch(() => [])`, so a failed read became an empty
+   * list and the table then labelled every holding "not bought here" and hid the
+   * Live trades list entirely — both stated as facts about the owner's history,
+   * when the history had simply not been read. The balance half of this panel is
+   * scrupulous about that distinction and the history half was not.
+   */
+  const [txError, setTxError] = useState(null);
   const [copied, setCopied] = useState(false);
   const [qr, setQr] = useState("");
 
@@ -54,11 +74,20 @@ export default function LivePortfolioPanel({
     setLoading(true);
     setLoadError(null);
     try {
-      const history = await fetchTxs(chain.chainId).catch(() => []);
+      let history = [];
+      try {
+        history = await fetchTxs(chain.chainId);
+        setTxError(null);
+      } catch (histErr) {
+        history = [];
+        setTxError(
+          histErr?.response?.data?.error || histErr?.message || "the server did not answer"
+        );
+      }
       setTxs(history);
 
       const provider = getProvider(chain.chainId);
-      const tokens = tokensForChain(chain);
+      const tokens = tokensForChain(chain, customTokens);
 
       const balances = await Promise.all(
         tokens.map(async (t) => {
@@ -91,9 +120,12 @@ export default function LivePortfolioPanel({
       setLoading(false);
     }
     // `reloadKey` is a deliberate dependency: bumping it is how the page asks
-    // for a reread after a swap.
+    // for a reread after a swap. `customTokens` is one too — adding a token has
+    // to make it appear here without a page reload, which is the point of
+    // adding it. `onRows` is excluded on purpose: it is a setState from the
+    // parent and including it re-creates this callback on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chain, address, reloadKey]);
+  }, [chain, address, reloadKey, customTokens]);
 
   useEffect(() => {
     load();
@@ -141,16 +173,45 @@ export default function LivePortfolioPanel({
    * an invented one.
    */
   const basis = useMemo(() => {
+    /**
+     * THE SELL LEG WAS DESCRIBED ABOVE AND NEVER WRITTEN.
+     *
+     * The loop had the buy branch and no `else`, so nothing was ever released.
+     * Buy one coin at 3,000, sell all of it, buy again at 4,000 and the table
+     * averaged all three into a cost of 3,500 — a price nobody ever paid — and
+     * reported a profit that did not exist, with no caveat, next to real money.
+     * A comment describing behaviour the code does not have is this project's
+     * documented failure mode written down.
+     *
+     * OLDEST FIRST. `/api/wallet/txs` sorts newest first, and a running average
+     * that consumes its own history backwards is not a running average at all,
+     * so the rows are reversed before they are accumulated.
+     *
+     * A swap records the token it SPENT as `symbol`/`value` and the token it
+     * received as `tokenOutSymbol`/`amountOut`, so a buy is keyed on the output
+     * and a sell on the input.
+     */
     const acc = {};
-    for (const s of swaps) {
-      const bought = s.tokenOutSymbol;
-      const spent = Number(s.value) || 0;
-      const got = Number(s.amountOut) || 0;
-      if (!bought || got <= 0) continue;
-      if (!acc[bought]) acc[bought] = { qty: 0, cost: 0 };
+    const oldestFirst = [...swaps].reverse();
+    for (const s of oldestFirst) {
       if (s.side === "buy") {
+        const bought = s.tokenOutSymbol;
+        const spent = Number(s.value) || 0;
+        const got = Number(s.amountOut) || 0;
+        if (!bought || got <= 0) continue;
+        if (!acc[bought]) acc[bought] = { qty: 0, cost: 0 };
         acc[bought].qty += got;
         acc[bought].cost += spent;
+      } else if (s.side === "sell") {
+        const sold = s.symbol;
+        const qtySold = Number(s.value) || 0;
+        const a = acc[sold];
+        if (!sold || qtySold <= 0 || !a || a.qty <= 0) continue;
+        // A proportional share of the cost leaves with the quantity, so the
+        // average cost of what remains is unchanged by the sale itself.
+        const share = Math.min(1, qtySold / a.qty);
+        a.cost = Math.max(0, a.cost - a.cost * share);
+        a.qty = Math.max(0, a.qty - qtySold);
       }
     }
     return acc;
@@ -382,7 +443,7 @@ export default function LivePortfolioPanel({
                         r.qty.toLocaleString(undefined, { maximumFractionDigits: 6 })
                       )}
                     </td>
-                    <td className="ta-right num">{price ? usd(price) : "No price"}</td>
+                    <td className="ta-right num">{price ? fmtPrice(price) : "No price"}</td>
                     <td className="ta-right num">{value != null ? usd(value) : "Not counted"}</td>
                     <td className="ta-right num">
                       {cost != null ? (
@@ -395,6 +456,10 @@ export default function LivePortfolioPanel({
                             </span>
                           )}
                         </>
+                      ) : txError ? (
+                        // Never "not bought here" on a history that was not
+                        // read: that is a statement about the owner's past.
+                        <span className="muted caption">history not read</span>
                       ) : (
                         <span className="muted caption">not bought here</span>
                       )}
@@ -406,6 +471,14 @@ export default function LivePortfolioPanel({
           </table>
           </div>
         </>
+      )}
+
+      {txError && (
+        <p className="muted caption" style={{ marginTop: 16 }}>
+          Your live trade history could not be read ({txError}), so cost and profit are not shown
+          against these holdings and the list of live trades is not below. Nothing about your
+          balances above depends on it.
+        </p>
       )}
 
       {swaps.length > 0 && (

@@ -104,24 +104,86 @@ const DEFAULT_CONFIRMATIONS = {
   43114: 60, // Avalanche C-Chain: ~63s at the measured 1.05s block
 };
 
+/**
+ * The floor a CONFIRMATIONS_<chainId> override may not go below.
+ *
+ * The guard here used to be `if (override && !Number.isNaN(Number(override)))`,
+ * which accepts 0 — the string "0" is truthy and Number("0") is not NaN — and
+ * accepts negatives, and accepts a value that is nothing but whitespace, since
+ * Number(" ") is 0. A depth of zero means an invoice is marked paid, a receipt
+ * is emailed and reminders are cancelled on a transfer with no confirmations at
+ * all, which on a mainnet can still be reorganised out of existence. The
+ * user-facing override path in cryptoSettings.service has clamped to [1, 300]
+ * all along; this path, which is the one a deployment actually uses, clamped
+ * nothing. A bad value is now refused, said out loud once, and the measured
+ * default is used instead — never a shallower depth than the default.
+ */
+const MIN_ENV_CONFIRMATIONS = 1;
+const MAX_ENV_CONFIRMATIONS = 300;
+const warnedConfirmations = new Set();
+
 function confirmationsFor(chainId) {
-  const override = process.env[`CONFIRMATIONS_${chainId}`];
-  if (override && !Number.isNaN(Number(override))) return Number(override);
-  return DEFAULT_CONFIRMATIONS[Number(chainId)] || 12;
+  const fallback = DEFAULT_CONFIRMATIONS[Number(chainId)] || 12;
+  const raw = process.env[`CONFIRMATIONS_${chainId}`];
+  if (raw === undefined || String(raw).trim() === "") return fallback;
+
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < MIN_ENV_CONFIRMATIONS || n > MAX_ENV_CONFIRMATIONS) {
+    if (!warnedConfirmations.has(String(chainId))) {
+      warnedConfirmations.add(String(chainId));
+      console.error(
+        `CONFIRMATIONS_${chainId} is "${raw}", which is not a depth between ` +
+          `${MIN_ENV_CONFIRMATIONS} and ${MAX_ENV_CONFIRMATIONS}. Ignoring it and using the ` +
+          `measured default of ${fallback} blocks. Settling an invoice at zero confirmations ` +
+          `would credit money a reorg can still remove.`
+      );
+    }
+    return fallback;
+  }
+  return Math.round(n);
+}
+
+/**
+ * A MISTYPED NUMBER MUST NOT REMOVE A GUARD.
+ *
+ * These three were `Number(process.env.X || default)` with nothing after it, so
+ * a stray letter or a unit ("20/hr") made them NaN and every comparison against
+ * them then read false. The address cap is the dangerous one: `recent >= NaN`
+ * is always false, so the limit that stops an account burning through
+ * derivation indices was switched off entirely, silently. `GRACE_DAYS` as NaN
+ * produces an Invalid Date and the grace query then matches nothing, which
+ * stops late payments being found at all.
+ *
+ * index.js already refuses to boot on a bad JWT_SECRET; the same instinct
+ * applies here, except that these have a safe default to fall back to, so the
+ * value is refused loudly rather than the process being killed.
+ */
+function positiveEnvNumber(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || String(raw).trim() === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    console.error(
+      `${name} is "${raw}", which is not a positive number. Using ${fallback} instead. ` +
+        `Left as it was, this would have disabled the guard it configures rather than tightening it.`
+    );
+    return fallback;
+  }
+  return n;
 }
 
 // After expiry an address stops being actively watched, but money sent late must
 // never vanish silently — it stays under a low-frequency grace watch this long.
-const GRACE_DAYS = Number(process.env.PAYMENT_GRACE_DAYS || 30);
+const GRACE_DAYS = positiveEnvNumber("PAYMENT_GRACE_DAYS", 30);
 
 // How often a single expired address is re-checked during that grace window.
 // The active pass runs every minute; re-scanning every expired address that often
 // for 30 days would be a large, pointless RPC bill, since late payments are rare
 // and not urgent. One cheap balance check an hour is plenty.
-const GRACE_SCAN_MINUTES = Number(process.env.PAYMENT_GRACE_SCAN_MINUTES || 60);
+const GRACE_SCAN_MINUTES = positiveEnvNumber("PAYMENT_GRACE_SCAN_MINUTES", 60);
 
 // Guard against derivation-index abuse (each generation burns an index forever).
-const MAX_ADDRESSES_PER_HOUR = Number(process.env.MAX_PAYMENT_ADDRESSES_PER_HOUR || 20);
+const MAX_ADDRESSES_PER_HOUR = positiveEnvNumber("MAX_PAYMENT_ADDRESSES_PER_HOUR", 20);
 
 module.exports = {
   RECEIVABLES_BRANCH,

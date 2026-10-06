@@ -28,7 +28,10 @@ const BASE_KEY = "ledgerwatch.wallet.keystore";
  * adopting it for whichever account happens to log in first is the bug this
  * module was changed to fix.
  */
-export const LEGACY_KEY = BASE_KEY;
+// Not exported: it is referenced only by the claim and discard helpers below,
+// and an exported handle on the pre-scoping keystore is an invitation to read
+// somebody else's wallet from another module.
+const LEGACY_KEY = BASE_KEY;
 
 /** Account id from the bearer token's payload, or null when logged out. */
 function activeUserId() {

@@ -1,0 +1,85 @@
+#!/bin/sh
+# Pre-commit guard — the local half of SECURITY.md 4.1 item 1.
+#
+# WHY THIS IS A TRACKED FILE AND NOT .git/hooks/pre-commit
+#
+# .git/hooks is not part of the repository, so a hook written there protects one
+# clone on one machine and is gone the next time the project is checked out. This
+# lives in .githooks/, which IS tracked, and is switched on once per clone with:
+#
+#     git config core.hooksPath .githooks
+#
+# CI runs gitleaks over the full history and is the real gate. This hook exists so
+# the failure happens in two seconds on the desk instead of two minutes later in a
+# pull request, and so a secret is never written into a commit object at all —
+# because once it is, removing it means rewriting history, which is what LW-001
+# already cost this project once.
+#
+# To bypass deliberately (and you should have a reason): git commit --no-verify
+
+set -e
+
+fail() {
+  echo ""
+  echo "  COMMIT REFUSED — $1"
+  echo ""
+  echo "  $2"
+  echo ""
+  echo "  See docs/SECURITY.md section 6. If this is a false positive, commit with"
+  echo "  --no-verify and add the pattern to .gitleaks.toml so CI agrees with you."
+  echo ""
+  exit 1
+}
+
+# Only look at what is actually being committed. Scanning the whole tree would
+# flag the three phrase files that live in the working copy on purpose.
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+# ---------------------------------------------------------------------------
+# 1. The path that leaked before, and anything shaped like it
+# ---------------------------------------------------------------------------
+for f in $staged; do
+  case "$f" in
+    acccountSecretPhrase/*|*.seed|*.mnemonic|*secret*phrase*|keystore*.json|.env|*/.env)
+      fail "a secret-shaped path is staged" "$f"
+      ;;
+  esac
+done
+
+# ---------------------------------------------------------------------------
+# 2. A recovery phrase in the content
+#
+# Twelve or more lowercase words in a row on one line. Prose is punctuated and
+# capitalised; a BIP-39 phrase is exactly this and nothing else.
+# ---------------------------------------------------------------------------
+phrase=$(git diff --cached -U0 -- $staged \
+  | grep '^+' | grep -v '^+++' \
+  | grep -Ei '\b([a-z]{3,8} ){11,}[a-z]{3,8}\b' \
+  | grep -Eiv '(example|placeholder|abandon abandon|test vector)' \
+  | head -3 || true)
+if [ -n "$phrase" ]; then
+  fail "a line looks like a BIP-39 recovery phrase" "$phrase"
+fi
+
+# ---------------------------------------------------------------------------
+# 3. A raw private key in the content
+# ---------------------------------------------------------------------------
+key=$(git diff --cached -U0 -- $staged \
+  | grep '^+' | grep -v '^+++' \
+  | grep -Ei '(private[_-]?key|privkey|secret[_-]?key)["'"'"'[:space:]:=]{1,10}(0x)?[a-f0-9]{64}' \
+  | head -3 || true)
+if [ -n "$key" ]; then
+  fail "a line looks like a raw private key" "$key"
+fi
+
+# ---------------------------------------------------------------------------
+# 4. gitleaks, when it is installed. Never a hard requirement: a hook that
+#    refuses to run without a tool nobody has is a hook people delete.
+# ---------------------------------------------------------------------------
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact --config .gitleaks.toml --no-banner \
+    || fail "gitleaks found a secret in the staged changes" "see the output above"
+fi
+
+exit 0

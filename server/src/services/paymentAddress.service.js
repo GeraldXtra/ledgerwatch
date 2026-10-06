@@ -3,7 +3,7 @@ const Debt = require("../models/Debt");
 const PaymentAddress = require("../models/PaymentAddress");
 const { getChain } = require("../config/chains");
 const { MAX_ADDRESSES_PER_HOUR, confirmationsFor } = require("../config/derivation");
-const { attachTotals, toleratedShortfallNgn } = require("./receivables.service");
+const { attachTotals, toleratedShortfallNgn, paidForDebt } = require("./receivables.service");
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -46,7 +46,7 @@ async function allocateIndex(userId) {
 async function getNgnRate() {
   const fallback = Number(process.env.NGN_PER_USD_FALLBACK || 1600);
   try {
-    // eslint-disable-next-line global-require
+     
     const { getNgnPrice } = require("./coingecko.service");
     if (typeof getNgnPrice === "function") {
       const row = await getNgnPrice("usd-coin");
@@ -64,6 +64,19 @@ async function getNgnRate() {
   } catch {
     /* fall through to the configured rate */
   }
+  /**
+   * `stale: true` is the honest part and was always here. `fetchedAt` is the
+   * dishonest part: there is no moment at which this rate was fetched, because
+   * it is an environment variable. It is stamped `now` because `rateTimestamp`
+   * is a required Date on the model and the invoice needs an issuance time — but
+   * every caller must read `stale` alongside it rather than treating the
+   * timestamp as freshness. The stored `rateIsFallback` carries that to the
+   * interface, which shows it beside the rate.
+   */
+  console.warn(
+    `[paymentAddress] NGN rate unavailable; using the configured fallback of ${fallback}. ` +
+      "Any invoice quoted now is fixed at that rate for its whole life."
+  );
   return { rate: fallback, fetchedAt: new Date(), stale: true };
 }
 
@@ -224,7 +237,7 @@ async function issueAddress({ userId, debtId, chainId, address, derivationIndex,
    */
   let decimals = token.decimals;
   try {
-    // eslint-disable-next-line global-require
+     
     const { rpcCall } = require("./rpc.service");
     const res = await rpcCall(chain, "eth_call", [{ to: token.address, data: "0x313ce567" }, "latest"]);
     if (res && res !== "0x") {
@@ -243,21 +256,72 @@ async function issueAddress({ userId, debtId, chainId, address, derivationIndex,
     console.warn(`[paymentAddress] could not read ${token.symbol} decimals: ${err.message}`);
   }
 
-  const record = await PaymentAddress.create({
-    userId,
-    debtId,
-    chainId: chain.chainId,
-    derivationIndex,
-    address,
-    tokenSymbol: token.symbol,
-    tokenContract: token.address,
-    tokenDecimals: decimals,
-    invoiceBalanceNgn: balance,
-    expectedUsdc: usdcForNgn(balance, rate),
-    ngnPerUsd: rate,
-    rateTimestamp: fetchedAt,
-    expiresAt: new Date(Date.now() + hours * HOUR_MS),
-  });
+  /**
+   * The `existing` check above is not atomic, so the database has the last word:
+   * a partial unique index on {debtId} for `active` rows. Two simultaneous
+   * requests both pass the check and one of them loses here, which must read as
+   * the same 409 the check produces rather than as a 500 — from the caller's
+   * side it is the same situation, arrived at a few milliseconds later.
+   */
+  let record;
+  try {
+    record = await PaymentAddress.create({
+      userId,
+      debtId,
+      chainId: chain.chainId,
+      derivationIndex,
+      address,
+      tokenSymbol: token.symbol,
+      tokenContract: token.address,
+      tokenDecimals: decimals,
+      invoiceBalanceNgn: balance,
+      expectedUsdc: usdcForNgn(balance, rate),
+      ngnPerUsd: rate,
+      rateTimestamp: fetchedAt,
+      // Persisted so the invoice can say so for as long as it exists. See the
+      // field's note on the model for why the timestamp cannot carry this.
+      rateIsFallback: Boolean(stale),
+
+      /**
+       * THE ONLY PLACE `quote` IS EVER WRITTEN. (LW-005, BUILD_PLAN P1-1.)
+       *
+       * Identical values to the fields above, at this instant — and that is the
+       * point. From here they diverge: `expectedUsdc` follows what is still
+       * owed, `quote.expectedUsdc` stays what the payer was asked for. Nothing
+       * else may assign to `quote`; `resyncActivePaymentAddress` asserts it.
+       */
+      quote: {
+        invoiceBalanceNgn: balance,
+        expectedUsdc: usdcForNgn(balance, rate),
+        ngnPerUsd: rate,
+        rateTimestamp: fetchedAt,
+        rateIsFallback: Boolean(stale),
+        issuedAt: new Date(),
+        reconstructed: false,
+      },
+
+      expiresAt: new Date(Date.now() + hours * HOUR_MS),
+    });
+  } catch (err) {
+    if (err && err.code === 11000) {
+      // WHICH constraint refused it decides what the caller is told. Reporting
+      // "already has an active address" for a reused derivation index or a
+      // duplicate address would send somebody looking in the wrong place.
+      const keys = Object.keys((err && err.keyPattern) || {});
+      console.warn(
+        `[paymentAddress] issue for invoice ${debtId} refused by a unique index on ` +
+          `${keys.join(",") || "an unknown key"}; nothing was written.`
+      );
+      if (keys.includes("debtId")) {
+        throw httpError(409, "This invoice already has an active payment address.");
+      }
+      if (keys.includes("address")) {
+        throw httpError(409, "That address is already issued against another invoice.");
+      }
+      throw httpError(409, "That derivation index has already been used. Try again.");
+    }
+    throw err;
+  }
 
   debt.history.push({ event: "crypto_address_issued" });
   await debt.save();
@@ -299,11 +363,9 @@ const TOLERANCE = Number(process.env.USDC_SETTLEMENT_TOLERANCE || 0.005);
  */
 async function resyncActivePaymentAddress(debtId) {
   try {
-    // eslint-disable-next-line global-require
+     
     const PaymentAddress = require("../models/PaymentAddress");
-    // eslint-disable-next-line global-require
-    const Payment = require("../models/Payment");
-    // eslint-disable-next-line global-require
+     
     const Debt = require("../models/Debt");
 
     const pa = await PaymentAddress.findOne({ debtId, status: "active" });
@@ -314,11 +376,7 @@ async function resyncActivePaymentAddress(debtId) {
 
     // COMBINED total across every method — bank, cash, crypto, manual. The whole
     // point is that one method's payment changes what the other must ask for.
-    const rows = await Payment.aggregate([
-      { $match: { debtId: pa.debtId } },
-      { $group: { _id: null, paid: { $sum: "$amount" } } },
-    ]);
-    const paid = rows.length ? rows[0].paid : 0;
+    const paid = await paidForDebt(pa.debtId);
     const remainingNgn = Math.max(0, (debt.amount || 0) - paid);
 
     /**
@@ -334,6 +392,8 @@ async function resyncActivePaymentAddress(debtId) {
      * stop ASKING for money it is still owed.
      */
     if (remainingNgn <= toleratedShortfallNgn(debt.amount) || remainingNgn <= 0) {
+      // The EXPECTATION goes to zero. The quote does not: what the payer was
+      // asked for remains what they were asked for, whoever ended up paying it.
       pa.expectedUsdc = 0;
       pa.status = "paid";
       await pa.save();
@@ -343,9 +403,32 @@ async function resyncActivePaymentAddress(debtId) {
     const expectedUsdc = usdcForNgn(remainingNgn, pa.ngnPerUsd);
     if (expectedUsdc === pa.expectedUsdc) return { updated: false, expectedUsdc, remainingNgn };
 
+    /**
+     * REWRITES THE EXPECTATION, NEVER THE QUOTE. (LW-005.)
+     *
+     * These two fields are what is STILL OWED, and rewriting them here is
+     * correct — it is what makes settlement's basis consistent (LW-004). What
+     * was wrong is that there was nowhere else for the ISSUANCE figure to live,
+     * so this line destroyed it.
+     *
+     * The assertion after the save is not decoration: it is the only thing that
+     * will catch a future edit adding `pa.quote.expectedUsdc = …` here, which
+     * would look entirely reasonable to whoever wrote it and would silently
+     * reintroduce the defect.
+     */
+    const quotedBefore = pa.quote ? pa.quote.expectedUsdc : undefined;
+
     pa.expectedUsdc = expectedUsdc;
     pa.invoiceBalanceNgn = remainingNgn;
     await pa.save();
+
+    if (pa.quote && pa.quote.expectedUsdc !== quotedBefore) {
+      console.error(
+        `[paymentAddress] INVARIANT BROKEN on ${pa.address}: the issuance quote changed during a ` +
+          `resync (${quotedBefore} -> ${pa.quote.expectedUsdc}). ARCHITECTURE.md invariant 6 says ` +
+          "quote.* is immutable after issuance. This is LW-005 returning."
+      );
+    }
     return { updated: true, expectedUsdc, remainingNgn, closed: false };
   } catch (err) {
     console.error("[paymentAddress] resync failed:", err.message);

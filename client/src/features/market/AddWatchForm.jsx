@@ -175,8 +175,16 @@ export default function AddWatchForm({ onAdded }) {
               <span className="num" style={{ color: "var(--ink)" }}>{fmtPrice(livePrice)}</span> now.{" "}
             </>
           ) : null}
-          {isPriceType(type)
-            ? "Tip: set Price below above the current price to trigger on the next check."
+          {/* One sentence used to serve both price conditions, and it only made
+              sense for one of them: it told somebody who had picked "Price
+              above" to set a value ABOVE the current price, which is the value
+              that will never fire. The first thing a new user does on this page
+              is add a watch, and following the tip produced one that looked
+              broken. Each condition now gets the advice that fires it. */}
+          {type === "price_below"
+            ? "Tip: set a value above the current price to trigger on the next check."
+            : type === "price_above"
+            ? "Tip: set a value below the current price to trigger on the next check."
             : "Measured from the price captured when the watch is created."}
         </p>
 

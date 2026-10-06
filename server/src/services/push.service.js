@@ -24,7 +24,7 @@ function getWebPush() {
   }
 
   try {
-    // eslint-disable-next-line global-require
+     
     webpush = require("web-push");
     webpush.setVapidDetails(
       VAPID_SUBJECT || "mailto:admin@ledgerwatch.app",
@@ -74,8 +74,25 @@ async function wantsCategory(userId, category) {
     const user = await User.findById(userId).select("notifyPrefs").lean();
     const prefs = (user && user.notifyPrefs) || {};
     return prefs[category] !== false;
-  } catch {
-    return true;
+  } catch (err) {
+    /**
+     * AN OPT-OUT THAT FAILS OPEN IS NOT AN OPT-OUT.
+     *
+     * This returned true — "assume they want it" — so during any database
+     * hiccup a person who had deliberately switched a category off started
+     * receiving it again, with nothing to explain why. Push payloads carry
+     * debtor names and amounts, so that also pushes customer data to a device
+     * the owner may have silenced on purpose.
+     *
+     * "We could not check" is not "they said yes". The notification is held
+     * back and the reason is logged; a missed notification is recoverable by
+     * opening the app, an unwanted one is not recoverable at all.
+     */
+    console.error(
+      `[push] could not read notification preferences for ${userId} (${err.message}); ` +
+        `holding back the "${category}" notification rather than assuming consent`
+    );
+    return false;
   }
 }
 

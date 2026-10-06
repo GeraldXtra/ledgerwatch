@@ -81,7 +81,7 @@ export const GUIDE = [
       img("signup.webp", "The create account form."),
       ol([
         "Open [useledgerwatch.co](https://useledgerwatch.co) and press **Get started**, or press **Create an account** on the sign in page.",
-        "Enter your full name, your email address and a password of at least six characters. You can also add your bank details here under **Bank details (optional)**; they can be added later in Settings.",
+        "Enter your full name, your email address and a password of at least eight characters. You can also add your bank details here under **Bank details (optional)**; they can be added later in Settings.",
         "Tick the verification box, then press **Create account**.",
         "Check your email for a six digit code. It is valid for thirty minutes. Type it in and press **Confirm and continue**. If it has not arrived, press **Send a new code**; if you typed the wrong address, press **Use a different email**.",
       ]),
@@ -647,9 +647,20 @@ export const GUIDE = [
       p(
         "Amounts are in the stablecoin. The daily figure is measured from every swap this account has signed in the last 24 hours. A trade that would pass a cap is blocked with the reason and how much room is left. The caps exist to stop a mistyped amount or a runaway loop; they are not a promise about the market."
       ),
+      h2("What can be traded live"),
+      p(
+        "Almost any listed coin that has a contract on the chosen network can be traded live. A dozen or so tokens per network are verified by hand against the chain and are treated as known; tokens you have added yourself by contract address are treated the same way. For everything else the contract address comes from the public coin index, and before it can be traded LedgerWatch reads the contract on that network to confirm something is there, that it reports the symbol and the number of decimals the listing claims, and that it is not copying a known token's symbol."
+      ),
+      h2("Checking the address before you buy"),
+      p(
+        "When the address came from the coin index rather than from the verified list, the confirm screen shows you the contract address, a link to open it on the explorer, the symbol and decimals the contract itself reports, and a box you must tick to say you have checked it. Until it is ticked the trade cannot be signed. Anyone can list a coin under a familiar name and a familiar logo, so the address is the only part that cannot be copied, and no automatic check can tell which of two similar listings you meant."
+      ),
+      p(
+        "You are asked once for each token on each network, in this browser. Anything the resolver wants you to know is shown beside the address on the same screen, for example when the contract calls itself something other than the listing does, which is normal for bridged and wrapped assets, or when the ticker is shared with a different token already verified on that network."
+      ),
       h2("What is not traded live"),
       p(
-        "A coin can be watched even when it has no pool on the chosen network. Choosing Buy on such an alert in live mode explains that it can only be traded on paper. Only the tokens verified in LedgerWatch's registry for that network, and tokens you have added by contract address, are traded live."
+        "A coin can be watched even when there is no way to trade it on the chosen network. Choosing Buy on such an alert explains which of these it is: there is no contract for that coin on this network, the network has no verified exchange, the price routes could not all be checked just now so no price was offered, the check against the chain could not be completed, or the coin is itself a dollar stablecoin. Each of those is a different answer and each says which it is. Watching still works in every case, and the coin can be traded on paper."
       ),
     ],
   },
@@ -669,7 +680,7 @@ export const GUIDE = [
         "Read the note about where your keys live, then press **Show recovery phrase**.",
         "Write the twelve words down, in order, on paper. This is the only way to restore the wallet if this browser is ever cleared or this device is lost. There is also a link to show the private key, which most people do not need.",
         "Tick **I have written down my recovery phrase** and press **Continue**.",
-        "Choose a wallet password of at least eight characters and confirm it. It encrypts the keys on this device and you enter it every time you send. Press **Create wallet**.",
+        "Choose a wallet password of at least twelve characters and confirm it. Three or four unrelated words work well. It encrypts the keys on this device, it is never sent anywhere, and unlike your account password it **cannot be reset** — so it has to be strong enough to survive somebody guessing at it offline. You enter it every time you send. Press **Create wallet**.",
       ]),
       img("wallet-create-password.webp", "The password step."),
       note(
@@ -1047,7 +1058,7 @@ export const GUIDE = [
         "Ask them for the transaction hash and open it on the explorer. Check the token, the network and the address match what they were given.",
         "A payment is listed as **Detected** within a few minutes of landing and becomes **Confirmed** once it is deep enough for that network's setting. A busy network can take longer.",
         "A payment after expiry is still found for thirty days and marked **Late**.",
-        "The wrong token, or the right token on the wrong network, is not recoverable. The panel lists a wrong token so you can see it happened.",
+        "The wrong token, or the right token on the wrong network, is not recoverable, and it is not listed on the panel either. Open the address on the explorer to see what actually arrived.",
       ]),
       h3("I cannot create a payment address"),
       p(
@@ -1056,8 +1067,10 @@ export const GUIDE = [
       h2("Market Watch"),
       h3("Prices delayed or unavailable"),
       p("The price feed is slow or rate limited. Your watches are still active and are checked with the next prices that arrive. Try again in a few minutes."),
-      h3("The Buy button says the coin can only be traded on paper"),
-      p("That coin has no verified pool on the selected network. Watching still works. See [Live trading](/docs/live-trading)."),
+      h3("The Buy button will not trade that coin live"),
+      p(
+        "The message says which reason it is: there is no contract for that coin on the selected network, the network has no verified exchange, the price routes could not all be checked just now, the check against the chain could not be completed, or the coin is a dollar stablecoin. The first two are facts about the network and will not change by trying again; the middle two mean the network was busy rather than broken, so try again in a few seconds. Watching still works in every case. See [Live trading](/docs/live-trading)."
+      ),
       h3("A trade was blocked by a cap"),
       p("The message says which cap and how much room is left. Lower the amount, or wait for the daily window to pass."),
       h2("Reminders"),

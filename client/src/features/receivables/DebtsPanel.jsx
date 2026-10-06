@@ -56,7 +56,10 @@ function sortDebts(debts, sort) {
   return asc ? out : out.reverse();
 }
 
-export default function DebtsPanel() {
+// `onLedgerChanged` is called after anything that moves money, so the figures
+// rail at the top of the page can restate itself instead of showing the numbers
+// it read when the page first loaded.
+export default function DebtsPanel({ onLedgerChanged }) {
   const toast = useToast();
   const { user } = useAuth();
   const [debts, setDebts] = useState([]);
@@ -80,8 +83,13 @@ export default function DebtsPanel() {
   // table can show which invoices are awaiting a stablecoin payment without
   // anyone having to open each one. `cryptoKey` bumps to re-read after an
   // address is issued or revoked.
+  //
+  // A Map rather than a Set: the chip used to print the literal "USDC" for every
+  // row, and an invoice can be issued in USDT wherever a verified contract
+  // exists. The symbol the payer was actually told to send is carried alongside
+  // the id so the ledger never names the wrong token.
   const [cryptoDebt, setCryptoDebt] = useState(null);
-  const [cryptoIds, setCryptoIds] = useState(() => new Set());
+  const [cryptoIds, setCryptoIds] = useState(() => new Map());
   const [cryptoKey, setCryptoKey] = useState(0);
   // Set when Generate Reminder had to issue an address first, so the reminder can
   // be generated as soon as that address exists.
@@ -107,6 +115,19 @@ export default function DebtsPanel() {
     }
   }, [search, status, from, to]);
 
+  /**
+   * Reload the ledger AND tell the page the figures moved.
+   *
+   * Deliberately separate from `load`, which also runs on every debounced
+   * keystroke in the search box: typing changes what is listed, not what is
+   * owed, and refetching the analytics on each keystroke would be a request per
+   * search with no new information in it.
+   */
+  const reloadAll = useCallback(async () => {
+    await load();
+    if (onLedgerChanged) onLedgerChanged();
+  }, [load, onLedgerChanged]);
+
   // Debounce search; other filters apply immediately.
   useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -124,11 +145,11 @@ export default function DebtsPanel() {
         if (!active) return;
         const ids = (data.addresses || [])
           .filter((a) => a.status === "active")
-          .map((a) => String(a.debtId));
-        setCryptoIds(new Set(ids));
+          .map((a) => [String(a.debtId), a.tokenSymbol || null]);
+        setCryptoIds(new Map(ids));
       })
       .catch(() => {
-        if (active) setCryptoIds(new Set());
+        if (active) setCryptoIds(new Map());
       });
     return () => {
       active = false;
@@ -158,23 +179,69 @@ export default function DebtsPanel() {
   async function createDebt(payload) {
     await http.post("/api/debts", payload);
     setAdding(false);
-    await load();
+    await reloadAll();
   }
   async function saveEdit(payload) {
     await http.patch(`/api/debts/${editing._id}`, payload);
     setEditing(null);
-    await load();
+    await reloadAll();
   }
   async function deleteDebt(debt) {
-    if (!window.confirm(`Delete debt for ${debt.debtorName}? This removes its payments and reminders.`)) return;
-    await http.delete(`/api/debts/${debt._id}`);
+    /**
+     * The old wording named the two harmless consequences and omitted the one
+     * that cannot be undone: the invoice's crypto payment address goes too, and
+     * with it the derivation index, which is the only record of which key
+     * reaches any money sitting at that address. The server now refuses when an
+     * address is still holding a confirmed balance; this says so up front, and
+     * reports the refusal instead of failing silently.
+     */
+    if (
+      !window.confirm(
+        `Delete the invoice for ${debt.debtorName}?
+
+` +
+          "This also removes its payments, its reminders and its crypto payment address. " +
+          "If that address is still holding money, sweep it first."
+      )
+    )
+      return;
+    try {
+      await http.delete(`/api/debts/${debt._id}`);
+    } catch (err) {
+      const data = err?.response?.data;
+      if (data?.code === "unswept_funds") {
+        const where = (data.addresses || [])
+          .map((a) => `${a.address} (${a.tokenSymbol})`)
+          .join(", ");
+        toast(
+          `${data.error}${where ? ` Address: ${where}` : ""}`,
+          { type: "error", duration: 12000 }
+        );
+        return;
+      }
+      toast(data?.error || "The invoice could not be deleted.", { type: "error" });
+      return;
+    }
     setDetailId(null);
-    await load();
+    await reloadAll();
   }
   async function markPaid(debt) {
-    await http.patch(`/api/debts/${debt._id}/paid`);
+    // This had no error path: a failed request produced an unhandled rejection
+    // and the screen did nothing at all, so the owner pressed the button again.
+    // Marking an invoice paid changes what is owed, and a silent failure leaves
+    // them chasing — or not chasing — on a balance they believe they corrected.
+    try {
+      await http.patch(`/api/debts/${debt._id}/paid`);
+    } catch (err) {
+      toast(
+        err?.response?.data?.error ||
+          `${debt.debtorName}'s debt could NOT be marked paid. The balance is unchanged.`,
+        { type: "error", duration: 9000 }
+      );
+      return;
+    }
     toast(`${debt.debtorName}'s debt marked fully paid`, { type: "success" });
-    await load();
+    await reloadAll();
   }
   /**
    * Generate a reminder, issuing the invoice's crypto payment address first if it
@@ -229,17 +296,42 @@ export default function DebtsPanel() {
     }
     setBulkBusy(true);
     let ok = 0;
+    /**
+     * EVERY FAILURE USED TO BE SWALLOWED AND THE RESULT ANNOUNCED IN GREEN.
+     *
+     * The loop counted successes, ignored every rejection, and then raised a
+     * success toast built from that count — so with the server unreachable the
+     * owner was congratulated with "Generated 0 reminders" and reasonably
+     * concluded the work was done. The failures are counted and named now, and
+     * the tone follows the outcome: green only when every one went through.
+     */
+    let failed = 0;
+    let firstError = "";
     for (const d of targets) {
       try {
         await http.post(`/api/debts/${d._id}/remind`);
         ok++;
-      } catch {
-        /* skip */
+      } catch (err) {
+        failed++;
+        if (!firstError) firstError = err?.response?.data?.error || "";
       }
     }
     setBulkBusy(false);
     clearSel();
-    toast(`Generated ${ok} reminder${ok === 1 ? "" : "s"}${label ? ` (${label})` : ""}.`, { type: "success" });
+    const scope = label ? ` (${label})` : "";
+    if (failed === 0) {
+      toast(`Generated ${ok} reminder${ok === 1 ? "" : "s"}${scope}.`, { type: "success" });
+    } else if (ok === 0) {
+      toast(
+        `No reminders were generated${scope}. All ${failed} failed.${firstError ? ` ${firstError}` : ""}`,
+        { type: "error", duration: 9000 }
+      );
+    } else {
+      toast(
+        `Generated ${ok} of ${ok + failed} reminders${scope}. ${failed} failed.${firstError ? ` ${firstError}` : ""}`,
+        { type: "error", duration: 9000 }
+      );
+    }
     await load();
   }
 
@@ -373,7 +465,7 @@ export default function DebtsPanel() {
           onMarkPaid={markPaid}
           onEdit={(d) => { setDetailId(null); setEditing(d); }}
           onDelete={deleteDebt}
-          onChanged={load}
+          onChanged={reloadAll}
           onCrypto={(d) => { setDetailId(null); setCryptoDebt(d); }}
           cryptoKey={cryptoKey}
         />

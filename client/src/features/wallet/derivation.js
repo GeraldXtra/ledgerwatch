@@ -83,14 +83,15 @@ export function deriveSignerFromWallet(master, index, provider) {
   return provider ? node.connect(provider) : node;
 }
 
-/**
- * Derive a SIGNER for `index`, connected to a provider. Used only for sweeping,
- * which is an outbound transaction and therefore always user-approved.
+/*
+ * A password-taking `deriveSigner(password, index, provider)` stood here and had
+ * no call sites at all: the sweep unlocks once and calls
+ * deriveSignerFromWallet per address, which is the entire reason that function
+ * takes an already-unlocked wallet. A second, unused route to a live private key
+ * sitting beside the live one is precisely the code a later change picks up
+ * without the reasoning that surrounds the real path, so it is gone. It is one
+ * line to restore from history if a caller ever genuinely needs it.
  */
-export async function deriveSigner(password, index, provider) {
-  const master = await unlockWallet(password);
-  return deriveSignerFromWallet(master, index, provider);
-}
 
 /**
  * Verify that a server-issued address really belongs to this seed at this index

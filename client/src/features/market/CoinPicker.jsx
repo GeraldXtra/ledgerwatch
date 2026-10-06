@@ -67,6 +67,18 @@ export default function CoinPicker({ value, onChange }) {
   const [loading, setLoading] = useState(false);
   const [quick, setQuick] = useState(quickCache);
   const [quickError, setQuickError] = useState("");
+  /**
+   * WHY THE RESULT LIST IS EMPTY, WHEN IT IS (LW-029).
+   *
+   * The search catch set `results` to `[]` and said nothing, and the dropdown
+   * renders "No coins match that search." for an empty list. So a rate limited
+   * or unreachable search told the user, as a fact, that the coin they typed
+   * does not exist — and they cannot add the watch, so they give up on a coin
+   * that is there. The same file already gets this right twice for prices. The
+   * coin search sits behind the CoinGecko circuit breaker, so a failure here is
+   * not a rarity.
+   */
+  const [searchError, setSearchError] = useState("");
   const wrapRef = useRef(null);
   const debounceRef = useRef(null);
 
@@ -98,13 +110,20 @@ export default function CoinPicker({ value, onChange }) {
       return;
     }
     setLoading(true);
+    setSearchError("");
     debounceRef.current = setTimeout(async () => {
       try {
         const { data } = await http.get("/api/coins/search", { params: { q: query } });
         setResults(data.coins || []);
+        setSearchError("");
         setOpen(true);
-      } catch {
+      } catch (err) {
         setResults([]);
+        setSearchError(
+          err?.response?.data?.error ||
+            "The coin search could not be reached, so this is not a list of what exists. Try again in a moment."
+        );
+        setOpen(true);
       } finally {
         setLoading(false);
       }
@@ -164,6 +183,10 @@ export default function CoinPicker({ value, onChange }) {
         <div className="coin-results" role="listbox">
           {loading ? (
             <div className="coin-result muted">Searching...</div>
+          ) : searchError ? (
+            /* The question was never answered, so nothing is stated about what
+               exists. Kept in the dropdown where the answer would have been. */
+            <div className="coin-result muted">{searchError}</div>
           ) : results.length === 0 ? (
             <div className="coin-result muted">No coins match that search.</div>
           ) : (

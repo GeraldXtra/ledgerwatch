@@ -7,11 +7,7 @@ const {
   generateReminderForDebt,
   dispatchReminder,
 } = require("../services/reminder.service");
-const {
-  attachTotals,
-  withDerived,
-  recomputeDebtStatus,
-} = require("../services/receivables.service");
+const { attachTotals, withDerived, recomputeDebtStatus, paidForDebt } = require("../services/receivables.service");
 const { resyncActivePaymentAddress } = require("../services/paymentAddress.service");
 const { onInvoiceSettled } = require("../services/settlement.service");
 
@@ -162,7 +158,20 @@ async function getOne(req, res) {
     const [withPaid] = await attachTotals(req.user._id, [debt]);
     return res.json({ debt: withPaid });
   } catch (err) {
-    return res.status(404).json({ error: "Debt not found" });
+    /**
+     * A MALFORMED ID IS NOT AN OUTAGE.
+     *
+     * This caught everything and answered "Debt not found", so a Mongo failure,
+     * a timeout or a bug in `attachTotals` all told the owner their invoice had
+     * been deleted. They then go looking for a record that is sitting there
+     * perfectly intact. Only a bad id — which is genuinely "no such thing" —
+     * keeps the 404; everything else says what it is.
+     */
+    if (err && err.name === "CastError") {
+      return res.status(404).json({ error: "Debt not found" });
+    }
+    console.error("getOne debt error:", err.message);
+    return res.status(500).json({ error: "Could not load that invoice just now." });
   }
 }
 
@@ -208,11 +217,8 @@ async function update(req, res) {
      * payment justified.
      */
     if (amountChanged) {
-      const agg = await Payment.aggregate([
-        { $match: { debtId: debt._id } },
-        { $group: { _id: null, paid: { $sum: "$amount" } } },
-      ]);
-      const paid = agg.length ? agg[0].paid : 0;
+      // THE canonical sum (LW-034). Was a hand-written aggregation, one of nine.
+      const paid = await paidForDebt(debt._id);
       if (Number(debt.amount) < paid) {
         return res.status(400).json({
           error: `The amount cannot be lower than the ${paid.toLocaleString("en-NG")} already recorded as paid on this invoice.`,
@@ -242,6 +248,64 @@ async function remove(req, res) {
     const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
+    /**
+     * REFUSE TO DELETE AN INVOICE THAT IS STILL HOLDING MONEY. (LW-103.)
+     *
+     * `PaymentAddress` is not bookkeeping. It is the only record of the
+     * DERIVATION INDEX, and the index is the only thing that says which key at
+     * m/44'/60'/0'/2/<n> reaches the funds at that address. Deleting the row
+     * deleted that, and `User.crypto.nextDerivationIndex` only ever moves
+     * forward, so the index cannot be recovered by counting either. The money
+     * stayed reachable in principle — the owner's recovery phrase still controls
+     * it — and unreachable in practice, because nothing left in the product
+     * could say where it was.
+     *
+     * The confirmation dialog said "This removes its payments and reminders",
+     * which was true and was not the dangerous part.
+     */
+    const addressesHeld = await PaymentAddress.find({
+      debtId: debt._id,
+      userId: req.user._id,
+    }).lean();
+
+    const holding = addressesHeld.filter((pa) => {
+      const seen = (pa.observed || [])
+        .filter((o) => o.status === "confirmed")
+        .reduce((sum, o) => sum + Number(o.value || 0) / 10 ** (pa.tokenDecimals || 6), 0);
+      const swept = (pa.sweeps || []).reduce((sum, x) => sum + (Number(x.amountUsdc) || 0), 0);
+      // One unit at the token's own precision, so floating-point noise in the
+      // division above cannot register as a balance.
+      return seen - swept > 1 / 10 ** (pa.tokenDecimals || 6);
+    });
+
+    const force = String(req.query.force || "").toLowerCase() === "true";
+    if (holding.length && !force) {
+      return res.status(409).json({
+        error:
+          "This invoice has a payment address that is still holding money. Sweep it first, " +
+          "or the record of which address it is will be gone.",
+        code: "unswept_funds",
+        addresses: holding.map((pa) => ({
+          address: pa.address,
+          chainId: pa.chainId,
+          tokenSymbol: pa.tokenSymbol,
+          derivationIndex: pa.derivationIndex,
+        })),
+      });
+    }
+
+    if (holding.length && force) {
+      // Deleted anyway, on the owner's explicit say-so. The index is the one
+      // fact that cannot be reconstructed, so it goes in the log where a human
+      // can still find it.
+      console.warn(
+        `[debts] invoice ${debt._id} deleted with unswept funds, forced by the owner. ` +
+          holding
+            .map((pa) => `${pa.address} (chain ${pa.chainId}, index ${pa.derivationIndex})`)
+            .join("; ")
+      );
+    }
+
     await Reminder.deleteMany({ debtId: debt._id, userId: req.user._id });
     await Payment.deleteMany({ debtId: debt._id, userId: req.user._id });
     // Payment addresses belong to the invoice. Left behind, the watch pass keeps
@@ -263,11 +327,8 @@ async function markPaid(req, res) {
     const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
-    const agg = await Payment.aggregate([
-      { $match: { debtId: debt._id } },
-      { $group: { _id: null, paid: { $sum: "$amount" } } },
-    ]);
-    const paidSoFar = agg.length ? agg[0].paid : 0;
+    // THE canonical sum (LW-034).
+    const paidSoFar = await paidForDebt(debt._id);
     const balance = (debt.amount || 0) - paidSoFar;
 
     let payment = null;
@@ -317,14 +378,41 @@ async function markPaid(req, res) {
      * from every path that closes an invoice.
      */
     if (payment) {
-      await onInvoiceSettled({
+      /**
+       * `markpaid:<debtId>:<paidSoFar>` IS AN IDEMPOTENCY KEY, NOT A REFERENCE.
+       *
+       * It is stored in `txHash` because that is where the unique index lives,
+       * and the receipt prints `txHash` as a "Transaction:" line — so a customer
+       * whose invoice was force settled received a receipt quoting an internal
+       * database id as though it were a payment reference. Force settling
+       * records money that moved somewhere this app cannot see; the honest
+       * receipt names no transaction at all.
+       */
+      const forReceipt = { ...payment.toObject(), txHash: null };
+
+      /**
+       * THE OUTCOME IS READ, NOT DISCARDED (LW-028). This call site was added
+       * after LW-028's table was written, so the register names only its twin
+       * in payments.controller. A receipt that never went out used to leave no
+       * trace here at all — not even a log line — while the owner saw the
+       * invoice close and assumed the customer had been told.
+       */
+      const settled = await onInvoiceSettled({
         debt,
-        payment,
+        payment: forReceipt,
         method: "bank",
         creditNgn: balance,
         totalPaid,
         fullyPaid: true,
-      }).catch(() => {});
+      }).catch((err) => ({ emailed: false, reason: err && err.message }));
+
+      if (settled && !settled.emailed) {
+        console.warn(
+          `[debts] no receipt sent for debt ${debt._id} after it was marked paid: ${
+            settled.reason || "unknown reason"
+          }`
+        );
+      }
     }
 
     return res.json({ debt: withDerived(debt, totalPaid) });

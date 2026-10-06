@@ -19,7 +19,7 @@ import { Link } from "react-router-dom";
 import { Button, Card, SkeletonLines, ToastProvider, useToast } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { getProvider, ERC20_ABI, rpcErrorReason } from "./provider";
-import { fetchUsdPrices, totalUsd, coinIdForSymbol, stableUsdPrice } from "./usdValue";
+import { fetchUsdPrices, totalUsd, coinIdForSymbol, stableUsdPrice, isVerifiedRow } from "./usdValue";
 import {
   hasWallet,
   getStoredAddress,
@@ -36,6 +36,7 @@ import {
   updateTxStatus,
   saveAddress,
   saveCustomToken,
+  removeCustomToken,
   fetchDiscoveredTokens,
   actOnDiscoveredToken,
 } from "./walletApi";
@@ -46,6 +47,7 @@ import TokenLogo from "../../components/TokenLogo";
 import { prefetchLogos } from "./tokenLogos";
 import BitcoinPanel from "./BitcoinPanel";
 import { clearBitcoinAddressCache } from "./bitcoin/addressCache";
+import { clearPendingSends } from "./bitcoin/pendingSend";
 import HoldingDetail from "./HoldingDetail";
 import CreateWalletModal from "./CreateWalletModal";
 import ImportWalletModal from "./ImportWalletModal";
@@ -75,6 +77,29 @@ import TxHistory from "./TxHistory";
 
 function shorten(a) {
   return a ? `${a.slice(0, 6)}...${a.slice(-4)}` : "";
+}
+
+/**
+ * IS THIS LOAD STILL THE CURRENT ONE?
+ *
+ * Reading a wallet is one round trip for the native coin and then one more for
+ * every token, in sequence, and nothing here used to cancel them. Switch network
+ * while they are in flight on a slow chain and the OLD chain's answers land
+ * afterwards, overwrite the new chain's, and are labelled with the new chain's
+ * name: "Held on Base" above Ethereum balances. The same ticker symbols exist on
+ * every chain, so there is nothing on screen to suggest the figure is wrong,
+ * which makes it exactly the wrong-number-in-right-clothes this project keeps
+ * having to unlearn. The prices path reasoned about this and concluded it was
+ * safe there (a dollar price is the same on every chain) while noting the same
+ * pattern WOULD be unsafe for balances. It was.
+ *
+ * Every loader takes the run token the effect owns and checks it before each
+ * setState. The default of `undefined` is deliberate: a loader wired straight to
+ * an onClick receives a MouseEvent instead, which has no `live`, and must still
+ * be allowed to write.
+ */
+function stillCurrent(run) {
+  return !run || run.live !== false;
 }
 
 function usd(n) {
@@ -147,6 +172,9 @@ function WalletInner() {
   // refresh", which gives the user nothing to act on.
   const [balError, setBalError] = useState(null);
   const [txs, setTxs] = useState([]);
+  // Why the history could not be read, when it could not. An empty list and a
+  // failed read are different facts and the Activity tab says which.
+  const [txsError, setTxsError] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -193,6 +221,7 @@ function WalletInner() {
     setLegacy(getLegacyWallet());
     setBalances(null);
     setTxs([]);
+    setTxsError(null);
     setDiscovered(null);
   }, [user?._id]);
 
@@ -206,8 +235,14 @@ function WalletInner() {
         setChains(usable);
         setEnableMainnet(Boolean(d.enableMainnet));
         // Restore the chain chosen earlier this session rather than snapping
-        // back to the first in the list on every reload.
-        if (usable.length) setChainId((prev) => prev || recallChain(usable));
+        // back to the first in the list on every reload. Bitcoin is offered
+        // from the same menu, so it has to be among the candidates here too or
+        // a Bitcoin user is silently returned to an EVM chain on every reload.
+        const selectable = [
+          ...usable,
+          ...BITCOIN_CHAINS.filter((c) => c.testnet || d.enableMainnet),
+        ];
+        if (selectable.length) setChainId((prev) => prev || recallChain(selectable));
       })
       .catch(() => setChains([]));
   }, []);
@@ -222,14 +257,19 @@ function WalletInner() {
     return [...(chain.tokens || []), ...custom];
   }, [chain, user?.customTokens]);
 
-  const loadBalances = useCallback(async () => {
+  const loadBalances = useCallback(async (run) => {
     if (!address || !chain) return;
     setBalLoading(true);
     try {
       const provider = getProvider(chain.chainId);
       const native = await provider.getBalance(address);
       const rows = [
-        { symbol: chain.nativeSymbol, amount: ethers.formatEther(native), native: true },
+        {
+          symbol: chain.nativeSymbol,
+          amount: ethers.formatEther(native),
+          native: true,
+          verified: true,
+        },
       ];
       for (const t of chainTokens) {
         try {
@@ -240,6 +280,9 @@ function WalletInner() {
             amount: ethers.formatUnits(bal, t.decimals),
             native: false,
             custom: Boolean(t.custom),
+            // Only a registry token has a contract anybody checked. See
+            // isVerifiedRow in usdValue.js for what this gates.
+            verified: !t.custom,
             address: t.address,
           });
         } catch (tokenErr) {
@@ -260,17 +303,21 @@ function WalletInner() {
             reason: rpcErrorReason(tokenErr),
             native: false,
             custom: Boolean(t.custom),
+            verified: !t.custom,
             address: t.address,
           });
         }
       }
+      if (!stillCurrent(run)) return;
       setBalances(rows);
       setBalError(null);
 
       // ONE logo request for the whole wallet. Eight rows each asking for their
       // own would be eight round trips for something purely cosmetic, and the
-      // balances must never wait on it.
-      prefetchLogos(rows.map((r) => r.symbol));
+      // balances must never wait on it. Verified rows only: the logo cache is
+      // keyed on the ticker, so asking for an unverified token's symbol is what
+      // put Circle's mark next to a counterfeit USDC.
+      prefetchLogos(rows.filter(isVerifiedRow).map((r) => r.symbol));
 
       /**
        * Price them. Deliberately AFTER the balances are set, so the amounts
@@ -294,7 +341,10 @@ function WalletInner() {
        * loud because the same pattern WOULD be unsafe for balances.
        */
       (async () => {
-        const symbols = rows.map((r) => r.symbol);
+        // Unverified contracts are excluded here as well as from the logos: a
+        // ticker is not an identity, and quoting one a dollar is how a fake
+        // stablecoin became a real-looking total.
+        const symbols = rows.filter(isVerifiedRow).map((r) => r.symbol);
         // What we can legitimately expect a number for. A custom token nobody
         // has a mapping for is not a failure and must not drive a retry.
         const priceable = symbols.filter(
@@ -324,21 +374,38 @@ function WalletInner() {
         }
       })();
     } catch (err) {
+      if (!stillCurrent(run)) return;
       setBalances(null);
       setBalError(rpcErrorReason(err));
     } finally {
-      setBalLoading(false);
+      // Guarded like every other write here: a stale run clearing this would
+      // turn off the skeleton the CURRENT run is still filling, and the hero
+      // would announce "Balance unavailable" over a load that is going fine.
+      if (stillCurrent(run)) setBalLoading(false);
     }
   }, [address, chain, chainTokens]);
 
-  const loadTxs = useCallback(async () => {
+  const loadTxs = useCallback(async (run) => {
     if (!address || !chain) return;
     let rows;
     try {
       rows = await fetchTxs(chain.chainId);
+      if (!stillCurrent(run)) return;
       setTxs(rows);
-    } catch {
+      setTxsError(null);
+    } catch (err) {
+      /**
+       * A FAILED HISTORY IS NOT AN EMPTY ONE.
+       *
+       * This set the list to [] and returned, and the Activity tab then said
+       * "No transactions yet. Sends you make from this wallet appear here." —
+       * telling somebody who has made transfers, in a confident sentence, that
+       * they never made one. The Bitcoin panel next door already carries both
+       * facts; now so does this.
+       */
+      if (!stillCurrent(run)) return;
       setTxs([]);
+      setTxsError(rpcErrorReason(err) || "Could not load your transaction history.");
       return;
     }
 
@@ -364,7 +431,7 @@ function WalletInner() {
         })
       );
       const changes = settled.filter(Boolean);
-      if (changes.length) {
+      if (changes.length && stillCurrent(run)) {
         setTxs((prev) =>
           prev.map((t) => {
             const hit = changes.find((c) => c._id === t._id);
@@ -384,28 +451,37 @@ function WalletInner() {
    * list and says so; it is not a balance and not a payment, so it never
    * blocks either.
    */
-  const loadDiscovered = useCallback(async () => {
+  const loadDiscovered = useCallback(async (run) => {
     if (!address || !chain) return;
     setDiscovered(null);
     setDiscoveredError("");
     try {
       const { tokens, sync } = await fetchDiscoveredTokens(chain.chainId);
+      if (!stillCurrent(run)) return;
       setDiscovered(tokens);
       setDiscoverySyncFailed(Boolean(sync && sync.failed));
     } catch {
+      if (!stillCurrent(run)) return;
       setDiscovered([]);
       setDiscoverySyncFailed(true);
     }
   }, [address, chain]);
 
   useEffect(() => {
-    loadBalances();
-    loadTxs();
-    loadDiscovered();
+    // One token for the whole pass. Marked dead on teardown, which is what a
+    // network switch triggers, so nothing this pass fetched can be written over
+    // the next network's answers. See stillCurrent above.
+    const run = { live: true };
+    loadBalances(run);
+    loadTxs(run);
+    loadDiscovered(run);
     // Backup state can change on another screen (Settings, wallet backup), so it
     // is re-read whenever this page becomes active rather than trusted from the
     // first render.
     setBackedUp(isBackedUp());
+    return () => {
+      run.live = false;
+    };
   }, [loadBalances, loadTxs, loadDiscovered]);
 
   /**
@@ -450,6 +526,9 @@ function WalletInner() {
     // the keystore address, so this is belt and braces rather than the only
     // guard.
     clearBitcoinAddressCache(user?._id);
+    // An unresolved Bitcoin send belongs to the keystore that made it, so it goes
+    // with the address cache rather than being shown against a different phrase.
+    clearPendingSends(user?._id);
     setAddress(addr);
     setLegacy(null);
     setCreateOpen(false);
@@ -463,12 +542,26 @@ function WalletInner() {
     setClaiming(true);
     try {
       const addr = claimLegacyWallet();
-      const saved = await saveAddress(addr).catch(() => null);
+      // Registering the address is best effort — the keystore has already moved
+      // and the wallet works either way — but a failure is SAID, because the
+      // account's `walletAddress` staying empty is what later brings back the
+      // "your wallet is not on this device" card for no visible reason.
+      const saved = await saveAddress(addr).catch((err) => {
+        toast(
+          `Your wallet was claimed, but this account's address could not be registered: ${
+            err?.response?.data?.error || err.message || "the server did not answer"
+          }`,
+          { type: "error" }
+        );
+        return null;
+      });
       if (saved && applyUser && user) applyUser({ ...user, walletAddress: addr });
       setLegacy(null);
       setAddress(addr);
-    } catch {
-      /* the panel stays up; the user can create a wallet instead */
+    } catch (err) {
+      // Was an empty catch, so a failed claim left the card sitting there
+      // looking unclicked and the user pressed it again.
+      toast(err?.message || "That wallet could not be claimed.", { type: "error" });
     } finally {
       setClaiming(false);
     }
@@ -478,9 +571,25 @@ function WalletInner() {
   // follows the user to another device the way their wallet address does.
   async function addCustomToken(token) {
     try {
-      await saveCustomToken(token);
+      /**
+       * THE SERVER'S LIST WINS.
+       *
+       * This appended the browser's own copy of what it had just sent and threw
+       * the reply away. The server normalises the address, refuses a duplicate
+       * it already holds, and answers with the whole list — so the browser's
+       * guess drifted from the truth until the next full page load, and the
+       * locally invented record (which also carried a `balance` string from the
+       * modal that has no place on a stored token) is what drove every balance
+       * read for that chain in the meantime.
+       */
+      const tokens = await saveCustomToken(token);
       if (applyUser && user) {
-        applyUser({ ...user, customTokens: [...(user.customTokens || []), token] });
+        applyUser({
+          ...user,
+          customTokens: Array.isArray(tokens)
+            ? tokens
+            : [...(user.customTokens || []), token],
+        });
       }
       setAddTokenOpen(false);
       setBalances(null);
@@ -491,6 +600,60 @@ function WalletInner() {
       // appeared to do nothing and got clicked again.
       const reason = err?.response?.data?.error || err.message || "Could not add that token.";
       toast(reason, { type: "error" });
+    }
+  }
+
+  /**
+   * TAKE A TOKEN BACK OUT OF THE WALLET.
+   *
+   * `removeCustomToken` and its endpoint have both existed since custom tokens
+   * were added and NOTHING called either of them: there was no remove button
+   * anywhere in the wallet or in Settings, so a contract address pasted by
+   * mistake, or a counterfeit accepted from the discovery list, stayed on the
+   * account for good and cost a round trip on every balance refresh forever.
+   * Hard rule 10 puts the owner in charge of what appears in their wallet, and
+   * control that only goes one way is not control.
+   */
+  async function removeToken(token) {
+    if (!chain || !token || !token.address) return;
+    if (
+      !window.confirm(
+        `Remove ${token.symbol || "this token"} from your wallet on ${chain.name}? ` +
+          "Nothing is moved or lost: the balance stays at your address on the chain and you can add the contract again."
+      )
+    ) {
+      return;
+    }
+    try {
+      const tokens = await removeCustomToken({
+        chainId: chain.chainId,
+        address: token.address,
+      });
+      if (applyUser && user) {
+        applyUser({
+          ...user,
+          customTokens: Array.isArray(tokens)
+            ? tokens
+            : (user.customTokens || []).filter(
+                (t) =>
+                  !(
+                    t.chainId === chain.chainId &&
+                    String(t.address).toLowerCase() === String(token.address).toLowerCase()
+                  )
+              ),
+        });
+      }
+      setDetail(null);
+      setBalances(null);
+      loadBalances();
+      toast(`${token.symbol || "That token"} is no longer shown on ${chain.name}.`, {
+        type: "success",
+      });
+    } catch (err) {
+      toast(
+        err?.response?.data?.error || err.message || "Could not remove that token just now.",
+        { type: "error" }
+      );
     }
   }
 
@@ -516,13 +679,26 @@ function WalletInner() {
     }
     clearWallet();
     clearBitcoinAddressCache(user?._id);
-    await clearAddress().catch(() => {});
+    clearPendingSends(user?._id);
+    // The keystore is already gone from this browser, so the removal has
+    // happened whatever the server says. But a swallowed failure here leaves the
+    // account still registered to an address, and the "your wallet is not on
+    // this device" card then reappears later with no explanation.
+    await clearAddress().catch((err) => {
+      toast(
+        `The wallet was removed from this device, but the server still has its address on file: ${
+          err?.response?.data?.error || err.message || "the request failed"
+        }`,
+        { type: "error" }
+      );
+    });
     // Keep context in step, or the "has a wallet but not on this device" card
     // would appear immediately after deliberately removing it.
     if (applyUser && user) applyUser({ ...user, walletAddress: null });
     setAddress(null);
     setBalances(null);
     setTxs([]);
+    setTxsError(null);
     setDiscovered(null);
   }
 
@@ -532,7 +708,13 @@ function WalletInner() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* the address is on screen to copy by hand */
+      // The tick never appearing is not enough. Somebody who believes they
+      // copied their address pastes whatever was on the clipboard before it and
+      // asks a payer to send funds there, so this says so out loud.
+      toast(
+        "Your browser blocked the clipboard. Copy the address from the screen by hand.",
+        { type: "error" }
+      );
     }
   }
 
@@ -661,7 +843,7 @@ function WalletInner() {
               <button
                 type="button"
                 className="mm-icon"
-                onClick={loadBalances}
+                onClick={() => loadBalances()}
                 title="Refresh balances"
                 aria-label="Refresh balances"
               >
@@ -759,8 +941,14 @@ function WalletInner() {
                 )}
               </>
             ) : balLoading ? (
-              <span className="mm-fiat" style={{ opacity: 0.35 }}>
-                {usd(0)}
+              /* A SKELETON, NOT A DIMMED ZERO. This rendered "$0.00" at a third
+                 opacity while the balances were still being read, which on a
+                 slow chain is several seconds of the wallet stating a figure it
+                 does not have. Dimming is a visual effect, not a statement, and
+                 hard rule 4 exists because a zero looks exactly like an emptied
+                 wallet. The Bitcoin panel already shows a skeleton here. */
+              <span style={{ display: "block", width: 200, maxWidth: "70%" }}>
+                <SkeletonLines count={1} />
               </span>
             ) : (
               <>
@@ -850,9 +1038,23 @@ function WalletInner() {
                   </div>
                 ) : balances ? (
                   visibleBalances.map((b) => {
-                    const price = usdPrices[String(b.symbol).toUpperCase()];
+                    const verified = isVerifiedRow(b);
+                    const price = verified ? usdPrices[String(b.symbol).toUpperCase()] : undefined;
                     const value =
                       !b.unknown && Number.isFinite(price) ? Number(b.amount) * price : null;
+                    // Does an unverified token borrow the ticker of one this
+                    // chain's registry has verified? That is the shape of a
+                    // counterfeit, and it is named on the row rather than left
+                    // to a grey "added" label nobody reads.
+                    const impersonates =
+                      !verified &&
+                      (chain?.tokens || []).some(
+                        (t) =>
+                          String(t.symbol).toUpperCase() === String(b.symbol).toUpperCase() &&
+                          String(t.address).toLowerCase() !== String(b.address).toLowerCase()
+                      )
+                        ? b.symbol
+                        : null;
                     return (
                       <div
                         className="mm-row"
@@ -869,8 +1071,14 @@ function WalletInner() {
                           }
                         }}
                       >
+                        {/* The disc is keyed on the CONTRACT for an unverified
+                            token, never on its ticker. TokenLogo looks a symbol
+                            up in the shared logo cache, so passing "USDC" here
+                            fetched Circle's own artwork and drew it beside a
+                            counterfeit; an address matches nothing in that map
+                            and gets the neutral coin glyph, which is the truth. */}
                         <TokenLogo
-                          symbol={b.symbol}
+                          symbol={verified ? b.symbol : b.address || b.symbol}
                           native={b.native}
                           unknown={b.unknown}
                         />
@@ -879,10 +1087,17 @@ function WalletInner() {
                             {b.symbol}
                             {b.custom && (
                               <span className="lw-label" style={{ letterSpacing: "0.12em" }}>
-                                added
+                                {impersonates ? "unverified" : "added"}
                               </span>
                             )}
                           </span>
+                          {impersonates && (
+                            <span className="mm-row-note warn">
+                              Calls itself {impersonates}, but this is not the verified{" "}
+                              {impersonates} contract on {chain ? chain.name : "this network"}.
+                              Anyone can deploy a token with any name.
+                            </span>
+                          )}
                           {/* The native token pays for every transaction, so it
                               is labelled here rather than discovered at signing
                               time. An unreadable row says so in words and never
@@ -942,6 +1157,8 @@ function WalletInner() {
             <div className="mm-list" style={{ padding: 16 }}>
               <TxHistory
                 txs={txs}
+                error={txsError}
+                onRetry={() => loadTxs()}
                 chain={chain}
                 chains={chains}
                 onReceive={() => {
@@ -979,6 +1196,13 @@ function WalletInner() {
                 key={chain.chainId}
                 address={address}
                 chain={chain}
+                // The SAME list the balances are read from, registry plus the
+                // owner's own imports. The form used to read `chain.tokens`
+                // alone, so a token you imported showed a balance in the wallet
+                // and then was simply absent from the Send dropdown with nothing
+                // saying why: money on display that the app refused to move
+                // (LW-038).
+                tokens={chainTokens}
                 onSent={() => {
                   setPanel(null);
                   setTab("activity");
@@ -1020,7 +1244,10 @@ function WalletInner() {
         <HoldingDetail
           balance={detail}
           chain={chain}
-          price={usdPrices[String(detail.symbol).toUpperCase()]}
+          price={
+            isVerifiedRow(detail) ? usdPrices[String(detail.symbol).toUpperCase()] : undefined
+          }
+          onRemove={detail.custom ? () => removeToken(detail) : null}
           onClose={() => setDetail(null)}
         />
       )}

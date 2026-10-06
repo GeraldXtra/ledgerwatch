@@ -1,7 +1,11 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, Lightbulb, TrendingDown, TrendingUp } from "lucide-react";
 import { Button, Field, Input, Modal } from "../../components/ui";
-import { usd } from "./format";
+// `usd` for money amounts, `fmtPrice` for a COIN PRICE. `usd` caps at two
+// decimals, so every price line on this panel read "$0" for a coin worth a
+// hundred thousandth of a dollar, which is most of the long tail the universal
+// resolver opened live trading to.
+import { usd, price as fmtPrice } from "./format";
 
 const QUICK = [0.25, 0.5, 0.75, 1];
 
@@ -14,15 +18,67 @@ const QUICK = [0.25, 0.5, 0.75, 1];
  * `portfolio` live portfolio, for balance/position limits
  * `onSubmit`  ({ action, amount, denom }) => Promise
  */
-export default function TradePanel({ side, alert, portfolio, onClose, onSubmit }) {
-  const price = Number(alert.priceAtAlert) || 0;
+export default function TradePanel({
+  side,
+  alert,
+  portfolio,
+  onClose,
+  onSubmit,
+  busyLabel,
+  /**
+   * The coin's price NOW, from the live market feed. Optional: when it is absent
+   * or stale the alert's captured price is used, as before.
+   */
+  currentPrice,
+}) {
+  /**
+   * THE PRICE THE USER IS ACTUALLY TRADING AT, NOT THE ONE THAT RAISED THE ALERT.
+   *
+   * `priceAtAlert` is a snapshot from the moment the condition fired. Everything
+   * on this panel was computed from it: the ceiling on what can be spent, the
+   * token/quote conversion, and the figures on the confirm screen. An alert
+   * sitting unanswered for an hour — which is normal, since the whole design is
+   * that a human decides — therefore priced the trade at an hour-old number.
+   *
+   * On a coin that moved 20% in that hour, "spend $100" converted to a token
+   * quantity that was 20% wrong, and the confirm screen showed a value the user
+   * would not get. In live mode the swap then quotes at the real price anyway,
+   * so the number on screen and the number executed were simply different.
+   *
+   * The live price wins where there is one. The alert's price remains the
+   * fallback, and the difference is shown below rather than quietly applied.
+   */
+  const alertPrice = Number(alert.priceAtAlert) || 0;
+  const livePrice = Number(currentPrice) || 0;
+  const price = livePrice > 0 ? livePrice : alertPrice;
+  const moved =
+    livePrice > 0 && alertPrice > 0
+      ? ((livePrice - alertPrice) / alertPrice) * 100
+      : 0;
   const holding = (portfolio?.holdings || []).find((h) => h.coinId === alert.coinId);
   const heldQty = holding ? holding.qty : 0;
-  const cash = portfolio?.cashBalance || 0;
+
+  /**
+   * "COULD NOT BE READ" IS NOT "$0" (hard rule 4).
+   *
+   * This was `portfolio?.cashBalance || 0`, so a live book whose stablecoin
+   * balance came back unreadable arrived here as a hard zero. The panel then
+   * told the owner "Available: $0" and refused every buy with "That is more
+   * than your available cash ($0)" — a statement about their money that the app
+   * had no way to know, produced by one RPC call that did not answer. The live
+   * book now sends null for a balance it does not know, and this panel still
+   * blocks the trade, which is the safe direction, but says the true reason.
+   */
+  const cashKnown = Number.isFinite(Number(portfolio?.cashBalance));
+  const cash = cashKnown ? Number(portfolio.cashBalance) : null;
+  const cashLabel = cashKnown ? usd(cash) : "could not be read";
 
   // The ceiling for this side: cash to spend on a buy, tokens held on a sell.
-  const maxQuote = side === "buy" ? cash : heldQty * price;
-  const maxToken = side === "buy" ? (price > 0 ? cash / price : 0) : heldQty;
+  // An unknown cash balance is a ceiling of zero — nothing can be authorised
+  // against a figure nobody has — and the message below says so rather than
+  // naming an amount.
+  const maxQuote = side === "buy" ? cash || 0 : heldQty * price;
+  const maxToken = side === "buy" ? (price > 0 ? (cash || 0) / price : 0) : heldQty;
 
   const [denom, setDenom] = useState(side === "buy" ? "quote" : "token");
   const [raw, setRaw] = useState("");
@@ -40,7 +96,9 @@ export default function TradePanel({ side, alert, portfolio, onClose, onSubmit }
     return {
       qty,
       value,
-      cashAfter: side === "buy" ? cash - value : cash + value,
+      // Null rather than NaN when the balance is unknown: an arithmetic result
+      // built on a figure we do not have is an invented one.
+      cashAfter: cash == null ? null : side === "buy" ? cash - value : cash + value,
       positionAfter: side === "buy" ? heldQty + qty : heldQty - qty,
     };
   }, [amount, denom, price, side, cash, heldQty]);
@@ -54,7 +112,11 @@ export default function TradePanel({ side, alert, portfolio, onClose, onSubmit }
     ? "Enter an amount greater than zero."
     : tooBig
     ? side === "buy"
-      ? `That is more than your available cash (${usd(cash)}).`
+      ? cashKnown
+        ? `That is more than your available cash (${usd(cash)}).`
+        : `Your ${portfolio?.cashSymbol || "dollar"} balance on this network could not be read, so ` +
+          `what you can spend is not known. That is a connection problem rather than an empty ` +
+          `wallet, and your funds are unaffected. Refresh Live positions and try again.`
       : `You only hold ${heldQty.toFixed(6)} ${alert.symbol}.`
     : "";
 
@@ -64,15 +126,37 @@ export default function TradePanel({ side, alert, portfolio, onClose, onSubmit }
     setError("");
   }
 
+  /**
+   * THE PANEL USED TO JAM ON EVERY REFUSAL.
+   *
+   * `busy` was cleared only in the catch. In live mode `onSubmit` answers "no"
+   * by RESOLVING — the coin is paper only here, the contract lookup could not be
+   * completed, the amount could not be converted, this browser holds no wallet —
+   * and every one of those resolutions left `busy` true forever. Confirm stayed
+   * greyed out reading "Checking the contract…", Back was greyed out beside it,
+   * and the only way out was the close cross, which threw away the amount typed.
+   * Since the refusal paths added for the universal resolver this is the common
+   * outcome rather than a rare one.
+   *
+   * `busy` now clears whichever way the call ends, and a refusal that comes back
+   * as `{ ok: false, message }` is shown here — on the screen the person is
+   * looking at, with their amount still in the field — instead of only as a
+   * toast that had already gone by the time they read it.
+   */
   async function submit() {
     setBusy(true);
     setError("");
     try {
-      await onSubmit({ action: side, amount, denom });
+      const result = await onSubmit({ action: side, amount, denom });
+      if (result && result.ok === false) {
+        setError(result.message || "That trade could not be completed");
+        setConfirming(false);
+      }
     } catch (err) {
       setError(err?.response?.data?.error || "That trade could not be completed");
-      setBusy(false);
       setConfirming(false);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -86,8 +170,19 @@ export default function TradePanel({ side, alert, portfolio, onClose, onSubmit }
           <Icon size={18} style={{ verticalAlign: "-3px", marginRight: 6 }} />
           {side === "buy" ? "Buy" : "Sell"} {alert.symbol}
         </h3>
-        <span className="muted small num">{usd(price)}</span>
+        <span className="muted small num">{fmtPrice(price)}</span>
       </div>
+
+      {/* The alert fired at one price and is being acted on at another. Shown
+          rather than silently applied, because the gap is the reason the figures
+          differ from the ones in the alert the user just read. */}
+      {Math.abs(moved) >= 0.5 && (
+        <div className="against-note">
+          {alert.symbol} has moved {moved > 0 ? "up" : "down"} {Math.abs(moved).toFixed(1)}% since
+          this alert was raised, from {fmtPrice(alertPrice)} to {fmtPrice(livePrice)}. The amounts below use
+          the price now.
+        </div>
+      )}
 
       {/* The agent advises; the human decides. Shown in context, never enforced. */}
       <div className="agent-reasoning">
@@ -158,7 +253,7 @@ export default function TradePanel({ side, alert, portfolio, onClose, onSubmit }
             <span className="muted small" style={{ marginLeft: "auto" }}>
               Available:{" "}
               <span className="num">
-                {side === "buy" ? usd(cash) : `${heldQty.toFixed(6)} ${alert.symbol}`}
+                {side === "buy" ? cashLabel : `${heldQty.toFixed(6)} ${alert.symbol}`}
               </span>
             </span>
           </div>
@@ -181,11 +276,13 @@ export default function TradePanel({ side, alert, portfolio, onClose, onSubmit }
               </div>
               <div>
                 <dt>Price</dt>
-                <dd className="num">{usd(price)}</dd>
+                <dd className="num">{fmtPrice(price)}</dd>
               </div>
               <div>
                 <dt>Cash after</dt>
-                <dd className="num">{usd(quote.cashAfter)}</dd>
+                <dd className="num">
+                  {quote.cashAfter != null ? usd(quote.cashAfter) : "not known"}
+                </dd>
               </div>
               <div>
                 <dt>{alert.symbol} position after</dt>
@@ -231,7 +328,7 @@ export default function TradePanel({ side, alert, portfolio, onClose, onSubmit }
             </div>
             <div>
               <dt>Price</dt>
-              <dd className="num">{usd(price)}</dd>
+              <dd className="num">{fmtPrice(price)}</dd>
             </div>
             <div>
               <dt>Agent suggested</dt>
@@ -246,7 +343,11 @@ export default function TradePanel({ side, alert, portfolio, onClose, onSubmit }
               <ArrowLeft size={14} /> Back
             </Button>
             <Button variant="primary" onClick={submit} disabled={busy}>
-              {busy ? "Executing…" : `Confirm ${side}`}
+              {/* A live trade spends this moment checking the coin's contract on
+                  the chain, which is not executing anything. Saying "Executing"
+                  there would name the wrong thing at the one moment the user is
+                  watching most closely. */}
+              {busy ? busyLabel || "Executing…" : `Confirm ${side}`}
             </Button>
           </div>
         </>

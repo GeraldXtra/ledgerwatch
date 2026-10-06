@@ -56,8 +56,14 @@ async function remove(req, res) {
     await watch.deleteOne();
     return res.json({ ok: true });
   } catch (err) {
+    // Same reasoning as debts.getOne: a failed delete is not a missing watch.
+    // Answering 404 told the user it was already gone, so they stopped trying
+    // while the row was still there, still being priced, still raising alerts.
+    if (err && err.name === "CastError") {
+      return res.status(404).json({ error: "Watch not found" });
+    }
     console.error("delete watch error:", err.message);
-    return res.status(404).json({ error: "Watch not found" });
+    return res.status(500).json({ error: "That watch could not be removed just now." });
   }
 }
 

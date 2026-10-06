@@ -37,8 +37,10 @@ This runs on real networks: Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Cha
 Bitcoin, with their test networks alongside. Invoices can be paid in USDC or USDT to a per-invoice
 address and settle by themselves. Market Watch can trade for real through Uniswap from the user's
 own wallet, in paper mode by default and in live mode only when the user opts in, with a per-trade
-and a daily cap. Keys are created and kept in the browser; the server relays signed transactions
-and never sees a key.
+and a daily cap. Be precise about those caps: the daily figure they are measured against is
+computed on the server, but the ceilings themselves are still applied in the browser, so they are a
+guard against a mistyped amount and not a control an attacker cannot step around. Keys are created
+and kept in the browser; the server relays signed transactions and never sees a key.
 
 It has not had an outside security review, and that is stated plainly in `docs/SECURITY.md` along
 with everything else that is still open. Anyone using it with real money should read that first.

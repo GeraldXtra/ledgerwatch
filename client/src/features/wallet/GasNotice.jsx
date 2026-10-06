@@ -11,6 +11,30 @@ import { formatNative, shortfallMessage } from "./gas";
 export default function GasNotice({ plan, chain }) {
   if (!plan) return null;
 
+  /**
+   * THE CHAIN HAS ALREADY SAID NO.
+   *
+   * Checked before the shortfall, because these are different refusals and the
+   * shortfall sentence would report "you are short 0" for this one. A revert was
+   * previously invisible here: the estimate failed, a made up gas figure took
+   * its place, and this rendered a calm "network fee is a typical transaction
+   * cost" note over a transaction guaranteed to fail and to cost its full fee
+   * anyway.
+   */
+  if (plan.reverted) {
+    return (
+      <div className="against-note">
+        <TriangleAlert size={15} />
+        <span>
+          {(chain && chain.name) || "The network"} has already rejected this transaction, so
+          signing it would cost the fee and change nothing. The reason it gave was:{" "}
+          {plan.revertReason || "no reason"}. The usual causes are sending more of a token than
+          you hold, or a token that will not let this address transfer.
+        </span>
+      </div>
+    );
+  }
+
   if (!plan.ok) {
     return (
       <div className="against-note">

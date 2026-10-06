@@ -30,12 +30,25 @@ process.env.VAPID_PRIVATE_KEY = "";
  */
 const rpcService = require("../services/rpc.service");
 const realRpcCall = rpcService.rpcCall;
+const realRpcCallTyped = rpcService.rpcCallTyped;
 const rpcCall = vi.fn();
 beforeAll(() => {
   rpcService.rpcCall = rpcCall;
+  /**
+   * The typed seam, derived from the same mock. `null` is a transport failure
+   * (nobody answered); an object carrying `__rpcError` is a node that ANSWERED
+   * with an error, which is the case LW-084's fallback exists for.
+   */
+  rpcService.rpcCallTyped = async (chain, method, params) => {
+    const r = await rpcCall(chain, method, params);
+    if (r && r.__rpcError) return { ok: false, reason: `rpc error: ${r.__rpcError}` };
+    if (r === null) return { ok: false, reason: "all 1 endpoint(s) failed: mock" };
+    return { ok: true, result: r };
+  };
 });
 afterAll(() => {
   rpcService.rpcCall = realRpcCall;
+  rpcService.rpcCallTyped = realRpcCallTyped;
 });
 
 const User = require("../models/User");
@@ -80,7 +93,7 @@ function transferLog({ contract, to = WALLET, from = SENDER, amount, block, hash
  * answer, and a set of windows that "fail" (return null, as rpcCall does
  * for a transport failure). `calls` records every eth_getLogs range asked.
  */
-function fakeChain({ head, logs = [], meta = {}, failWindows = [] }) {
+function fakeChain({ head, logs = [], meta = {}, failWindows = [], refuseUnfiltered = false }) {
   const calls = [];
   rpcCall.mockReset();
   rpcCall.mockImplementation(async (chain, method, params) => {
@@ -88,10 +101,18 @@ function fakeChain({ head, logs = [], meta = {}, failWindows = [] }) {
     if (method === "eth_getLogs") {
       const from = parseInt(params[0].fromBlock, 16);
       const to = parseInt(params[0].toBlock, 16);
-      calls.push({ from, to });
+      const addresses = Array.isArray(params[0].address)
+        ? params[0].address.map((a) => String(a).toLowerCase())
+        : null;
+      calls.push(addresses ? { from, to, address: true } : { from, to });
       if (failWindows.some((f) => f.from === from)) return null;
+      // A public node that will not serve a log query with no address filter.
+      if (refuseUnfiltered && !addresses) {
+        return { __rpcError: "Please specify an address in your request or, to remove restrictions, order a dedicated full node here" };
+      }
       return logs.filter((l) => {
         const b = parseInt(l.blockNumber, 16);
+        if (addresses && !addresses.includes(String(l.address).toLowerCase())) return false;
         return b >= from && b <= to;
       });
     }
@@ -308,6 +329,46 @@ describe("new token detection", () => {
 
     expect(r.discovered).toBe(0);
     expect(r.added).toBe(0);
+  });
+
+  it("reads the known tokens through an address filter when the node refuses unfiltered queries (LW-084)", async () => {
+    const chain = getChain(CHAIN_ID);
+    const known = chain.tokens[0];
+    const user = await makeUser();
+    const head = 1000;
+    const calls = fakeChain({
+      head,
+      refuseUnfiltered: true,
+      logs: [
+        transferLog({ contract: known.address, amount: 5_000_000, block: head - 3, hash: "0x" + "a1".repeat(32) }),
+        transferLog({ contract: SPAM, amount: 1, block: head - 2, hash: "0x" + "b2".repeat(32) }),
+      ],
+      meta: { [SPAM]: { symbol: "SPAM", name: "Spam", decimals: 18 } },
+    });
+
+    const result = await syncInboundTransfers({ userId: user._id, chainId: CHAIN_ID, address: WALLET });
+
+    // Read, not failed: the known token's arrival is recorded and the cursor
+    // moves, while the unknown token could not be seen on this node.
+    expect(result.failed).toBe(false);
+    expect(result.limited).toBe(true);
+    expect(await cursorOf(user._id)).toBe(head);
+    const rows = await WalletTx.find({ userId: user._id }).lean();
+    expect(rows.map((r) => r.symbol)).toEqual([known.symbol]);
+    const u = await User.findById(user._id).lean();
+    expect((u.discoveredTokens || []).length).toBe(0);
+    // The second query per window carried the address list.
+    expect(calls.some((c) => c.address)).toBe(true);
+  });
+
+  it("does not fall back when the node could not be reached at all", async () => {
+    const user = await makeUser();
+    const head = 1000;
+    const calls = fakeChain({ head, failWindows: [{ from: Math.max(0, head - spanFor(getChain(CHAIN_ID)) + 1) }] });
+    const result = await syncInboundTransfers({ userId: user._id, chainId: CHAIN_ID, address: WALLET });
+    expect(result.failed).toBe(true);
+    expect(result.limited).toBe(false);
+    expect(calls.every((c) => !c.address)).toBe(true);
   });
 
   it("runs one sync per wallet per chain when asked twice at once", async () => {

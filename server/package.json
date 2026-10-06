@@ -25,7 +25,6 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.5",
-    "node-cron": "^3.0.3",
     "nodemailer": "^9.0.3",
     "qrcode": "^1.5.4",
     "twilio": "^6.0.2",

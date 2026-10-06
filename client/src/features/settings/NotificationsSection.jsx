@@ -45,23 +45,62 @@ export default function NotificationsSection() {
   });
 
   const [push, setPush] = useState(null);
+  const [pushError, setPushError] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
 
-  const refresh = () => getPushState().then(setPush);
+  /**
+   * The push state had NO failure handling at all: the rejection went nowhere,
+   * `push` stayed null, and the render falls through to the "Enable
+   * notifications" button for a null — so somebody who already has notifications
+   * on was shown the enable button, and the per-category toggles (which only
+   * appear when the state says subscribed) vanished. A failed load stating a
+   * definite fact about the world is the LW-029 pattern; it now says it could
+   * not look, and offers to look again.
+   */
+  const refresh = () =>
+    getPushState()
+      .then((state) => {
+        setPush(state);
+        setPushError("");
+      })
+      .catch((err) => {
+        setPush(null);
+        setPushError(
+          err?.response?.data?.error || err.message || "the browser or server did not answer"
+        );
+      });
+
   useEffect(() => {
     refresh();
   }, []);
 
   const toggleSend = (k) => (e) => setAutoSend((a) => ({ ...a, [k]: e.target.checked }));
 
+  /**
+   * OPTIMISTIC, WITH THE ROLLBACK THAT MAKES IT HONEST.
+   *
+   * The checkbox was flipped first and left flipped when the save failed, so
+   * somebody who unticked "Market alerts" during a network blip saw it unticked,
+   * believed it was off, and kept receiving market alerts — a control showing a
+   * state it does not have. ARCHITECTURE §9.2 allows optimistic state and makes
+   * rollback on failure mandatory; this is the smallest possible version of the
+   * project's stated failure mode.
+   */
   async function savePrefs(next) {
+    const previous = prefs;
     setPrefs(next);
     try {
       await updateProfile({ notifyPrefs: next });
-    } catch {
-      toast("Could not save that preference.", { type: "error" });
+    } catch (err) {
+      setPrefs(previous);
+      toast(
+        `That preference was not saved: ${
+          err?.response?.data?.error || err.message || "the server did not answer"
+        }. It is unchanged.`,
+        { type: "error" }
+      );
     }
   }
 
@@ -116,7 +155,23 @@ export default function NotificationsSection() {
     setBusy(true);
     setMsg("");
     try {
-      await disablePush();
+      /**
+       * READ THE ANSWER. `disablePush` was changed to report each half of the
+       * work honestly ({ok, reason, detail}) instead of always returning ok —
+       * but this call discarded it, so the screen could still say notifications
+       * were off while the subscription survived on the server and reminders
+       * kept arriving. Reporting a failure nobody renders is the same silence,
+       * one level up.
+       */
+      const off = await disablePush();
+      if (off && off.ok === false) {
+        toast(
+          "Notifications could not be switched off: " +
+            (off.detail || off.reason || "the server did not confirm it") +
+            ". This device may still receive them.",
+          { type: "error", duration: 10000 }
+        );
+      }
       setMsg("Notifications turned off on this device.");
     } finally {
       setBusy(false);
@@ -186,7 +241,19 @@ export default function NotificationsSection() {
           </div>
         )}
 
-        {push && !push.supported ? (
+        {pushError ? (
+          <div className="stack-sm" style={{ marginTop: 8 }}>
+            <p className="error-text" style={{ margin: 0 }}>
+              Whether notifications are on for this device could not be checked: {pushError}. Your
+              settings are unchanged, and in-app alerts still work.
+            </p>
+            <div>
+              <Button size="sm" disabled={busy} onClick={refresh}>
+                Try again
+              </Button>
+            </div>
+          </div>
+        ) : push && !push.supported ? (
           <p className="muted small" style={{ marginTop: 8 }}>
             {push.reason ||
               "This browser does not support push notifications. In-app alerts still work everywhere."}
