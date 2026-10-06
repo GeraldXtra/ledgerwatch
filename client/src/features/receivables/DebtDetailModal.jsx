@@ -54,6 +54,31 @@ export default function DebtDetailModal({
         </div>
       </div>
 
+      <div className="row wrap detail-actions no-print">
+        <Button onClick={() => onRemind(debt)}>
+          <BellRing size={14} /> Generate reminder
+        </Button>
+        {/* Hidden when the account has crypto payments switched off in Settings.
+            The server rejects issuance too, so this is the visible half of one
+            rule rather than the whole of it. */}
+        {!paid && onCrypto && cryptoEnabled && (
+          <Button onClick={() => onCrypto(debt)}>
+            <Coins size={14} /> Crypto payment
+          </Button>
+        )}
+        {!paid && (
+          <Button onClick={() => onMarkPaid(debt)}>
+            <Check size={14} /> Mark fully paid
+          </Button>
+        )}
+        <Button variant="ghost" onClick={() => onEdit(debt)}>
+          <Pencil size={14} /> Edit
+        </Button>
+        <Button variant="danger" onClick={() => onDelete(debt)}>
+          <Trash2 size={14} /> Delete
+        </Button>
+      </div>
+
       <div className="detail-stats">
         <div className="detail-stat">
           <span className="overline">Original</span>
@@ -82,31 +107,6 @@ export default function DebtDetailModal({
       <Suspense fallback={null}>
         <CryptoPaymentPanel debt={debt} refreshKey={cryptoKey} />
       </Suspense>
-
-      <div className="row wrap detail-actions no-print">
-        <Button onClick={() => onRemind(debt)}>
-          <BellRing size={14} /> Generate reminder
-        </Button>
-        {/* Hidden when the account has crypto payments switched off in Settings.
-            The server rejects issuance too, so this is the visible half of one
-            rule rather than the whole of it. */}
-        {!paid && onCrypto && cryptoEnabled && (
-          <Button onClick={() => onCrypto(debt)}>
-            <Coins size={14} /> Crypto payment
-          </Button>
-        )}
-        {!paid && (
-          <Button onClick={() => onMarkPaid(debt)}>
-            <Check size={14} /> Mark fully paid
-          </Button>
-        )}
-        <Button variant="ghost" onClick={() => onEdit(debt)}>
-          <Pencil size={14} /> Edit
-        </Button>
-        <Button variant="danger" onClick={() => onDelete(debt)}>
-          <Trash2 size={14} /> Delete
-        </Button>
-      </div>
     </Modal>
   );
 }

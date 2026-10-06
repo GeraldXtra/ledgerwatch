@@ -21,11 +21,11 @@ const reduceMotion = () =>
 // tokens: on light paper the ramp darkens toward the accent, on dark paper it
 // brightens, because "heavier" has to mean "more contrast" on both.
 const BUCKETS = [
-  { key: "current", label: "Current", color: "var(--chart-ramp-1)" },
-  { key: "d1_30", label: "1 to 30 days", color: "var(--chart-ramp-2)" },
-  { key: "d31_60", label: "31 to 60 days", color: "var(--chart-ramp-3)" },
-  { key: "d61_90", label: "61 to 90 days", color: "var(--chart-ramp-4)" },
-  { key: "d90plus", label: "90d+", color: "var(--chart-ramp-5)" },
+  { key: "current", label: "Current", color: "var(--age-1)" },
+  { key: "d1_30", label: "1 to 30 days", color: "var(--age-2)" },
+  { key: "d31_60", label: "31 to 60 days", color: "var(--age-3)" },
+  { key: "d61_90", label: "61 to 90 days", color: "var(--age-4)" },
+  { key: "d90plus", label: "90d+", color: "var(--age-5)" },
 ];
 
 function ChartTooltip({ active, payload }) {
@@ -50,10 +50,10 @@ export default function AgingChart({ aging }) {
     <div className="rec-chart-frame">
       <ResponsiveContainer width="100%" height={260}>
         <BarChart data={data} margin={{ top: 10, right: 8, bottom: 0, left: 8 }} barCategoryGap="12%">
-          <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
-          <XAxis dataKey="label" tick={{ fill: "var(--chart-tick)", fontSize: 11.5 }} tickLine={false} axisLine={{ stroke: "var(--chart-axis)" }} />
-          <YAxis tick={{ fill: "var(--chart-tick)", fontSize: 11.5 }} tickLine={false} axisLine={false} width={66} tickFormatter={(v) => compactNgn(v, "").trim()} />
-          <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--chart-cursor)" }} />
+          <CartesianGrid stroke="var(--line)" vertical={false} />
+          <XAxis dataKey="label" tick={{ fill: "var(--muted)", fontSize: 11.5 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} />
+          <YAxis tick={{ fill: "var(--muted)", fontSize: 11.5 }} tickLine={false} axisLine={false} width={66} tickFormatter={(v) => compactNgn(v, "").trim()} />
+          <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--soft)" }} />
           {/* minPointSize keeps a small bucket visible when another dominates the
               linear scale. Without it the smaller bars round to sub pixel and the
               chart reads as a single oversized bar. */}
@@ -65,7 +65,7 @@ export default function AgingChart({ aging }) {
             isAnimationActive={!reduceMotion()}
           >
             {data.map((d) => (
-              <Cell key={d.label} fill={empty ? "var(--chart-empty)" : d.color} />
+              <Cell key={d.label} fill={empty ? "var(--line)" : d.color} />
             ))}
           </Bar>
         </BarChart>

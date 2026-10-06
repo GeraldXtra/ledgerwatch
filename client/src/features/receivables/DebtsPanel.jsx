@@ -364,19 +364,6 @@ export default function DebtsPanel({ onLedgerChanged }) {
 
   return (
     <>
-      {loading && debts.length === 0 ? (
-        <div className="kpi-row">
-          <SkeletonBlockRow />
-        </div>
-      ) : (
-        <div className="kpi-row">
-          <StatCard label="Total outstanding" countTo={k.totalOutstanding} format={kpiNgn} icon={<CircleDollarSign size={17} />} iconTone={k.totalOutstanding > 0 ? "neg" : "neutral"} hint="Sum of open balances" />
-          <StatCard label="Overdue" countTo={overdueCount} tone={overdueCount > 0 ? "neg" : undefined} iconTone={overdueCount > 0 ? "neg" : "neutral"} icon={<AlertCircle size={17} />} hint={overdueCount === 1 ? "debt past due" : "debts past due"} />
-          <StatCard label="Collected (shown)" countTo={k.collected} format={kpiNgn} tone={k.collected > 0 ? "pos" : undefined} iconTone="pos" icon={<HandCoins size={17} />} hint="Across the filtered list" />
-          <StatCard label="Active clients" countTo={k.activeDebtors} icon={<Users size={17} />} iconTone="neutral" hint="With an open balance" />
-        </div>
-      )}
-
       <Card
         eyebrow="Ledger"
         title="Debts"
@@ -395,6 +382,19 @@ export default function DebtsPanel({ onLedgerChanged }) {
           </div>
         }
       >
+        {loading && debts.length === 0 ? (
+          <div className="kpi-row">
+            <SkeletonBlockRow />
+          </div>
+        ) : (
+          <div className="kpi-row">
+            <StatCard label="Total outstanding" countTo={k.totalOutstanding} format={kpiNgn} icon={<CircleDollarSign size={17} />} iconTone={k.totalOutstanding > 0 ? "neg" : "neutral"} hint="Sum of open balances" />
+            <StatCard label="Overdue" countTo={overdueCount} tone={overdueCount > 0 ? "neg" : undefined} iconTone={overdueCount > 0 ? "neg" : "neutral"} icon={<AlertCircle size={17} />} hint={overdueCount === 1 ? "debt past due" : "debts past due"} />
+            <StatCard label="Collected (shown)" countTo={k.collected} format={kpiNgn} tone={k.collected > 0 ? "pos" : undefined} iconTone="pos" icon={<HandCoins size={17} />} hint="Across the filtered list" />
+            <StatCard label="Active clients" countTo={k.activeDebtors} icon={<Users size={17} />} iconTone="neutral" hint="With an open balance" />
+          </div>
+        )}
+
         <div className="filters-row">
           <div className="search-field grow">
             <Search size={15} className="search-icon" />

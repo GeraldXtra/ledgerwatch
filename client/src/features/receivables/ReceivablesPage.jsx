@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { BarChart3, Receipt, Sparkles, Users } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { Sparkles } from "lucide-react";
 import http from "../../api/http";
 import {
   Button,
@@ -14,11 +15,7 @@ import DebtsPanel from "./DebtsPanel";
 import DebtorsView from "./DebtorsView";
 import { kpiNgn } from "./format";
 
-const TABS = [
-  { id: "overview", label: "Overview", icon: <BarChart3 size={15} /> },
-  { id: "debts", label: "Debts", icon: <Receipt size={15} /> },
-  { id: "debtors", label: "Debtors", icon: <Users size={15} /> },
-];
+const VIEWS = ["overview", "debts", "debtors"];
 
 function AssistantCard() {
   const [question, setQuestion] = useState("");
@@ -66,7 +63,9 @@ function AssistantCard() {
 }
 
 function Receivables() {
-  const [tab, setTab] = useState("overview");
+  const [params] = useSearchParams();
+  const wanted = params.get("view");
+  const tab = VIEWS.includes(wanted) ? wanted : "overview";
 
   /**
    * The analytics live here rather than inside the overview panel, because the
@@ -152,29 +151,15 @@ function Receivables() {
 
   return (
     <>
-      <PageHeader
-        title="Receivables"
-        support="What you are owed, who owes it, and how long it has been waiting."
-        figures={figures}
-      />
+      {tab === "overview" && (
+        <PageHeader
+          title="Receivables"
+          support="What you are owed, who owes it, and how long it has been waiting."
+          figures={figures}
+        />
+      )}
 
-      <div className="subtabs" role="tablist">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            className={tab === t.id ? "subtab active" : "subtab"}
-            onClick={() => setTab(t.id)}
-          >
-            {t.icon}
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <div key={tab} className="stack subtab-panel">
+      <div key={tab} className={tab === "overview" ? "stack subtab-panel" : "subtab-panel ws-view"}>
         {tab === "overview" && (
           <>
             <ReceivablesOverview data={analytics} error={analyticsError} />

@@ -150,7 +150,7 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
       </div>
 
       <form onSubmit={submit} className="stack">
-        <div className="grid2">
+        <div className="grid2 debt-form-grid">
           <Field label="Debtor name">
             <Input value={form.debtorName} onChange={update("debtorName")} required autoFocus />
           </Field>
