@@ -30,25 +30,9 @@
    --------------------------------------------------------------------------- */
 
 :root {
-  /* The serif is retired. Anything that still asks for the display face gets
-     the interface face, so no screen can bring it back by accident. */
-  --font-display: var(--font-ui);
-
-  /* A cooler, plainer ground than the warm paper the previous layer used. */
-  --canvas: #f5f6f8;
-  --canvas-2: #eef0f3;
-  --well: #f7f8fa;
-  --hero-tint: #ffffff;
-  --border: #e4e7eb;
-  --border-hi: #cfd5dc;
-
-  --radius: 8px;
-  --radius-sm: 6px;
-  --shell-max: 1180px;
-}
-
-:root[data-theme="dark"] {
-  --hero-tint: var(--card);
+  --radius: var(--r);
+  --radius-sm: var(--r-sm);
+  --shell-max: var(--maxw);
 }
 
 html {

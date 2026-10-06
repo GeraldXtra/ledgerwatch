@@ -1,346 +1,192 @@
-/* =============================================================================
-   index.css  design tokens and the component library.
-
-   WHAT WAS REMOVED HERE, AND WHY. The September interface rebuild moved the
-   app shell, the sign in page, the landing page and part of the wallet header
-   into styles/app.css and its own components, and deleted the components they
-   came from. Their rules were never taken out of this file. By the audit that
-   prompted this pass, 146 of 526 class names defined here appeared nowhere in
-   the application at all: the whole landing page block, the split screen sign
-   in, the sidebar and app shell, the product mockup and the old wallet header.
-   That is not tidiness. This stylesheet is in the main bundle, so every visitor
-   downloaded it, including on the landing page LW-046 is already trying to slim,
-   and dead rules for things like a persistent mainnet warning banner made the
-   safety story look larger than it is.
-
-   Every rule removed was checked against all of client/src, index.html, public/
-   and app.css first, by substring, so a class assembled at run time from a
-   template literal (avatar-t${n}, toast-${type}, delivery-${status},
-   tone-${band}, tx-${status}, tick-${dir}) counts as used and stayed. If you
-   are looking for a rule that used to be here, it is in git history, and its
-   component almost certainly is not.
-   ============================================================================= */
-
 :root {
+  --bg: #FFFCF3;
+  --panel: #FFFFFF;
+  --soft: #FBF6E8;
+  --sel: #FFF4CF;
+  --line: #EFE9D8;
+  --line-strong: #DDD3B8;
+  --ink: #1D1B16;
+  --muted: #655F52;
+  --accent: #FFC233;
+  --on-accent: #1D1B16;
+  --accent-hover: #F2B31B;
+  --accent-soft: #FFF2C7;
+  --accent-ink: #7A5600;
+  --focus: #1D1B16;
+  --money: #14804A;
+  --money-soft: #E2F4E9;
+  --money-ink: #0F6B3D;
+  --due: #C8322B;
+  --due-soft: #FDE9E7;
+  --warn: #9A5B00;
+  --warn-soft: #FFF1D6;
+  --chart-a: #FFE39A;
+  --chart-b: #14804A;
+  --age-1: #FFF0C4;
+  --age-2: #FFE08A;
+  --age-3: #F5C548;
+  --age-4: #C99312;
+  --age-5: #C8322B;
+  --pri: var(--accent);
+  --on-pri: var(--on-accent);
+  --overlay: rgba(29, 27, 22, 0.3);
+  --shadow: 0 12px 32px rgba(29, 27, 22, 0.12);
+  --r: 12px;
+  --r-sm: 8px;
+  --r-lg: 18px;
+  --font: "Lexend", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --maxw: 1180px;
   color-scheme: light;
 
-  /* =========================================================================
-     LEDGER  ink and brass on warm paper
-
-     The neutrals here are WARM on purpose. The previous set was cold blue grey
-     (#f2f5f9, #e1e7f0, #64748b), which is a stock utility palette, and against
-     navy it read as a default rather than a decision. Warm paper under navy ink
-     with a brass accent is the register a ledger has always been kept in, and
-     it is the difference between the product looking generated and looking made.
-
-     One accent only. Brass marks value; it is never decoration.
-     ========================================================================= */
-
-  /* ---- INK  the brand and every primary action ---- */
-  --navy-950: #06101b;
-  --navy-900: #0a1420;
-  --navy-800: #101c2c;
-  --navy-700: #16283f; /* PRIMARY. White on this is about 13:1 */
-  --navy-600: #23405f;
-  --navy-100: #dde3ec;
-  --navy-50:  #eff2f6;
-
-  /* ---- BRASS  the one accent, spent sparingly ---- */
-  --gold-700: #74581a; /* carries text on paper, about 6:1 */
-  --gold-600: #96742b;
-  --gold-500: #b08d3f; /* brand tone. Antique rather than yellow */
-  --gold-400: #cdae6c;
-  --gold-200: #e8dbbc;
-  --gold-100: #f3ead4;
-  --gold-50:  #faf6ec;
-
-  /* Components read --accent-*; these map onto ink so one edit recolours every
-     button, link and active row. Brass stays separate and stays rare. */
-  --accent-800: var(--navy-950);
-  --accent-700: var(--navy-800);
-  --accent-600: var(--navy-700); /* PRIMARY */
-  --accent-500: var(--navy-600);
-  --accent-400: #35577c;
-  --accent-100: var(--navy-100);
-  --accent-50:  var(--navy-50);
-  --ring: rgba(22, 40, 63, 0.26);
-
-  /* ---- WARM neutrals. The change that carries the whole redesign ---- */
-  --canvas:      #f7f5f1;
-  --canvas-2:    #f1ede6;
-  --card:        #ffffff;
-  --well:        #f4f1ea;
-  --canvas-deep: #e9e4da;
-  --hero-tint:   #fbfaf7;
-  --border:      #e6e1d8;
-  --border-hi:   #d2cabb;
-  --ink:   #15181d;
-  --body:  #3f454e;
-  --muted: #6d6962;
-  --faint: #9b958b;
-
-  /* semantic: tinted ground with same hue text. Data only, never a UI accent */
-  --pos-text: #0b6247;
-  --pos-bg:   #dcece4;
-  --neg-text: #a2362a;
-  --neg-bg:   #f8e4df;
-  --warn-text: #7f6220;
-  --warn-bg:   #f4ecd9;
-  --neutral-text: #5d5952;
-  --neutral-bg:   #efece5;
-
-  /* Charts. Recharts takes colours as SVG attributes, so every chart used to
-     carry its own hex values and none of them knew the theme had changed: a
-     navy bar on a navy card, grey grid lines on a dark ground. These are the
-     only colours a chart may use. The aging ramp reads as WEIGHT (older money
-     is heavier); on dark paper that means brighter, which is why the dark
-     block reverses it rather than dimming it. */
-  --chart-grid: #eef2f7;
-  --chart-axis: #e5e8ed;
-  --chart-tick: #64748b;
-  --chart-cursor: rgba(22, 41, 74, 0.05);
-  --chart-cursor-line: #d6dbe3;
-  --chart-empty: #e5e8ed;
-  --chart-dot-ring: #ffffff;
-  --chart-navy: #47689f;
-  --chart-pos: #0a6e4c;
-  --chart-ramp-1: #8fa8ce;
-  --chart-ramp-2: #6b8abb;
-  --chart-ramp-3: #47689f;
-  --chart-ramp-4: #2a4a7d;
-  --chart-ramp-5: #16294a;
-  --chart-alloc-3: #8fa0b8;
-  --chart-alloc-4: #c7a98f;
-  --chart-alloc-5: #7fb39b;
-  --chart-alloc-6: #b0899e;
-
-  /* Shadows are WARM tinted, not black. Black shadows on warm paper turn it
-     grey and are the fastest way to make a warm palette look dirty. Elevation
-     changes alpha and spread, never colour. */
-  --sh-sm: 0 1px 2px rgba(38, 30, 18, 0.05), 0 1px 3px rgba(38, 30, 18, 0.04);
-  --sh-md: 0 2px 4px rgba(38, 30, 18, 0.05), 0 10px 24px rgba(38, 30, 18, 0.07);
-  --sh-lg: 0 4px 10px rgba(38, 30, 18, 0.06), 0 24px 48px rgba(38, 30, 18, 0.1);
-  --sh-hero: 0 28px 68px rgba(38, 30, 18, 0.15), 0 10px 24px rgba(38, 30, 18, 0.08);
-  --sh-pop: 0 0 0 1px var(--border), 0 14px 36px rgba(38, 30, 18, 0.13),
-    0 4px 12px rgba(38, 30, 18, 0.06);
-  --sh-modal: 0 20px 48px rgba(38, 30, 18, 0.17), 0 8px 18px rgba(38, 30, 18, 0.08);
-  --sh-card: var(--sh-sm);
-  --sh-hover: var(--sh-md);
-
-  /* spacing rhythm */
+  --navy-950: var(--ink);
+  --navy-900: var(--ink);
+  --navy-800: var(--ink);
+  --navy-700: var(--ink);
+  --navy-600: var(--ink);
+  --navy-100: var(--soft);
+  --navy-50: var(--soft);
+  --gold-700: var(--accent-ink);
+  --gold-600: var(--accent-ink);
+  --gold-500: var(--accent);
+  --gold-400: var(--accent);
+  --gold-200: var(--accent-soft);
+  --gold-100: var(--accent-soft);
+  --gold-50: var(--soft);
+  --accent-800: var(--ink);
+  --accent-700: var(--ink);
+  --accent-600: var(--ink);
+  --accent-500: var(--ink);
+  --accent-400: var(--muted);
+  --accent-100: var(--accent-soft);
+  --accent-50: var(--soft);
+  --ring: var(--accent-soft);
+  --canvas: var(--bg);
+  --canvas-2: var(--soft);
+  --card: var(--panel);
+  --well: var(--soft);
+  --canvas-deep: var(--soft);
+  --hero-tint: var(--panel);
+  --border: var(--line);
+  --border-hi: var(--line-strong);
+  --body: var(--ink);
+  --faint: var(--muted);
+  --pos-text: var(--money);
+  --pos-bg: var(--money-soft);
+  --neg-text: var(--due);
+  --neg-bg: var(--due-soft);
+  --warn-text: var(--warn);
+  --warn-bg: var(--warn-soft);
+  --neutral-text: var(--muted);
+  --neutral-bg: var(--soft);
+  --chart-grid: var(--line);
+  --chart-axis: var(--line);
+  --chart-tick: var(--muted);
+  --chart-cursor: var(--soft);
+  --chart-cursor-line: var(--line-strong);
+  --chart-empty: var(--line);
+  --chart-dot-ring: var(--panel);
+  --chart-navy: var(--chart-a);
+  --chart-pos: var(--chart-b);
+  --chart-ramp-1: var(--age-1);
+  --chart-ramp-2: var(--age-2);
+  --chart-ramp-3: var(--age-3);
+  --chart-ramp-4: var(--age-4);
+  --chart-ramp-5: var(--age-5);
+  --chart-alloc-3: var(--line-strong);
+  --chart-alloc-4: var(--accent);
+  --chart-alloc-5: var(--money);
+  --chart-alloc-6: var(--warn);
+  --sh-sm: none;
+  --sh-md: none;
+  --sh-lg: var(--shadow);
+  --sh-hero: none;
+  --sh-pop: var(--shadow);
+  --sh-modal: var(--shadow);
+  --sh-card: none;
+  --sh-hover: none;
   --gap-tight: 16px;
   --gap: 24px;
   --gap-loose: 32px;
+  --ease-out: ease-out;
+  --ease-spring: ease-out;
+  --t-fast: 150ms;
+  --t-pop: 150ms;
+  --t-modal: 150ms;
+  --t-enter: 150ms;
+  --font-display: var(--font);
+  --font-ui: var(--font);
 
-  /* ---- MOTION  one curve, four speeds ----
-     A single easing curve across the whole app is what makes movement feel like
-     one hand rather than several. This one decelerates hard, so things arrive
-     rather than drift. */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --t-fast: 160ms;
-  --t-pop: 220ms;
-  --t-modal: 280ms;
-  --t-enter: 420ms;
-
-  /* ---- TYPE ----
-     Newsreader carries the figures and the titles. It is a serif drawn for
-     screens, and on a page about money it reads as a record rather than an app.
-     Inter does the interface work it is good at. */
-  --font-display: "Newsreader", Georgia, "Times New Roman", serif;
-  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-
-  font-family: var(--font-ui);
-  font-feature-settings: "cv01", "ss03", "cv10";
+  font-family: var(--font);
 }
 
-/* =========================================================================
-   DARK  the same ledger after the lamps are lit
-
-   Every colour above is a token, so a dark theme is the same tokens with
-   different values and nothing else: no component knows which theme it is
-   in. The attribute is set on <html> by a tiny inline script in index.html
-   before the first paint (so a dark page never flashes light) and by
-   src/theme.js when the toggle in the masthead is pressed. The system
-   preference decides when nobody has chosen.
-
-   The neutrals stay WARM. A dark theme that goes cold blue grey is the same
-   stock utility palette the light one was rewritten away from. This is ink on
-   dark paper, not a terminal.
-
-   The accents are lifted a step so they carry on a dark ground, and the
-   brass that carried TEXT on paper (gold-700) becomes light so it still reads.
-   White on --accent-600 stays above 7:1.
-   ========================================================================= */
-/* ---------------------------------------------------------------------------
-   THE SYSTEM PREFERENCE, WITH NO JAVASCRIPT INVOLVED.
-
-   Dark used to depend entirely on public/theme-boot.js stamping data-theme on
-   the root element. That script reads localStorage, and reading it THROWS in
-   some privacy modes; its catch swallows the throw and sets no attribute at
-   all. A user whose whole machine is in dark got the full light interface, and
-   nothing anywhere said why. There was also no listener for the system
-   preference changing while the app is open, so switching the OS to dark did
-   nothing until a reload.
-
-   This block is the CSS-only fallback ARCHITECTURE.md 9.5 asks for: the system
-   preference applies on its own unless the user has explicitly chosen light.
-   The explicit :root[data-theme="dark"] block below repeats the same values so
-   a toggle to dark still wins on a light-preferring system, and carries equal
-   specificity, so an explicit light choice disables this one by selector rather
-   than by order.
-
-   MIRROR. These two blocks are the same palette written twice, because CSS
-   cannot share one declaration block between a media query and a top-level
-   rule. CHANGE ONE, CHANGE BOTH. Any token defined in only one of them is a
-   bug that shows up on exactly one of the two ways a reader reaches dark.
-   --------------------------------------------------------------------------- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    --bg: #111416;
+    --panel: #191C1F;
+    --soft: #212529;
+    --sel: #332B12;
+    --line: #272B30;
+    --line-strong: #363B41;
+    --ink: #EDF0EE;
+    --muted: #A0A8A3;
+    --accent: #FFD157;
+    --on-accent: #1D1B16;
+    --accent-hover: #FFDA75;
+    --accent-soft: #3A3115;
+    --accent-ink: #FFD76E;
+    --focus: #FFD157;
+    --money: #5AD394;
+    --money-soft: #183224;
+    --money-ink: #86E3B1;
+    --due: #F2796F;
+    --due-soft: #3A1F1D;
+    --warn: #F2B451;
+    --warn-soft: #3A2D14;
+    --chart-a: #4A3F1C;
+    --chart-b: #5AD394;
+    --age-1: #2E2915;
+    --age-2: #4A3F1C;
+    --age-3: #7A6524;
+    --age-4: #B8952E;
+    --age-5: #F2796F;
+    --overlay: rgba(0, 0, 0, 0.55);
+    --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
     color-scheme: dark;
-
-    --navy-100: #1e2b3d;
-    --navy-50: #161f2c;
-
-    --accent-800: #a9c3e2;
-    --accent-700: #7d9fc6;
-    --accent-600: #2f4f76; /* PRIMARY. White on this is about 7.5:1 */
-    --accent-500: #3d6190;
-    --accent-400: #5f83ad;
-    --accent-100: var(--navy-100);
-    --accent-50: var(--navy-50);
-    --ring: rgba(125, 159, 198, 0.38);
-
-    --gold-700: #dcc07a; /* carries text on dark paper */
-    --gold-600: #c9a95d;
-    --gold-500: #b08d3f;
-    --gold-400: #8c7136;
-    --gold-200: #3b3322;
-    --gold-100: #2c2719;
-    --gold-50: #232016;
-
-    --canvas: #101317;
-    --canvas-2: #14181d;
-    --card: #181c22;
-    --well: #1d222a;
-    --canvas-deep: #0b0e12;
-    --hero-tint: #151a20;
-    --border: #272d36;
-    --border-hi: #353d49;
-    --ink: #f1efe9;
-    --body: #c8c4bb;
-    --muted: #918c82;
-    --faint: #6b665e;
-
-    --pos-text: #72d0a9;
-    --pos-bg: #14302a;
-    --neg-text: #f08c7e;
-    --neg-bg: #3b201c;
-    --warn-text: #e2c26c;
-    --warn-bg: #342d18;
-    --neutral-text: #b6b1a7;
-    --neutral-bg: #23282f;
-
-    --chart-grid: #232a34;
-    --chart-axis: #2e3642;
-    --chart-tick: #8f99a8;
-    --chart-cursor: rgba(169, 195, 226, 0.08);
-    --chart-cursor-line: #3a4452;
-    --chart-empty: #2a313b;
-    --chart-dot-ring: #181c22;
-    --chart-navy: #6f92c4;
-    --chart-pos: #3fae86;
-    --chart-ramp-1: #34506f;
-    --chart-ramp-2: #4a6a91;
-    --chart-ramp-3: #6386b4;
-    --chart-ramp-4: #86a5cf;
-    --chart-ramp-5: #aac3e3;
-    --chart-alloc-3: #9aa9bf;
-    --chart-alloc-4: #cfae92;
-    --chart-alloc-5: #86bca3;
-    --chart-alloc-6: #b995a8;
-
-    --sh-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
-    --sh-md: 0 2px 4px rgba(0, 0, 0, 0.35), 0 10px 24px rgba(0, 0, 0, 0.4);
-    --sh-lg: 0 4px 10px rgba(0, 0, 0, 0.4), 0 24px 48px rgba(0, 0, 0, 0.5);
-    --sh-hero: 0 28px 68px rgba(0, 0, 0, 0.6), 0 10px 24px rgba(0, 0, 0, 0.4);
-    --sh-pop: 0 0 0 1px var(--border), 0 14px 36px rgba(0, 0, 0, 0.55),
-      0 4px 12px rgba(0, 0, 0, 0.35);
-    --sh-modal: 0 20px 48px rgba(0, 0, 0, 0.65), 0 8px 18px rgba(0, 0, 0, 0.4);
   }
 }
 
 :root[data-theme="dark"] {
+  --bg: #111416;
+  --panel: #191C1F;
+  --soft: #212529;
+  --sel: #332B12;
+  --line: #272B30;
+  --line-strong: #363B41;
+  --ink: #EDF0EE;
+  --muted: #A0A8A3;
+  --accent: #FFD157;
+  --on-accent: #1D1B16;
+  --accent-hover: #FFDA75;
+  --accent-soft: #3A3115;
+  --accent-ink: #FFD76E;
+  --focus: #FFD157;
+  --money: #5AD394;
+  --money-soft: #183224;
+  --money-ink: #86E3B1;
+  --due: #F2796F;
+  --due-soft: #3A1F1D;
+  --warn: #F2B451;
+  --warn-soft: #3A2D14;
+  --chart-a: #4A3F1C;
+  --chart-b: #5AD394;
+  --age-1: #2E2915;
+  --age-2: #4A3F1C;
+  --age-3: #7A6524;
+  --age-4: #B8952E;
+  --age-5: #F2796F;
+  --overlay: rgba(0, 0, 0, 0.55);
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   color-scheme: dark;
-
-  --navy-100: #1e2b3d;
-  --navy-50: #161f2c;
-
-  --accent-800: #a9c3e2;
-  --accent-700: #7d9fc6;
-  --accent-600: #2f4f76; /* PRIMARY. White on this is about 7.5:1 */
-  --accent-500: #3d6190;
-  --accent-400: #5f83ad;
-  --accent-100: var(--navy-100);
-  --accent-50: var(--navy-50);
-  --ring: rgba(125, 159, 198, 0.38);
-
-  --gold-700: #dcc07a; /* carries text on dark paper */
-  --gold-600: #c9a95d;
-  --gold-500: #b08d3f;
-  --gold-400: #8c7136;
-  --gold-200: #3b3322;
-  --gold-100: #2c2719;
-  --gold-50: #232016;
-
-  --canvas: #101317;
-  --canvas-2: #14181d;
-  --card: #181c22;
-  --well: #1d222a;
-  --canvas-deep: #0b0e12;
-  --hero-tint: #151a20;
-  --border: #272d36;
-  --border-hi: #353d49;
-  --ink: #f1efe9;
-  --body: #c8c4bb;
-  --muted: #918c82;
-  --faint: #6b665e;
-
-  --pos-text: #72d0a9;
-  --pos-bg: #14302a;
-  --neg-text: #f08c7e;
-  --neg-bg: #3b201c;
-  --warn-text: #e2c26c;
-  --warn-bg: #342d18;
-  --neutral-text: #b6b1a7;
-  --neutral-bg: #23282f;
-
-  --chart-grid: #232a34;
-  --chart-axis: #2e3642;
-  --chart-tick: #8f99a8;
-  --chart-cursor: rgba(169, 195, 226, 0.08);
-  --chart-cursor-line: #3a4452;
-  --chart-empty: #2a313b;
-  --chart-dot-ring: #181c22;
-  --chart-navy: #6f92c4;
-  --chart-pos: #3fae86;
-  --chart-ramp-1: #34506f;
-  --chart-ramp-2: #4a6a91;
-  --chart-ramp-3: #6386b4;
-  --chart-ramp-4: #86a5cf;
-  --chart-ramp-5: #aac3e3;
-  --chart-alloc-3: #9aa9bf;
-  --chart-alloc-4: #cfae92;
-  --chart-alloc-5: #86bca3;
-  --chart-alloc-6: #b995a8;
-
-  --sh-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
-  --sh-md: 0 2px 4px rgba(0, 0, 0, 0.35), 0 10px 24px rgba(0, 0, 0, 0.4);
-  --sh-lg: 0 4px 10px rgba(0, 0, 0, 0.4), 0 24px 48px rgba(0, 0, 0, 0.5);
-  --sh-hero: 0 28px 68px rgba(0, 0, 0, 0.6), 0 10px 24px rgba(0, 0, 0, 0.4);
-  --sh-pop: 0 0 0 1px var(--border), 0 14px 36px rgba(0, 0, 0, 0.55),
-    0 4px 12px rgba(0, 0, 0, 0.35);
-  --sh-modal: 0 20px 48px rgba(0, 0, 0, 0.65), 0 8px 18px rgba(0, 0, 0, 0.4);
 }
 
 * {
