@@ -49,83 +49,15 @@
   --tint-5-ink: #3F5A2B;
   color-scheme: light;
 
-  --navy-950: var(--ink);
-  --navy-900: var(--ink);
-  --navy-800: var(--ink);
-  --navy-700: var(--ink);
-  --navy-600: var(--ink);
-  --navy-100: var(--soft);
-  --navy-50: var(--soft);
-  --gold-700: var(--accent-ink);
-  --gold-600: var(--accent-ink);
-  --gold-500: var(--accent);
-  --gold-400: var(--accent);
-  --gold-200: var(--accent-soft);
-  --gold-100: var(--accent-soft);
-  --gold-50: var(--soft);
-  --accent-800: var(--ink);
-  --accent-700: var(--ink);
-  --accent-600: var(--ink);
   --accent-500: var(--ink);
   --accent-400: var(--muted);
-  --accent-100: var(--accent-soft);
-  --accent-50: var(--soft);
-  --ring: var(--accent-soft);
-  --canvas: var(--bg);
-  --canvas-2: var(--soft);
-  --card: var(--panel);
-  --well: var(--soft);
-  --canvas-deep: var(--soft);
-  --hero-tint: var(--panel);
   --border: var(--line);
-  --border-hi: var(--line-strong);
-  --body: var(--ink);
-  --faint: var(--muted);
   --pos-text: var(--money);
-  --pos-bg: var(--money-soft);
   --neg-text: var(--due);
-  --neg-bg: var(--due-soft);
-  --warn-text: var(--warn);
-  --warn-bg: var(--warn-soft);
-  --neutral-text: var(--muted);
-  --neutral-bg: var(--soft);
-  --chart-grid: var(--line);
-  --chart-axis: var(--line);
-  --chart-tick: var(--muted);
-  --chart-cursor: var(--soft);
-  --chart-cursor-line: var(--line-strong);
-  --chart-empty: var(--line);
-  --chart-dot-ring: var(--panel);
-  --chart-navy: var(--chart-a);
-  --chart-pos: var(--chart-b);
-  --chart-ramp-1: var(--age-1);
-  --chart-ramp-2: var(--age-2);
-  --chart-ramp-3: var(--age-3);
-  --chart-ramp-4: var(--age-4);
-  --chart-ramp-5: var(--age-5);
-  --chart-alloc-3: var(--line-strong);
-  --chart-alloc-4: var(--accent);
-  --chart-alloc-5: var(--money);
-  --chart-alloc-6: var(--warn);
-  --sh-sm: none;
-  --sh-md: none;
-  --sh-lg: var(--shadow);
-  --sh-hero: none;
-  --sh-pop: var(--shadow);
-  --sh-modal: var(--shadow);
-  --sh-card: none;
-  --sh-hover: none;
-  --gap-tight: 16px;
-  --gap: 24px;
-  --gap-loose: 32px;
-  --ease-out: ease-out;
-  --ease-spring: ease-out;
-  --t-fast: 150ms;
-  --t-pop: 150ms;
-  --t-modal: 150ms;
-  --t-enter: 150ms;
-  --font-display: var(--font);
-  --font-ui: var(--font);
+  --chart-alloc-3: var(--accent);
+  --chart-alloc-4: var(--age-4);
+  --chart-alloc-5: var(--accent-ink);
+  --chart-alloc-6: var(--age-2);
 
   font-family: var(--font);
 }
@@ -417,13 +349,6 @@ code {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
-}
-
-.split-7-5 {
-  display: grid;
-  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-  gap: 16px;
-  align-items: start;
 }
 
 .kpi-row {
@@ -1770,9 +1695,6 @@ button.chip:hover {
 }
 
 @media (max-width: 899px) {
-  .split-7-5 {
-    grid-template-columns: minmax(0, 1fr);
-  }
 
   .stat-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1955,70 +1877,3 @@ button.chip:hover {
     scroll-behavior: auto !important;
   }
 }
-
-.auth-card {
-  width: 100%;
-  max-width: 440px;
-}
-.chart-frame {
-  height: 240px;
-  margin: 0 -8px;
-}
-.toast-success .toast-icon {
-  background: var(--pos-bg);
-  color: var(--pos-text);
-}
-.toast-info .toast-icon {
-  background: var(--accent-50);
-  color: var(--accent-700);
-}
-.display {
-  font-size: clamp(33px, 3.7vw, 52px);
-  font-weight: 700;
-  letter-spacing: -1.5px;
-  line-height: 1.08;
-  color: var(--ink);
-  margin: 0;
-}
-
-.lead {
-  font-size: 18px;
-  line-height: 1.6;
-  color: var(--muted);
-  margin: 0;
-  max-width: 54ch;
-}
-.landing {
-  background: var(--card);
-  min-height: 100vh;
-  overflow-x: hidden;
-}
-
-.section-head {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 48px;
-}
-
-.section-head.center {
-  align-items: center;
-  text-align: center;
-}
-
-.step {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  position: relative;
-  padding-top: 8px;
-}
-.tx-list { list-style: none; margin: 0; padding: 0; }
-.turnstile-field { display: flex; justify-content: center; margin: 4px 0 2px; min-height: 65px; }
-.turnstile-field .field-error { margin-top: 6px; text-align: center; }
-
-.turnstile-missing { justify-content: flex-start; gap: 10px; padding: 12px 14px;
-  background: var(--warn-bg); border: 1px solid var(--gold-200); border-radius: 8px;
-  color: var(--warn-text); font-size: 13px; line-height: 1.5; text-align: left; }
-.turnstile-missing .caption { color: var(--warn-text); opacity: .85; margin-top: 2px; }
-

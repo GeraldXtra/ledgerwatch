@@ -2,7 +2,7 @@ import { useEffect, useMemo } from "react";
 import { Link, Navigate, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import PublicShell from "../components/PublicShell";
-import { Blocks } from "../docs/Blocks";
+import { Blocks, slugify } from "../docs/Blocks";
 import { GUIDE, GROUPS } from "../docs/guide";
 
 /**
@@ -135,6 +135,17 @@ export default function DocsPage() {
             )}
           </div>
         </article>
+
+        <nav className="docs-toc">
+          <p>On this page</p>
+          {page.blocks
+            .filter((b) => b.type === "h2")
+            .map((h) => (
+              <a key={h.text} href={`#${slugify(h.text)}`}>
+                {h.text}
+              </a>
+            ))}
+        </nav>
       </div>
     </PublicShell>
   );

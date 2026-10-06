@@ -398,10 +398,10 @@ export default function AuthPage() {
   return (
     <div className="gate">
       <aside className="gate-aside">
-        <Link to="/" className="lw-brand" style={{ color: "#fff" }}>
+        <Link to="/" className="lw-brand">
           <LogoMark size={32} />
-          <span className="lw-brand-name" style={{ color: "#fff" }}>
-            Ledger<em style={{ color: "var(--gold-400)" }}>Watch</em>
+          <span className="lw-brand-name">
+            Ledger<em>Watch</em>
           </span>
         </Link>
 
