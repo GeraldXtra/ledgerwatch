@@ -758,7 +758,7 @@ function WalletInner() {
           )}
 
           <section className="card card-flush mm-panel">
-            <div className="tabs mm-tabs" role="tablist" aria-label="Wallet">
+            <div className="tabs mm-tabs" role="tablist">
               <button
                 type="button"
                 role="tab"

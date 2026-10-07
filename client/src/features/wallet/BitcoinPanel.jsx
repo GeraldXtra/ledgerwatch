@@ -734,7 +734,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       )}
 
       <section className="card card-flush mm-panel">
-      <div className="tabs mm-tabs" role="tablist" aria-label="Bitcoin">
+      <div className="tabs mm-tabs" role="tablist">
         <button
           type="button"
           role="tab"

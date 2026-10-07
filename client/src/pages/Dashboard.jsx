@@ -333,7 +333,7 @@ function Workspace() {
       </header>
 
       <div className="aw">
-        <nav className={navOpen ? "aw-nav show" : "aw-nav"} id="aw-nav" aria-label="LedgerWatch" ref={navRef}>
+        <nav className={navOpen ? "aw-nav show" : "aw-nav"} id="aw-nav" aria-label="Sections" ref={navRef}>
           <SideNav section={section} view={view} />
         </nav>
         {navOpen && (
