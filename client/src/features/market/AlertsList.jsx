@@ -7,6 +7,7 @@ export default function AlertsList({ alerts, onTrade, onDismiss, busyId }) {
     <Card
       eyebrow="Your decision"
       title="Alerts awaiting your decision"
+      count={alerts.length}
       subtitle="The agent recommends; you choose the side and the amount. Nothing executes until you confirm."
     >
       {alerts.length === 0 ? (
@@ -16,7 +17,7 @@ export default function AlertsList({ alerts, onTrade, onDismiss, busyId }) {
           hint="When a watch condition hits, the agent raises an alert here with a suggestion for your decision."
         />
       ) : (
-        <div>
+        <div className="alert-grid">
           {alerts.map((a) => (
             <div key={a._id} className="alert-card">
               <div className="row space-between">

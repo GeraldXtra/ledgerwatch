@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, Lightbulb, TrendingDown, TrendingUp } from "lucide-react";
-import { Button, Field, Input, Modal } from "../../components/ui";
+import { AlertTriangle, ArrowLeft, Lightbulb } from "lucide-react";
+import { Button, Field, Input, Modal, PageHeader } from "../../components/ui";
 import { usd, price as fmtPrice } from "./format";
 
 const QUICK = [0.25, 0.5, 0.75, 1];
@@ -91,190 +91,218 @@ export default function TradePanel({
     }
   }
 
-  const Icon = side === "buy" ? TrendingUp : TrendingDown;
   const wentAgainst = alert.suggestion !== "hold" && alert.suggestion !== side;
 
+  const title = `${side === "buy" ? "Buy" : "Sell"} ${alert.symbol}`;
+
   return (
-    <Modal label={`${side === "buy" ? "Buy" : "Sell"} ${alert.symbol}`} onClose={onClose}>
-      <div className="row space-between">
-        <h3 className="section-title">
-          <Icon size={18} style={{ verticalAlign: "-3px", marginRight: 6 }} />
-          {side === "buy" ? "Buy" : "Sell"} {alert.symbol}
-        </h3>
-        <span className="muted small num">{fmtPrice(price)}</span>
-      </div>
+    <Modal
+      label={title}
+      view={side}
+      params={{ step: confirming ? 2 : 1 }}
+      crumb={title}
+      onClose={onClose}
+    >
+      <div className="wiz">
+        <ol className="wiz-steps">
+          <li aria-current={confirming ? undefined : "step"} className={confirming ? "done" : undefined}>
+            <small>Step 1</small>
+            <b>Amount to spend</b>
+          </li>
+          <li aria-current={confirming ? "step" : undefined}>
+            <small>Step 2</small>
+            <b>Confirm this {side}</b>
+          </li>
+        </ol>
 
-      {Math.abs(moved) >= 0.5 && (
-        <div className="against-note">
-          {alert.symbol} has moved {moved > 0 ? "up" : "down"} {Math.abs(moved).toFixed(1)}% since
-          this alert was raised, from {fmtPrice(alertPrice)} to {fmtPrice(livePrice)}. The amounts below use
-          the price now.
-        </div>
-      )}
-
-      <div className="agent-reasoning">
-        <span className="icon-tile neutral">
-          <Lightbulb size={16} />
-        </span>
-        <div className="grow">
-          <div className="overline">Agent recommendation: {alert.suggestion}</div>
-          <p className="muted small" style={{ margin: "4px 0 0" }}>
-            {alert.message}
-          </p>
-        </div>
-      </div>
-
-      {wentAgainst && (
-        <div className="against-note">
-          <AlertTriangle size={15} />
-          <span>
-            You are choosing to <strong>{side}</strong> while the agent suggested{" "}
-            <strong>{alert.suggestion}</strong>. That is your call, and it will be recorded.
-          </span>
-        </div>
-      )}
-
-      {!confirming ? (
-        <>
-          <div className="seg" role="tablist" style={{ maxWidth: 260 }}>
-            <button
-              type="button"
-              className={denom === "token" ? "seg-btn active" : "seg-btn"}
-              onClick={() => {
-                setDenom("token");
-                setRaw("");
-              }}
-            >
-              {alert.symbol} amount
-            </button>
-            <button
-              type="button"
-              className={denom === "quote" ? "seg-btn active" : "seg-btn"}
-              onClick={() => {
-                setDenom("quote");
-                setRaw("");
-              }}
-            >
-              USD value
-            </button>
-          </div>
-
-          <Field label={denom === "quote" ? "Amount to spend (USD)" : `Amount (${alert.symbol})`}>
-            <Input
-              type="number"
-              min="0"
-              step="any"
-              value={raw}
-              onChange={(e) => setRaw(e.target.value)}
-              placeholder="0"
-              autoFocus
+        <div className="wiz-main">
+          {!confirming ? (
+            <PageHeader
+              title={
+                <>
+                  {side === "buy" ? "Buy" : "Sell"} {alert.symbol}
+                </>
+              }
+              support={<span className="num">{fmtPrice(price)}</span>}
             />
-          </Field>
-
-          <div className="row wrap">
-            {QUICK.map((p) => (
-              <Button key={p} size="sm" onClick={() => setPct(p)}>
-                {p === 1 ? "MAX" : `${p * 100}%`}
-              </Button>
-            ))}
-            <span className="muted small" style={{ marginLeft: "auto" }}>
-              Available:{" "}
-              <span className="num">
-                {side === "buy" ? cashLabel : `${heldQty.toFixed(6)} ${alert.symbol}`}
-              </span>
-            </span>
-          </div>
-
-          {validationMessage && <p className="error-text">{validationMessage}</p>}
-
-          {amount > 0 && !tooBig && (
-            <dl className="trade-quote">
-              <div>
-                <dt>You {side === "buy" ? "spend" : "sell"}</dt>
-                <dd className="num">
-                  {denom === "quote" ? usd(quote.value) : `${quote.qty.toFixed(8)} ${alert.symbol}`}
-                </dd>
-              </div>
-              <div>
-                <dt>You receive</dt>
-                <dd className="num">
-                  {side === "buy" ? `${quote.qty.toFixed(8)} ${alert.symbol}` : usd(quote.value)}
-                </dd>
-              </div>
-              <div>
-                <dt>Price</dt>
-                <dd className="num">{fmtPrice(price)}</dd>
-              </div>
-              <div>
-                <dt>Cash after</dt>
-                <dd className="num">
-                  {quote.cashAfter != null ? usd(quote.cashAfter) : "not known"}
-                </dd>
-              </div>
-              <div>
-                <dt>{alert.symbol} position after</dt>
-                <dd className="num">{quote.positionAfter.toFixed(8)}</dd>
-              </div>
-            </dl>
+          ) : (
+            <PageHeader title={<>Confirm this {side}</>} support="Nothing executes until you confirm." />
           )}
 
-          {error && <p className="error-text">{error}</p>}
+          {Math.abs(moved) >= 0.5 && (
+            <div className="against-note">
+              {alert.symbol} has moved {moved > 0 ? "up" : "down"} {Math.abs(moved).toFixed(1)}% since
+              this alert was raised, from {fmtPrice(alertPrice)} to {fmtPrice(livePrice)}. The amounts below use
+              the price now.
+            </div>
+          )}
 
-          <div className="row" style={{ justifyContent: "flex-end" }}>
-            <Button variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button variant="primary" disabled={invalid} onClick={() => setConfirming(true)}>
-              Review {side}
-            </Button>
+          <div className="agent-reasoning">
+            <span className="icon-tile neutral">
+              <Lightbulb size={16} />
+            </span>
+            <div className="grow">
+              <div className="overline">Agent recommendation: {alert.suggestion}</div>
+              <p className="muted small" style={{ margin: "4px 0 0" }}>
+                {alert.message}
+              </p>
+            </div>
           </div>
-        </>
-      ) : (
-        <>
-          <div className="settings-head">
-            <h4 className="card-title">Confirm this {side}</h4>
-            <p className="muted small">Nothing executes until you confirm.</p>
-          </div>
 
-          <dl className="trade-quote">
-            <div>
-              <dt>Action</dt>
-              <dd>
-                {side === "buy" ? "Buy" : "Sell"} {alert.symbol}
-              </dd>
+          {wentAgainst && (
+            <div className="against-note">
+              <AlertTriangle size={15} />
+              <span>
+                You are choosing to <strong>{side}</strong> while the agent suggested{" "}
+                <strong>{alert.suggestion}</strong>. That is your call, and it will be recorded.
+              </span>
             </div>
-            <div>
-              <dt>Amount</dt>
-              <dd className="num">
-                {quote.qty.toFixed(8)} {alert.symbol}
-              </dd>
-            </div>
-            <div>
-              <dt>Value</dt>
-              <dd className="num">{usd(quote.value)}</dd>
-            </div>
-            <div>
-              <dt>Price</dt>
-              <dd className="num">{fmtPrice(price)}</dd>
-            </div>
-            <div>
-              <dt>Agent suggested</dt>
-              <dd>{alert.suggestion}</dd>
-            </div>
-          </dl>
+          )}
 
-          {error && <p className="error-text">{error}</p>}
+          {!confirming ? (
+            <>
+              <section className="card stack">
+              <div className="seg" role="tablist" style={{ maxWidth: 260 }}>
+                <button
+                  type="button"
+                  className={denom === "token" ? "seg-btn active" : "seg-btn"}
+                  onClick={() => {
+                    setDenom("token");
+                    setRaw("");
+                  }}
+                >
+                  {alert.symbol} amount
+                </button>
+                <button
+                  type="button"
+                  className={denom === "quote" ? "seg-btn active" : "seg-btn"}
+                  onClick={() => {
+                    setDenom("quote");
+                    setRaw("");
+                  }}
+                >
+                  USD value
+                </button>
+              </div>
 
-          <div className="row" style={{ justifyContent: "flex-end" }}>
-            <Button variant="ghost" onClick={() => setConfirming(false)} disabled={busy}>
-              <ArrowLeft size={14} /> Back
-            </Button>
-            <Button variant="primary" onClick={submit} disabled={busy}>
-              {busy ? busyLabel || "Executing…" : `Confirm ${side}`}
-            </Button>
-          </div>
-        </>
-      )}
+              <Field label={denom === "quote" ? "Amount to spend (USD)" : `Amount (${alert.symbol})`}>
+                <Input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={raw}
+                  onChange={(e) => setRaw(e.target.value)}
+                  placeholder="0"
+                  autoFocus
+                />
+              </Field>
+
+              <div className="row wrap">
+                {QUICK.map((p) => (
+                  <Button key={p} size="sm" onClick={() => setPct(p)}>
+                    {p === 1 ? "MAX" : `${p * 100}%`}
+                  </Button>
+                ))}
+                <span className="muted small" style={{ marginLeft: "auto" }}>
+                  Available:{" "}
+                  <span className="num">
+                    {side === "buy" ? cashLabel : `${heldQty.toFixed(6)} ${alert.symbol}`}
+                  </span>
+                </span>
+              </div>
+
+              {validationMessage && <p className="error-text">{validationMessage}</p>}
+
+              {amount > 0 && !tooBig && (
+                <dl className="trade-quote">
+                  <div>
+                    <dt>You {side === "buy" ? "spend" : "sell"}</dt>
+                    <dd className="num">
+                      {denom === "quote" ? usd(quote.value) : `${quote.qty.toFixed(8)} ${alert.symbol}`}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>You receive</dt>
+                    <dd className="num">
+                      {side === "buy" ? `${quote.qty.toFixed(8)} ${alert.symbol}` : usd(quote.value)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Price</dt>
+                    <dd className="num">{fmtPrice(price)}</dd>
+                  </div>
+                  <div>
+                    <dt>Cash after</dt>
+                    <dd className="num">
+                      {quote.cashAfter != null ? usd(quote.cashAfter) : "not known"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{alert.symbol} position after</dt>
+                    <dd className="num">{quote.positionAfter.toFixed(8)}</dd>
+                  </div>
+                </dl>
+              )}
+
+              {error && <p className="error-text">{error}</p>}
+
+              </section>
+
+              <div className="pv-foot">
+                <Button variant="ghost" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button variant="primary" disabled={invalid} onClick={() => setConfirming(true)}>
+                  Review {side}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <section className="card stack">
+              <dl className="trade-quote">
+                <div>
+                  <dt>Action</dt>
+                  <dd>
+                    {side === "buy" ? "Buy" : "Sell"} {alert.symbol}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Amount</dt>
+                  <dd className="num">
+                    {quote.qty.toFixed(8)} {alert.symbol}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Value</dt>
+                  <dd className="num">{usd(quote.value)}</dd>
+                </div>
+                <div>
+                  <dt>Price</dt>
+                  <dd className="num">{fmtPrice(price)}</dd>
+                </div>
+                <div>
+                  <dt>Agent suggested</dt>
+                  <dd>{alert.suggestion}</dd>
+                </div>
+              </dl>
+
+              {error && <p className="error-text">{error}</p>}
+
+              </section>
+
+              <div className="pv-foot">
+                <Button variant="ghost" onClick={() => setConfirming(false)} disabled={busy}>
+                  <ArrowLeft size={14} /> Back
+                </Button>
+                <Button variant="primary" onClick={submit} disabled={busy}>
+                  {busy ? busyLabel || "Executing…" : `Confirm ${side}`}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </Modal>
   );
 }

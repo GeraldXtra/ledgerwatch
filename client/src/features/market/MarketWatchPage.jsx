@@ -4,6 +4,7 @@ import {
   Bell,
   Eye,
   Info,
+  Plus,
   RefreshCw,
   TrendingDown,
   TrendingUp,
@@ -16,13 +17,13 @@ import { useAuth } from "../../context/AuthContext";
 import {
   Button,
   Card,
+  Modal,
   PageHeader,
   SkeletonBlock,
   StatCard,
   ToastProvider,
   useToast,
 } from "../../components/ui";
-import { DetailPane } from "../../components/ui/Modal";
 import { usd, signedUsd, pct } from "./format";
 import useMarkets from "./useMarkets";
 import MarketTable from "./MarketTable";
@@ -112,6 +113,7 @@ function MarketWatch() {
   const [running, setRunning] = useState(false);
   const [detail, setDetail] = useState(null);
   const [deepLinkNote, setDeepLinkNote] = useState("");
+  const [addingWatch, setAddingWatch] = useState(false);
 
   const coinIds = useMemo(() => {
     const ids = new Set(watches.map((w) => w.coinId));
@@ -540,11 +542,11 @@ function MarketWatch() {
 
   const actions = (
     <>
-      <Button variant="primary" onClick={runPass} loading={running}>
-        <Zap size={14} /> {running ? "Checking" : "Check now"}
-      </Button>
       <Button variant="ghost" icon title="Refresh" onClick={loadData}>
         <RefreshCw size={14} />
+      </Button>
+      <Button variant="primary" onClick={runPass} loading={running}>
+        <Zap size={14} /> {running ? "Checking" : "Check now"}
       </Button>
     </>
   );
@@ -553,7 +555,7 @@ function MarketWatch() {
 
   return (
     <>
-      <div className="subtab-panel ws-view market-view" hidden={view !== "alerts"}>
+      <div className="page-stack subtab-panel market-view" hidden={view !== "alerts"}>
         <PageHeader title="Alerts" action={actions} />
 
         {error && <p className="error-text">{error}</p>}
@@ -580,7 +582,7 @@ function MarketWatch() {
         )}
       </div>
 
-      <div className="subtab-panel ws-view market-view" hidden={view !== "watchlist"}>
+      <div className="page-stack subtab-panel market-view" hidden={view !== "watchlist"}>
         {error && <p className="error-text">{error}</p>}
 
         {waiting ? (
@@ -591,13 +593,18 @@ function MarketWatch() {
               rows={marketRows}
               onSelect={(m) => setDetail(m.id)}
               live={{ lastFetchedAt, stale }}
+              action={
+                <Button variant="primary" onClick={() => setAddingWatch(true)}>
+                  <Plus size={14} /> Add watch
+                </Button>
+              }
             />
             <WatchList watches={watches} onEdit={editWatch} onRemove={removeWatch} />
           </>
         )}
       </div>
 
-      <div className="stack subtab-panel" hidden={view !== "portfolio"}>
+      <div className="page-stack subtab-panel" hidden={view !== "portfolio"}>
         <PageHeader
           title="Market Watch"
           support={
@@ -608,7 +615,9 @@ function MarketWatch() {
           action={actions}
         />
 
-        <TradingModeToggle mode={mode} onChange={setMode} />
+        <section className="card">
+          <TradingModeToggle mode={mode} onChange={setMode} />
+        </section>
 
         {error && <p className="error-text">{error}</p>}
 
@@ -734,10 +743,10 @@ function MarketWatch() {
         )}
       </div>
 
-      {!waiting && (
-        <DetailPane screen="inline" active={view === "watchlist"}>
-          <AddWatchForm onAdded={loadData} />
-        </DetailPane>
+      {addingWatch && (
+        <Modal label="Watch a coin" view="watch" onClose={() => setAddingWatch(false)}>
+          <AddWatchForm onAdded={loadData} onCancel={() => setAddingWatch(false)} />
+        </Modal>
       )}
 
       {selectedMarket && (

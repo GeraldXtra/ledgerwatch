@@ -1545,7 +1545,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 10px 16px;
-  padding: 0 4px;
 }
 
 .mode-toggle {
@@ -1553,7 +1552,7 @@
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--line-strong);
-  border-radius: var(--r);
+  border-radius: 999px;
   background: var(--soft);
 }
 
@@ -1561,10 +1560,10 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 34px;
+  height: 32px;
   padding: 0 14px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 999px;
   background: transparent;
   color: var(--muted);
   font-size: 14px;
@@ -1576,9 +1575,8 @@
 }
 
 .mode-btn.active {
-  background: var(--panel);
-  color: var(--ink);
-  box-shadow: 0 0 0 1px var(--line-strong);
+  background: var(--ink);
+  color: var(--panel);
 }
 
 .mode-btn:disabled {
@@ -1627,6 +1625,12 @@
 
 .hero-grid > div + div {
   border-left: 1px solid var(--line);
+}
+
+.hero-grid .overline {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
 }
 
 .hero-value {
@@ -1703,6 +1707,11 @@
   overflow-y: auto;
 }
 
+.chat-log + .row.wrap,
+.card .row.wrap:has(> .chip) {
+  gap: 6px;
+}
+
 .chat-msg {
   align-self: flex-start;
   max-width: 90%;
@@ -1722,14 +1731,19 @@
   color: var(--ink);
 }
 
-.alert-card {
-  padding: 14px 0;
-  border-top: 1px solid var(--line);
+.alert-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
-.alert-card:first-child {
-  border-top: 0;
-  padding-top: 6px;
+.alert-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
 }
 
 .alert-card > .row:first-child {
@@ -1737,9 +1751,15 @@
   gap: 8px 12px;
 }
 
+.alert-card > .row:first-child > .num {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .alert-msg {
-  margin: 8px 0 12px;
-  color: var(--muted);
+  margin: 0;
+  color: var(--ink);
   font-size: 14px;
 }
 
@@ -1757,8 +1777,8 @@
   display: inline-flex;
   align-items: center;
   height: 22px;
-  padding: 0 7px;
-  border-radius: 6px;
+  padding: 0 8px;
+  border-radius: 999px;
   background: var(--warn-soft);
   color: var(--warn);
   font-size: 12px;
@@ -1879,15 +1899,15 @@
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--line-strong);
-  border-radius: var(--r);
+  border-radius: 999px;
   background: var(--soft);
 }
 
 .timeframe-btn {
   height: 32px;
-  padding: 0 12px;
+  padding: 0 14px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 999px;
   background: transparent;
   color: var(--muted);
   font-size: 13.5px;
@@ -1899,23 +1919,24 @@
 }
 
 .timeframe-btn.active {
-  background: var(--panel);
-  color: var(--ink);
-  box-shadow: 0 0 0 1px var(--line-strong);
+  background: var(--ink);
+  color: var(--panel);
 }
 
 .coin-chart {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+}
+
+.wiz-main .card .row.wrap > .btn-sm {
+  border-width: 1px;
+  border-color: var(--line-strong);
+  font-weight: 600;
 }
 
 .coin-chart > .timeframe-row {
   justify-self: start;
-}
-
-.ws-sheet-dialog > .seg,
-.ws-sheet-dialog > .timeframe-row {
-  align-self: flex-start;
 }
 
 .coin-chart-frame {
@@ -1932,35 +1953,134 @@
 .agent-reasoning {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
   padding: 12px 14px;
-  border: 1px solid var(--line);
+  border: 2px solid var(--accent);
   border-radius: var(--r);
-  background: var(--soft);
+  background: var(--accent-soft);
 }
 
 .agent-reasoning .icon-tile {
-  width: 30px;
-  height: 30px;
-  background: var(--panel);
-}
-
-.ws-sheet-base > .card {
-  padding: 0;
-  border: 0;
-  border-radius: 0;
+  width: 22px;
+  height: 22px;
   background: transparent;
+  color: var(--accent-ink);
 }
 
-.ws-sheet-base > .card > .card-head {
-  margin: 0 0 18px;
-  padding: 0;
-  border-bottom: 0;
+.agent-reasoning .muted {
+  color: var(--ink);
 }
 
-.ws-sheet-base > .card > .card-head .card-title {
-  font-size: 23px;
-  letter-spacing: -0.02em;
+.coin-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.coin-price-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.coin-price {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.ruled-list .list-row:first-child {
+  padding-top: 0;
+}
+
+.wiz {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.wiz-steps {
+  display: grid;
+  gap: 18px;
+  margin: 0;
+  padding: 8px 0 0;
+  list-style: none;
+}
+
+.wiz-steps li {
+  display: grid;
+  gap: 2px;
+  padding-left: 14px;
+  border-left: 3px solid var(--line);
+}
+
+.wiz-steps small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.wiz-steps b {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.wiz-steps li[aria-current="step"] {
+  border-left-color: var(--accent);
+}
+
+.wiz-steps li[aria-current="step"] b,
+.wiz-steps li.done b {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.wiz-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  min-width: 0;
+}
+
+.watch-table .coin-chip {
+  min-width: 46px;
+}
+
+.watch-edit-cell .watch-edit {
+  min-width: 0;
+}
+
+@media (max-width: 1099px) {
+  .alert-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 899px) {
+  .wiz {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .wiz-steps {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 0;
+  }
+
+  .hero-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hero-grid > div + div {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .hero-value {
+    font-size: 34px;
+  }
 }
 
 .coin-picker {
@@ -2139,108 +2259,26 @@ button.coin-result:focus-visible {
 }
 
 @media (max-width: 899px) {
-  .ws-view > .page-head {
-    position: static;
-    padding: 16px 16px 12px;
-  }
-
-  .ws-view > .page-head ~ .card > .card-head,
-  .ws-view > .card + .card > .card-head {
-    margin: 0 -16px;
-    padding: 16px 16px 4px;
-  }
-
-  .ws-view > .error-text,
-  .ws-view > .deeplink-note,
-  .ws-view > .skeleton {
-    margin: 12px 16px 0;
-  }
-
-  .hero-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .hero-grid > div + div {
-    border-left: 0;
-    border-top: 1px solid var(--line);
-  }
-
-  .hero-value {
-    font-size: 34px;
-  }
-
-  .ws-main .kpi-row .stat-value {
-    font-size: 22px;
-  }
-
-  .ws-main .kpi-row .stat-card {
-    padding: 14px 16px;
-  }
-
-  .mode-btn {
-    height: 40px;
-  }
-
-  .timeframe-btn {
-    height: 40px;
-  }
-
   .coin-result {
     min-height: 44px;
   }
 }
 
-@media (max-width: 640px) {
-  .ws-main .kpi-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+@media (max-width: 759px) {
+  .mode-btn,
+  .timeframe-btn {
+    height: 40px;
   }
 
-  .market-table tbody tr {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    column-gap: 12px;
-    row-gap: 4px;
-    padding: 12px 0;
-  }
-
-  .market-table td,
-  .table-stack.market-table td {
-    display: block;
-    padding: 0;
-    text-align: left;
-  }
-
-  .market-table td::before {
-    content: none;
-  }
-
-  .market-table td:nth-child(1) {
-    grid-column: 1;
-    grid-row: 1 / span 2;
-    align-self: center;
-  }
-
-  .market-table td:nth-child(2) {
-    grid-column: 2;
-    grid-row: 1;
-    text-align: right;
-  }
-
-  .market-table td:nth-child(3) {
-    grid-column: 2;
-    grid-row: 2;
-    text-align: right;
-    font-size: 13.5px;
-  }
-
-  .market-table td:nth-child(4) {
+  .market-table td.sparkline-col {
     grid-column: 1 / -1;
-    grid-row: 3;
+    justify-items: stretch;
   }
 
   .market-table .sparkline,
   .market-table .sparkline-empty {
     width: 100%;
+    margin-left: 0;
   }
 }
 

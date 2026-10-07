@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Pencil, Trash2, X } from "lucide-react";
-import { Button, Modal } from "../../components/ui";
+import { Button, Card, Modal, PageHeader } from "../../components/ui";
 import { price as fmtPrice, compact, pct, conditionText } from "./format";
 import CoinChart from "./CoinChart";
 import WatchEditRow from "./WatchEditRow";
@@ -25,50 +25,61 @@ export default function CoinDetailModal({
   ];
 
   return (
-    <Modal label={`${market.name} details`} onClose={onClose} size="lg">
-      <div className="row space-between coin-detail-head">
-        <div className="row">
-          {market.image ? (
-            <img className="coin-logo lg" src={market.image} alt="" width={34} height={34} />
-          ) : (
-            <span className="coin-chip">{market.symbol}</span>
-          )}
-          <div>
-            <h3 className="section-title">
-              {market.name} <span className="muted">{market.symbol}</span>
-            </h3>
-            {market.priceUnavailable ? (
-              <div className="muted small">
-                Live price unavailable right now. Your watch is still active.
-              </div>
+    <Modal
+      label={`${market.name} details`}
+      view="coin"
+      crumb={market.name}
+      onClose={onClose}
+      size="lg"
+    >
+      <PageHeader
+        title={
+          <span className="coin-title">
+            {market.image ? (
+              <img className="coin-logo lg" src={market.image} alt="" width={34} height={34} />
             ) : (
-              <div className="row" style={{ gap: 8 }}>
-                <span className="mono-strong num" style={{ fontSize: 18 }}>
-                  {fmtPrice(market.current_price)}
-                </span>
-                <span className={`num small ${changeCls}`}>{pct(change)} 24h</span>
-              </div>
+              <span className="coin-chip">{market.symbol}</span>
             )}
-          </div>
+            <span>
+              {market.name} <span className="page-count">{market.symbol}</span>
+            </span>
+          </span>
+        }
+        support={
+          market.priceUnavailable ? (
+            <span className="muted small">
+              Live price unavailable right now. Your watch is still active.
+            </span>
+          ) : (
+            <span className="coin-price-line">
+              <span className="coin-price num">{fmtPrice(market.current_price)}</span>
+              <span className={`num ${changeCls}`}>{pct(change)} 24h</span>
+            </span>
+          )
+        }
+        action={
+          <Button variant="ghost" icon title="Close" onClick={onClose}>
+            <X size={16} />
+          </Button>
+        }
+      />
+
+      <Card title="Price">
+        <CoinChart coinId={market.id} defaultDays={7} />
+      </Card>
+
+      <Card title="Details">
+        <div className="detail-stats">
+          {stats.map((s) => (
+            <div key={s.label} className="detail-stat">
+              <span className="overline">{s.label}</span>
+              <span className="num">{s.value}</span>
+            </div>
+          ))}
         </div>
-        <Button variant="ghost" icon title="Close" onClick={onClose}>
-          <X size={16} />
-        </Button>
-      </div>
+      </Card>
 
-      <CoinChart coinId={market.id} defaultDays={7} />
-
-      <div className="detail-stats">
-        {stats.map((s) => (
-          <div key={s.label} className="detail-stat">
-            <span className="overline">{s.label}</span>
-            <span className="num mono-strong">{s.value}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="detail-section">
-        <span className="overline">Your position</span>
+      <Card title="Your position">
         {holding ? (
           <div className="detail-holding">
             <span className="num">
@@ -84,16 +95,15 @@ export default function CoinDetailModal({
             You hold no {market.symbol}. Approve a buy alert to open a position.
           </p>
         )}
-      </div>
+      </Card>
 
-      <div className="detail-section">
-        <span className="overline">Active watches</span>
+      <Card title="Active watches" count={watches.length}>
         {watches.length === 0 ? (
           <p className="muted small" style={{ margin: 0 }}>
             No watches on {market.symbol} yet. Add one from the watch form.
           </p>
         ) : (
-          <ul className="plain-list">
+          <ul className="plain-list ruled-list">
             {watches.map((w) =>
               editingId === w._id ? (
                 <li key={w._id} className="list-row">
@@ -108,9 +118,7 @@ export default function CoinDetailModal({
                 </li>
               ) : (
                 <li key={w._id} className="row space-between list-row">
-                  <span className="small" style={{ color: "var(--ink)" }}>
-                    when {conditionText(w.condition)}
-                  </span>
+                  <span>when {conditionText(w.condition)}</span>
                   <div className="row">
                     <Button variant="ghost" size="sm" icon title="Edit condition" onClick={() => setEditingId(w._id)}>
                       <Pencil size={13} />
@@ -124,7 +132,7 @@ export default function CoinDetailModal({
             )}
           </ul>
         )}
-      </div>
+      </Card>
     </Modal>
   );
 }

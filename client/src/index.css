@@ -1963,6 +1963,21 @@ button.chip:hover {
   .page-head-actions > .row {
     width: 100%;
   }
+
+  .page-head {
+    position: relative;
+  }
+
+  .page-head-actions:has(> .btn-icon:only-child) {
+    position: absolute;
+    top: -6px;
+    right: -10px;
+    width: auto;
+  }
+
+  .page-head:has(> .page-head-actions > .btn-icon:only-child) > .page-head-main {
+    padding-right: 40px;
+  }
 }
 
 @media (max-width: 759px) {
@@ -2079,6 +2094,7 @@ button.chip:hover {
   .table-stack td {
     display: grid;
     align-content: start;
+    justify-items: start;
     gap: 3px;
     min-width: 0;
     padding: 0;

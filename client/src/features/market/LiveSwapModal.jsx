@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import { ExternalLink, ShieldCheck, TriangleAlert, X } from "lucide-react";
-import { Button, Field, Input, Modal, SkeletonLines, useToast } from "../../components/ui";
+import { Button, Field, Input, Modal, SkeletonLines, useToast, PageHeader } from "../../components/ui";
 import http from "../../api/http";
 import { useAuth } from "../../context/AuthContext";
 import GasNotice from "../wallet/GasNotice";
@@ -203,15 +203,27 @@ export default function LiveSwapModal({
   const addressBlocking = needsAcknowledgement(token) && !addressChecked;
 
   return (
-    <Modal label="Confirm live trade" onClose={busy ? () => {} : onClose} size="lg">
-      <div className="row space-between">
-        <h3 className="section-title">
-          {side === "buy" ? "Buy" : "Sell"} {coin.symbol} · live
-        </h3>
-        <Button variant="ghost" icon title="Close" onClick={onClose} disabled={busy}>
-          <X size={15} />
-        </Button>
-      </div>
+    <Modal
+      label="Confirm live trade"
+      view="swap"
+      crumb={`${side === "buy" ? "Buy" : "Sell"} ${coin.symbol} · live`}
+      onClose={busy ? () => {} : onClose}
+      size="lg"
+    >
+      <PageHeader
+        title={
+          <>
+            {side === "buy" ? "Buy" : "Sell"} {coin.symbol} · live
+          </>
+        }
+        action={
+          <Button variant="ghost" icon title="Close" onClick={onClose} disabled={busy}>
+            <X size={15} />
+          </Button>
+        }
+      />
+
+      <section className="card stack">
 
       {error && !done && (
         <div className="against-note" role="alert">
@@ -435,6 +447,7 @@ export default function LiveSwapModal({
           )}
         </>
       )}
+      </section>
     </Modal>
   );
 }

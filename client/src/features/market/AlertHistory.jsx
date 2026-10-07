@@ -13,6 +13,7 @@ export default function AlertHistory({ alerts }) {
     <Card
       eyebrow="History"
       title="Alert history"
+      count={alerts.length}
       subtitle="Every alert the agent has raised, and what you decided."
     >
       {alerts.length === 0 ? (

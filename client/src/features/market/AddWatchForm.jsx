@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 import http from "../../api/http";
 import { price as fmtPrice } from "./format";
-import { Button, Card, Field, Select, Input } from "../../components/ui";
+import { Button, Field, PageHeader, Select, Input } from "../../components/ui";
 import CoinPicker from "./CoinPicker";
 
 const TYPES = [
@@ -14,7 +14,7 @@ const TYPES = [
 
 const isPriceType = (t) => t === "price_below" || t === "price_above";
 
-export default function AddWatchForm({ onAdded }) {
+export default function AddWatchForm({ onAdded, onCancel }) {
   const [coin, setCoin] = useState(null);
   const [type, setType] = useState("price_below");
   const [value, setValue] = useState("");
@@ -106,12 +106,14 @@ export default function AddWatchForm({ onAdded }) {
     : "e.g. 5";
 
   return (
-    <Card
-      eyebrow="New watch"
-      title="Watch a coin"
-      subtitle="Search any coin, set a condition, and the agent checks it on every pass."
-    >
-      <form onSubmit={submit} className="stack-sm">
+    <>
+      <PageHeader
+        eyebrow="New watch"
+        title="Watch a coin"
+        support="Search any coin, set a condition, and the agent checks it on every pass."
+      />
+      <form onSubmit={submit} className="pv-form">
+        <section className="card stack">
         <Field label="Coin">
           <CoinPicker value={coin} onChange={setCoin} />
         </Field>
@@ -161,11 +163,19 @@ export default function AddWatchForm({ onAdded }) {
 
         {error && <p className="error-text" style={{ margin: 0 }}>{error}</p>}
         {ok && !error && <p className="muted small" style={{ margin: 0 }}>{ok}</p>}
+        </section>
 
-        <Button variant="primary" type="submit" loading={busy} block>
-          <Plus size={15} /> Add watch
-        </Button>
+        <div className="pv-foot">
+          {onCancel && (
+            <Button variant="ghost" onClick={onCancel} disabled={busy}>
+              Cancel
+            </Button>
+          )}
+          <Button variant="primary" type="submit" loading={busy}>
+            <Plus size={15} /> Add watch
+          </Button>
+        </div>
       </form>
-    </Card>
+    </>
   );
 }
