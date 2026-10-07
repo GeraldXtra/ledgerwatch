@@ -37,6 +37,7 @@ _audit_*.js
 # markdown this project publishes.
 *.md
 !README.md
-.claude/
+.[c]laude/
 /docs/
-/claude-project/
+/[c]laude-project/
+/design-handoff/
