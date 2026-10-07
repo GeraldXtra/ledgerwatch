@@ -13,8 +13,7 @@ const SECTIONS = String(process.env.SECTIONS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 const WALLET_PW = "docs-screenshots-only-1";
-const DIALOG = ".ws-sheet-dialog:not([hidden])";
-const PANE = ".ws-sheet-base:not([hidden])";
+const PAGE = ".aw-pages > .pv:not([hidden])";
 const results = { ok: [], failed: [] };
 
 function isLocal(url) {
@@ -48,16 +47,6 @@ async function shot(target, name, opts = {}) {
     results.failed.push(`${name}: ${err.message}`);
     console.log("  FAILED", name, err.message);
   }
-}
-
-async function shotEl(page, selector, name, opts = {}) {
-  const el = await page.$(selector);
-  if (!el) {
-    results.failed.push(`${name}: no element ${selector}`);
-    console.log("  FAILED", name, "no element", selector);
-    return;
-  }
-  await shot(el, name, opts);
 }
 
 async function clickText(page, selector, text, { exact = false, index = 0 } = {}) {
@@ -95,13 +84,13 @@ async function goto(page, route, wait = 1500) {
   await sleep(wait);
 }
 
-async function waitDialog(page, timeout = 10000) {
-  await page.waitForSelector(DIALOG, { timeout });
+async function waitPage(page, timeout = 10000) {
+  await page.waitForSelector(PAGE, { timeout });
 }
 
-async function closeDialog(page) {
-  await page.keyboard.press("Escape");
-  await sleep(500);
+async function goBack(page) {
+  await page.evaluate(() => history.back());
+  await sleep(900);
 }
 
 async function newPage(browser, { phone = false, token = null, theme = "light" } = {}) {
@@ -155,15 +144,15 @@ async function openOpenDebt(page, pattern = /Partial|Overdue|Pending/) {
 
 async function createWallet(page) {
   await clickText(page, "button", "Create a wallet");
-  await waitDialog(page);
-  await clickText(page, `${DIALOG} button`, "Show recovery phrase");
+  await waitPage(page);
+  await clickText(page, `${PAGE} button`, "Show recovery phrase");
   await page.waitForSelector(".mnemonic-grid", { timeout: 10000 });
-  await page.click(`${DIALOG} .toggle-row input[type=checkbox]`);
-  await clickText(page, `${DIALOG} button`, "Continue");
+  await page.click(`${PAGE} .toggle-row input[type=checkbox]`);
+  await clickText(page, `${PAGE} button`, "Continue");
   await sleep(400);
-  await typeInto(page, `${DIALOG} input[type=password]`, WALLET_PW, { index: 0 });
-  await typeInto(page, `${DIALOG} input[type=password]`, WALLET_PW, { index: 1 });
-  await clickText(page, `${DIALOG} button[type=submit]`, "Create wallet");
+  await typeInto(page, `${PAGE} input[type=password]`, WALLET_PW, { index: 0 });
+  await typeInto(page, `${PAGE} input[type=password]`, WALLET_PW, { index: 1 });
+  await clickText(page, `${PAGE} button[type=submit]`, "Create wallet");
   await page.waitForSelector(".mm", { timeout: 90000 });
 }
 
@@ -210,41 +199,43 @@ async function cardWith(page, text) {
     await shot(page, "receivables-debts");
 
     await clickText(page, "button", "Record debt");
-    await waitDialog(page);
+    await waitPage(page);
     await sleep(600);
     await shot(page, "debt-record");
-    await closeDialog(page);
+    await goBack(page);
 
     await openOpenDebt(page);
-    await waitDialog(page);
+    await waitPage(page);
     await sleep(2500);
     await shot(page, "debt-detail");
 
     try {
-      await clickText(page, `${DIALOG} button`, "Record payment");
+      await clickText(page, `${PAGE} button`, "Record payment");
       await sleep(700);
       await page.evaluate(() => {
-        const f = document.querySelector(".ws-sheet-dialog:not([hidden]) form");
+        const f = document.querySelector(".aw-pages > .pv:not([hidden]) form");
         if (f) f.scrollIntoView({ block: "center" });
       });
       await sleep(400);
       await shot(page, "debt-payment");
-      await clickText(page, `${DIALOG} button`, "Cancel");
+      await clickText(page, `${PAGE} button`, "Cancel");
       await sleep(400);
     } catch (e) {
       results.failed.push("debt-payment: " + e.message);
     }
 
-    await page.evaluate(() => {
-      const d = document.querySelector(".ws-detail");
-      if (d) d.scrollTop = 0;
-    });
-    await clickText(page, `${DIALOG} button`, "Generate reminder");
-    await page.waitForSelector(`${DIALOG} .reminder-box`, { timeout: 30000 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await clickText(page, `${PAGE} .page-head-actions button`, "Generate reminder");
+    await page.waitForSelector(`${PAGE} .reminder-box`, { timeout: 30000 });
     await sleep(1500);
+    await page.evaluate(() => {
+      const box = document.querySelector(".aw-pages > .pv:not([hidden]) .reminder-box");
+      const card = box && box.closest(".card");
+      if (card) window.scrollTo(0, card.getBoundingClientRect().top + window.scrollY - 72);
+    });
+    await sleep(500);
     await shot(page, "debt-reminder");
-    await closeDialog(page);
-    await closeDialog(page);
+    await goBack(page);
 
     await goto(page, "/app/receivables?view=debtors", 1000);
     await page.waitForSelector(".debtors-table tbody tr", { timeout: 20000 });
@@ -252,10 +243,10 @@ async function cardWith(page, text) {
     await shot(page, "debtors");
     const drows = await page.$$(".debtors-table tbody tr");
     await drows[0].click();
-    await page.waitForSelector(`${DIALOG} .timeline`, { timeout: 20000 });
+    await page.waitForSelector(`${PAGE} .timeline`, { timeout: 20000 });
     await sleep(1500);
     await shot(page, "debtor-profile");
-    await clickText(page, `${DIALOG} button`, "Statement");
+    await clickText(page, `${PAGE} button`, "Statement");
     await page.waitForSelector(".statement", { timeout: 20000 });
     await sleep(800);
     await shot(page, "debtor-statement");
@@ -268,7 +259,7 @@ async function cardWith(page, text) {
     await page.waitForSelector(".debts-table tbody tr", { timeout: 20000 });
     await sleep(1500);
     await openOpenDebt(page);
-    await waitDialog(page);
+    await waitPage(page);
     await sleep(2500);
     await shot(page, "theme-dark");
     await page.close();
@@ -288,32 +279,36 @@ async function cardWith(page, text) {
 
     if (await page.$(".alert-card")) {
       await clickText(page, ".alert-card button", "Buy");
-      await waitDialog(page);
+      await waitPage(page);
       await sleep(600);
       await shot(page, "market-trade");
-      await typeInto(page, `${DIALOG} input[type=number]`, "2500");
+      await typeInto(page, `${PAGE} input[type=number]`, "2500");
       await sleep(400);
-      await clickText(page, `${DIALOG} button`, "Review");
+      await clickText(page, `${PAGE} button`, "Review buy");
       await sleep(600);
       await shot(page, "market-trade-confirm");
-      await closeDialog(page);
+      await goBack(page);
     } else {
       results.failed.push("market-trade: no pending alert to open");
     }
 
     await goto(page, "/app/market?view=watchlist", 6000);
     await shot(page, "market-watchlist");
-    await shotEl(page, PANE, "market-add-watch");
+    await clickText(page, ".page-head-actions button", "Add watch");
+    await waitPage(page);
+    await sleep(800);
+    await shot(page, "market-add-watch");
+    await goBack(page);
     const watches = await cardWith(page, "Active watches");
     if (watches) await shot(watches, "market-watches");
 
     const row = await page.$(".market-table tbody tr");
     if (row) {
       await row.click();
-      await waitDialog(page);
+      await waitPage(page);
       await sleep(4500);
       await shot(page, "market-coin");
-      await closeDialog(page);
+      await goBack(page);
     }
 
     await goto(page, "/app/market?view=portfolio", 6000);
@@ -329,24 +324,24 @@ async function cardWith(page, text) {
     await shot(page, "wallet-setup");
 
     await clickText(page, "button", "Create a wallet");
-    await waitDialog(page);
+    await waitPage(page);
     await sleep(500);
-    await clickText(page, `${DIALOG} button`, "Show recovery phrase");
+    await clickText(page, `${PAGE} button`, "Show recovery phrase");
     await page.waitForSelector(".mnemonic-grid", { timeout: 10000 });
     await page.addStyleTag({ content: ".mnemonic-grid li { filter: blur(7px); } .pk-value { filter: blur(7px); }" });
     await sleep(500);
     await shot(page, "wallet-create-phrase");
-    await page.click(`${DIALOG} .toggle-row input[type=checkbox]`);
-    await clickText(page, `${DIALOG} button`, "Continue");
+    await page.click(`${PAGE} .toggle-row input[type=checkbox]`);
+    await clickText(page, `${PAGE} button`, "Continue");
     await sleep(500);
     await shot(page, "wallet-create-password");
-    await closeDialog(page);
+    await goBack(page);
 
     await clickText(page, "button", "Import one");
-    await waitDialog(page);
+    await waitPage(page);
     await sleep(500);
     await shot(page, "wallet-import");
-    await closeDialog(page);
+    await goBack(page);
 
     await createWallet(page);
     await sleep(3000);
@@ -358,46 +353,47 @@ async function cardWith(page, text) {
     await sleep(6000);
     await shot(page, "wallet-main");
 
-    await clickText(page, ".mm-action", "Receive");
-    await page.waitForSelector(`${PANE} .receive-card`, { timeout: 10000 });
+    await clickText(page, ".page-head-actions button", "Receive");
+    await page.waitForSelector(`${PAGE} .receive-card`, { timeout: 10000 });
     await sleep(1200);
     await shot(page, "wallet-receive");
+    await goBack(page);
 
-    await clickText(page, ".mm-action", "Send");
-    await page.waitForSelector(`${PANE} input`, { timeout: 8000 });
+    await clickText(page, ".page-head-actions button", "Send");
+    await page.waitForSelector(`${PAGE} input`, { timeout: 8000 });
     await sleep(800);
     await shot(page, "wallet-send");
-    await typeInto(page, `${PANE} input`, "0x000000000000000000000000000000000000dEaD", { index: 0 });
-    await typeInto(page, `${PANE} input[type=number]`, "0.001");
-    await clickText(page, `${PANE} button`, "Review transaction");
+    await typeInto(page, `${PAGE} input`, "0x000000000000000000000000000000000000dEaD", { index: 0 });
+    await typeInto(page, `${PAGE} input[type=number]`, "0.001");
+    await clickText(page, `${PAGE} button`, "Review transaction");
     await sleep(6000);
     await shot(page, "wallet-send-review");
 
-    await clickText(page, ".mm-action", "Collected");
+    await goBack(page);
+    await clickText(page, ".page-head-actions button", "Collected");
     await sleep(4000);
     await shot(page, "wallet-collected");
-    await clickText(page, ".mm-action", "Collected");
-    await sleep(400);
+    await goBack(page);
 
     await clickText(page, ".mm-linkish", "Import a token");
-    await waitDialog(page);
+    await waitPage(page);
     await sleep(500);
     await shot(page, "wallet-import-token");
-    await closeDialog(page);
+    await goBack(page);
 
-    await clickText(page, ".mm-tab", "Activity");
+    await clickText(page, ".mm-tabs .tab", "Activity");
     await sleep(800);
     await shot(page, "wallet-activity");
-    await clickText(page, ".mm-tab", "Tokens");
+    await clickText(page, ".mm-tabs .tab", "Tokens");
     await sleep(400);
 
     const firstRow = await page.$(".mm-row[role=button]");
     if (firstRow) {
       await firstRow.click();
-      await waitDialog(page);
+      await waitPage(page);
       await sleep(4500);
       await shot(page, "wallet-token-detail");
-      await closeDialog(page);
+      await goBack(page);
     }
 
     await page.click(".net-trigger");
@@ -405,12 +401,12 @@ async function cardWith(page, text) {
     await clickText(page, ".net-item", "Bitcoin", { exact: false, index: 0 });
     await sleep(1500);
     await shot(page, "wallet-bitcoin-setup");
-    await typeInto(page, ".mm input[type=password]", WALLET_PW);
-    await clickText(page, ".mm button", "Set up Bitcoin");
+    await typeInto(page, ".aw-view input[type=password]", WALLET_PW);
+    await clickText(page, ".aw-view button", "Set up Bitcoin");
     await page.waitForSelector(".mm-actions", { timeout: 60000 });
     await sleep(4000);
     await shot(page, "wallet-bitcoin");
-    await clickText(page, ".mm-action", "Send");
+    await clickText(page, ".mm-actions button", "Send");
     await sleep(3500);
     await shot(page, "wallet-bitcoin-send");
     await page.close();
@@ -446,22 +442,22 @@ async function cardWith(page, text) {
     await page.waitForSelector(".debts-table tbody tr", { timeout: 20000 });
     await sleep(1500);
     await openOpenDebt(page, /Pending/);
-    await waitDialog(page);
+    await waitPage(page);
     await sleep(2000);
-    await clickText(page, `${DIALOG} button`, "Crypto payment");
+    await clickText(page, `${PAGE} .page-head-actions button`, "Crypto payment");
     await page.waitForFunction(
       () =>
-        Array.from(document.querySelectorAll(".ws-sheet-dialog:not([hidden])")).some((p) =>
+        Array.from(document.querySelectorAll(".aw-pages > .pv:not([hidden])")).some((p) =>
           /Crypto payment for/.test(p.textContent)
         ),
       { timeout: 120000 }
     );
-    await page.waitForSelector(`${DIALOG} .trade-quote`, { timeout: 60000 });
+    await page.waitForSelector(`${PAGE} .trade-quote`, { timeout: 60000 });
     await sleep(1500);
     await shot(page, "crypto-issue");
 
-    await typeInto(page, `${DIALOG} input[type=password]`, WALLET_PW);
-    await clickText(page, `${DIALOG} button[type=submit]`, "Create payment address");
+    await typeInto(page, `${PAGE} input[type=password]`, WALLET_PW);
+    await clickText(page, `${PAGE} button[type=submit]`, "Create payment address");
     await page.waitForSelector(".crypto-card", { timeout: 180000 });
     await sleep(7000);
     const card = await page.$(".crypto-card");
@@ -480,26 +476,30 @@ async function cardWith(page, text) {
     await goto(page, "/app/settings?section=wallet-backup", 2500);
     await shot(page, "settings-backup");
     await clickText(page, ".backup-option", "Reveal secret recovery phrase");
-    await waitDialog(page);
+    await waitPage(page);
     await sleep(600);
     await shot(page, "settings-backup-reveal");
-    await closeDialog(page);
+    await goBack(page);
     await page.close();
   });
 
   await section("phone", async () => {
     const page = await newPage(browser, { phone: true, token: TOKEN });
     await goto(page, "/app/receivables", 5000);
+    await page.click(".aw-burger");
+    await sleep(900);
     await shot(page, "phone-home");
+    await page.keyboard.press("Escape");
+    await sleep(500);
     await goto(page, "/app/receivables?view=debts", 1000);
     await page.waitForSelector(".debts-table tbody tr", { timeout: 20000 });
     await sleep(1500);
     await shot(page, "phone-debts");
     await openOpenDebt(page);
-    await waitDialog(page);
+    await waitPage(page);
     await sleep(2000);
     await shot(page, "phone-debt-detail");
-    await closeDialog(page);
+    await goBack(page);
 
     await goto(page, "/app/market", 7000);
     await shot(page, "phone-market");
@@ -507,7 +507,7 @@ async function cardWith(page, text) {
     await shot(page, "phone-wallet");
     await goto(page, "/app/settings", 2500);
     await shot(page, "phone-settings");
-    await clickText(page, ".nav-item", "Notifications");
+    await clickText(page, ".tabs .tab", "Notifications");
     await sleep(1500);
     await shot(page, "phone-settings-section");
     await page.close();
