@@ -578,15 +578,15 @@ code {
   background: none;
   color: var(--link);
   font: inherit;
-  font-weight: 700;
-  text-decoration: none;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
   cursor: pointer;
 }
 
 .linklike:hover {
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
 }
 
 .field {
@@ -1002,11 +1002,6 @@ input[type="radio"] {
   align-items: center;
   gap: 12px;
   min-width: 0;
-}
-
-.lead-name {
-  font-weight: 700;
-  color: var(--ink);
 }
 
 .lead-link {
@@ -1587,8 +1582,7 @@ button.chip:hover {
   margin-bottom: 0;
 }
 
-.pv-foot,
-.form-foot {
+.pv-foot {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -1687,6 +1681,13 @@ button.chip:hover {
   font-size: 14px;
 }
 
+.stack > * + .trade-quote,
+.stack > .trade-quote + *,
+.stack > * + .tx-summary,
+.stack > .tx-summary + * {
+  margin-top: 16px;
+}
+
 .trade-quote > div {
   display: grid;
   align-content: start;
@@ -1713,17 +1714,6 @@ button.chip:hover {
   color: var(--muted);
 }
 
-.coin-detail-head {
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.coin-detail-head .section-title {
-  font-size: 28px;
-  letter-spacing: -0.01em;
-}
-
 .detail-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1748,10 +1738,6 @@ button.chip:hover {
 .detail-stat > * {
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-.detail-section > * + * {
-  margin-top: 10px;
 }
 
 .plain-list {
@@ -2052,8 +2038,7 @@ button.chip:hover {
     min-height: 44px;
   }
 
-  .pv-foot > .btn,
-  .form-foot > .btn {
+  .pv-foot > .btn {
     flex: 1 1 auto;
   }
 

@@ -14,10 +14,10 @@ import {
 import LogoMark from "../components/LogoMark";
 
 const ROWS = [
-  { who: "Dangote Cement", amount: "85,000", state: "Overdue 6 days", tone: "neg" },
-  { who: "Zenith Trading", amount: "42,500", state: "Reminder sent", tone: "warn" },
-  { who: "Emeka Obi Ltd", amount: "30,000", state: "Part paid", tone: "warn" },
-  { who: "Chidi Okafor", amount: "18,000", state: "Due Friday", tone: "" },
+  { who: "Dangote Cement", amount: "85,000", state: "Overdue 6 days", tone: "overdue" },
+  { who: "Zenith Trading", amount: "42,500", state: "Reminder sent", tone: "pending" },
+  { who: "Emeka Obi Ltd", amount: "30,000", state: "Part paid", tone: "partial" },
+  { who: "Chidi Okafor", amount: "18,000", state: "Due Friday", tone: "pending" },
 ];
 
 function LedgerPanel() {
@@ -30,7 +30,10 @@ function LedgerPanel() {
       {ROWS.map((r) => (
         <div className="site-panel-row" key={r.who}>
           <span className="site-panel-who">{r.who}</span>
-          <span className={`pill ${r.tone}`}>{r.state}</span>
+          <span className={`pill ${r.tone}`}>
+            <span className="pill-dot" />
+            {r.state}
+          </span>
           <span className="site-panel-amt">{r.amount}</span>
         </div>
       ))}

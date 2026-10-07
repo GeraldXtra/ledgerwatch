@@ -1574,7 +1574,8 @@
   color: var(--ink);
 }
 
-.mode-btn.active {
+.mode-btn.active,
+.mode-btn.active:hover:not(:disabled) {
   background: var(--ink);
   color: var(--panel);
 }
@@ -3426,8 +3427,17 @@ button.coin-result:focus-visible {
   top: 0;
   z-index: 30;
   padding-top: env(safe-area-inset-top, 0px);
-  border-bottom: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--topbar);
+  color: var(--topbar-ink);
+}
+
+.site-nav .brand,
+.site-nav .brand-name {
+  color: var(--topbar-ink);
+}
+
+.site-nav :focus-visible {
+  outline-color: var(--accent);
 }
 
 .site-nav-inner {
@@ -3458,7 +3468,7 @@ button.coin-result:focus-visible {
 .site-nav-links > a:not(.btn) {
   padding: 8px 10px;
   border-radius: var(--r);
-  color: var(--muted);
+  color: var(--topbar-muted);
   font-size: 14.5px;
   font-weight: 600;
   text-decoration: none;
@@ -3467,14 +3477,14 @@ button.coin-result:focus-visible {
 .site-nav-link:hover,
 .site-nav-link.active,
 .site-nav-links > a:not(.btn):hover {
-  color: var(--ink);
+  color: var(--topbar-ink);
 }
 
 .site-nav-links .btn {
-  height: 36px;
+  height: 32px;
   margin-left: 8px;
   padding: 0 14px;
-  font-size: 14px;
+  font-size: 13.5px;
 }
 
 .menu-btn {
@@ -3484,13 +3494,13 @@ button.coin-result:focus-visible {
   height: 44px;
   padding: 0;
   border: 0;
-  border-radius: var(--r);
+  border-radius: 50%;
   background: transparent;
-  color: var(--ink);
+  color: var(--topbar-ink);
 }
 
 .menu-btn:hover {
-  background: var(--soft);
+  background: var(--topbar-hover);
 }
 
 .site-foot {
@@ -3501,8 +3511,10 @@ button.coin-result:focus-visible {
   gap: 10px 24px;
   padding-top: 20px;
   padding-bottom: 28px;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
+  background: var(--topbar);
+  box-shadow: 0 0 0 100vmax var(--topbar);
+  clip-path: inset(0 -100vmax);
+  color: var(--topbar-muted);
   font-size: 13.5px;
 }
 
@@ -3520,8 +3532,12 @@ button.coin-result:focus-visible {
 }
 
 .site-foot .site-nav-links a:hover {
-  color: var(--ink);
+  color: var(--topbar-ink);
   text-decoration: underline;
+}
+
+.site-foot :focus-visible {
+  outline-color: var(--accent);
 }
 
 .site-hero {
@@ -3531,10 +3547,14 @@ button.coin-result:focus-visible {
   gap: 72px;
   padding-top: 76px;
   padding-bottom: 84px;
+  background: var(--topbar);
+  box-shadow: 0 0 0 100vmax var(--topbar);
+  clip-path: inset(0 -100vmax);
 }
 
 .site-hero h1 {
   max-width: 13ch;
+  color: var(--topbar-ink);
   font-size: 52px;
   line-height: 1.06;
   letter-spacing: -0.03em;
@@ -3543,9 +3563,23 @@ button.coin-result:focus-visible {
 .site-lead {
   max-width: 50ch;
   margin-top: 22px;
-  color: var(--muted);
+  color: var(--topbar-muted);
   font-size: 18px;
   line-height: 1.6;
+}
+
+.site-hero .btn:not(.btn-primary) {
+  border-color: var(--topbar-ink);
+  background: transparent;
+  color: var(--topbar-ink);
+}
+
+.site-hero .btn:not(.btn-primary):hover {
+  background: var(--topbar-hover);
+}
+
+.site-hero :focus-visible {
+  outline-color: var(--accent);
 }
 
 .site-cta {
@@ -3560,20 +3594,20 @@ button.coin-result:focus-visible {
   align-items: center;
   gap: 8px;
   margin-top: 20px;
-  color: var(--muted);
+  color: var(--topbar-muted);
   font-size: 13.5px;
 }
 
 .site-note > svg {
   flex: none;
-  color: var(--accent-ink);
+  color: var(--accent);
 }
 
 .site-panel {
   overflow: hidden;
-  border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: var(--panel);
+  box-shadow: var(--box-shadow);
 }
 
 .site-panel-head {
@@ -3635,13 +3669,8 @@ button.coin-result:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-.pill.neg {
-  background: var(--due-soft);
-  color: var(--due);
-}
-
 .site-section {
-  border-top: 1px solid var(--line);
+  border-top: 0;
 }
 
 .site-section > .site-wrap,
@@ -3671,7 +3700,7 @@ button.coin-result:focus-visible {
 .site-steps {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 40px 48px;
+  gap: 16px;
   margin-top: 40px;
 }
 
@@ -3680,8 +3709,10 @@ button.coin-result:focus-visible {
   display: grid;
   align-content: start;
   gap: 8px;
-  padding-top: 20px;
-  border-top: 1px solid var(--line-strong);
+  padding: 24px;
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  box-shadow: var(--box-shadow);
 }
 
 .site-feature-icon {
@@ -3704,9 +3735,9 @@ button.coin-result:focus-visible {
 .site-feature-link {
   justify-self: start;
   margin-top: 4px;
-  color: var(--accent-ink);
+  color: var(--link);
   font-size: 14.5px;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .site-step-no {
@@ -3715,16 +3746,18 @@ button.coin-result:focus-visible {
   width: 30px;
   height: 30px;
   margin-bottom: 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r);
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
 .site-band {
-  border-top: 1px solid var(--line);
-  background: var(--panel);
+  border-top: 0;
+  background: var(--accent-soft);
 }
 
 .site-band > .site-wrap {
@@ -3952,6 +3985,7 @@ button.coin-result:focus-visible {
   gap: 4px;
   min-height: 0;
   padding: 12px 14px;
+  border: 2px solid var(--warn);
   border-radius: var(--r);
   background: var(--warn-soft);
   color: var(--warn);
@@ -4010,9 +4044,14 @@ button.coin-result:focus-visible {
 }
 
 .docs-side a.active {
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-  font-weight: 600;
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.docs-toggle {
+  display: none;
 }
 
 .docs-body {
@@ -4112,10 +4151,12 @@ button.coin-result:focus-visible {
   place-items: center;
   width: 26px;
   height: 26px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .docs-callout {
@@ -4123,19 +4164,19 @@ button.coin-result:focus-visible {
   gap: 4px;
   margin-top: 18px;
   padding: 14px 16px;
-  border: 1px solid var(--line);
+  border: 2px solid var(--accent);
   border-radius: var(--r);
-  background: var(--soft);
+  background: var(--accent-soft);
   line-height: 1.6;
 }
 
 .docs-callout.warn {
-  border-color: transparent;
+  border-color: var(--warn);
   background: var(--warn-soft);
 }
 
 .docs-callout.danger {
-  border-color: transparent;
+  border-color: var(--due);
   background: var(--due-soft);
 }
 
@@ -4160,9 +4201,9 @@ button.coin-result:focus-visible {
 .docs-table th {
   padding: 10px 14px;
   border-bottom: 1px solid var(--line-strong);
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 600;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
   text-align: left;
 }
 
@@ -4220,8 +4261,8 @@ button.coin-result:focus-visible {
   align-items: center;
   gap: 6px;
   min-height: 44px;
-  color: var(--accent-ink);
-  font-weight: 600;
+  color: var(--link);
+  font-weight: 700;
 }
 
 .docs-toc,
@@ -4324,9 +4365,20 @@ button.coin-result:focus-visible {
 .contact-form {
   margin-top: 32px;
   padding: 24px;
-  border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: var(--panel);
+  box-shadow: var(--box-shadow);
+}
+
+.contact-form .settings-note.danger {
+  padding: 2px 0 0 28px;
+  border: 0;
+  background: none;
+}
+
+.contact-form .settings-note.danger > svg:first-child {
+  top: 4px;
+  left: 0;
 }
 
 .contact-hp {
@@ -4343,9 +4395,9 @@ button.coin-result:focus-visible {
   gap: 14px;
   margin-top: 32px;
   padding: 24px;
-  border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: var(--panel);
+  box-shadow: var(--box-shadow);
 }
 
 .contact-done > svg {
@@ -4518,8 +4570,7 @@ button.coin-result:focus-visible {
     align-items: stretch;
     gap: 0;
     padding: 4px 16px 12px;
-    border-bottom: 1px solid var(--line);
-    background: var(--bg);
+    background: var(--topbar);
   }
 
   .menu-open .site-nav-more {
@@ -4532,7 +4583,7 @@ button.coin-result:focus-visible {
 
   .site-nav-more .site-nav-link {
     padding: 13px 0;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--topbar-rule);
     border-radius: 0;
     font-size: 16px;
   }
@@ -4647,6 +4698,19 @@ button.coin-result:focus-visible {
 
   .docs-side {
     display: none;
+    position: static;
+    max-height: none;
+    padding: 8px 0 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .docs-side.show {
+    display: block;
+  }
+
+  .docs-toggle {
+    display: inline-flex;
+    margin-top: 16px;
   }
 
   .docs-mobile-select {

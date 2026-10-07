@@ -1,6 +1,6 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, List } from "lucide-react";
 import PublicShell from "../components/PublicShell";
 import { Blocks, slugify } from "../docs/Blocks";
 import { GUIDE, GROUPS } from "../docs/guide";
@@ -12,6 +12,11 @@ export default function DocsPage() {
   const wanted = slug || GUIDE[0].slug;
   const index = GUIDE.findIndex((p) => p.slug === wanted);
   const page = index >= 0 ? GUIDE[index] : null;
+  const [contentsOpen, setContentsOpen] = useState(false);
+
+  useEffect(() => {
+    setContentsOpen(false);
+  }, [wanted]);
 
   const grouped = useMemo(
     () => GROUPS.map((g) => ({ ...g, pages: GUIDE.filter((p) => p.group === g.id) })),
@@ -58,7 +63,39 @@ export default function DocsPage() {
   return (
     <PublicShell wide>
       <div className="docs">
-        <aside className="docs-side" aria-label="Guide sections">
+        <div className="docs-side-wrap">
+        <button
+          type="button"
+          className="btn btn-sm docs-toggle"
+          aria-expanded={contentsOpen}
+          aria-controls="docs-side"
+          onClick={() => setContentsOpen((o) => !o)}
+        >
+          <List size={15} aria-hidden="true" /> Contents
+        </button>
+        <aside
+          className={contentsOpen ? "docs-side show" : "docs-side"}
+          id="docs-side"
+          aria-label="Guide sections"
+        >
+          <span className="select-wrap docs-mobile-select">
+          <select
+            className="select"
+            aria-label="Go to a guide page"
+            value={page.slug}
+            onChange={(e) => navigate(e.target.value === GUIDE[0].slug ? "/docs" : `/docs/${e.target.value}`)}
+          >
+            {grouped.map((g) => (
+              <optgroup key={g.id} label={g.label}>
+                {g.pages.map((p) => (
+                  <option key={p.slug} value={p.slug}>
+                    {p.title}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          </span>
           {grouped.map((g) => (
             <div className="docs-side-group" key={g.id}>
               <h2 className="docs-side-title">{g.label}</h2>
@@ -75,25 +112,9 @@ export default function DocsPage() {
             </div>
           ))}
         </aside>
+        </div>
 
         <article className="docs-body">
-          <select
-            className="select docs-mobile-select"
-            aria-label="Go to a guide page"
-            value={page.slug}
-            onChange={(e) => navigate(e.target.value === GUIDE[0].slug ? "/docs" : `/docs/${e.target.value}`)}
-          >
-            {grouped.map((g) => (
-              <optgroup key={g.id} label={g.label}>
-                {g.pages.map((p) => (
-                  <option key={p.slug} value={p.slug}>
-                    {p.title}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-
           <p className="docs-crumb">
             <Link to="/docs">Guide</Link> / {group ? group.label : ""}
           </p>
