@@ -13,7 +13,7 @@ import {
   Zap,
 } from "lucide-react";
 import http from "../../api/http";
-import { Button, Card, Field, Input, SkeletonLines } from "../../components/ui";
+import { Button, Card, Field, Input, PageHeader, SkeletonLines } from "../../components/ui";
 import { DetailPane } from "../../components/ui/Modal";
 import TokenLogo from "../../components/TokenLogo";
 import { unlockWallet } from "./keystore";
@@ -613,7 +613,8 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
 
   return (
     <>
-      <div className="mm-top" style={{ borderTop: "1px solid var(--border)" }}>
+      <section className="card mm">
+      <div className="mm-top">
         <button type="button" className="mm-acct" onClick={copyAddr} title="Copy your Bitcoin address">
           <span className="addr num" style={{ fontSize: 12 }}>
             {address.slice(0, 10)}...{address.slice(-6)}
@@ -661,23 +662,20 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       </div>
 
       <div className="mm-actions">
-        <button
-          type="button"
-          className="mm-action brass"
-          onClick={() => setPanel(panel === "receive" ? null : "receive")}
-        >
-          <span className="ring">
-            <ArrowDownToLine size={19} />
-          </span>
-          Receive
-        </button>
-        <button type="button" className="mm-action" onClick={openSend}>
-          <span className="ring">
-            <ArrowUpRight size={19} />
-          </span>
+        <button type="button" className="btn" onClick={openSend}>
+          <ArrowUpRight size={16} />
           Send
         </button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => setPanel(panel === "receive" ? null : "receive")}
+        >
+          <ArrowDownToLine size={16} />
+          Receive
+        </button>
       </div>
+      </section>
 
       {ambiguous && (
         <div className="mm-drawer" style={{ padding: "0 16px 16px" }}>
@@ -735,17 +733,22 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
         </div>
       )}
 
-      <div className="mm-tabs">
+      <section className="card card-flush mm-panel">
+      <div className="tabs mm-tabs" role="tablist" aria-label="Bitcoin">
         <button
           type="button"
-          className={tab === "balance" ? "mm-tab active" : "mm-tab"}
+          role="tab"
+          aria-selected={tab === "balance"}
+          className="tab"
           onClick={() => setTab("balance")}
         >
           Holdings
         </button>
         <button
           type="button"
-          className={tab === "activity" ? "mm-tab active" : "mm-tab"}
+          role="tab"
+          aria-selected={tab === "activity"}
+          className="tab"
           onClick={() => setTab("activity")}
         >
           Activity
@@ -884,10 +887,17 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
           )}
         </div>
       )}
+      </section>
 
       {panel === "receive" && (
-        <DetailPane onBack={() => setPanel(null)}>
-          <Card title="Receive Bitcoin">
+        <DetailPane
+          view="receive"
+          crumb="Receive Bitcoin"
+          label="Receive Bitcoin"
+          onBack={() => setPanel(null)}
+        >
+          <PageHeader title="Receive Bitcoin" />
+          <section className="card">
             <p className="muted small" style={{ marginTop: 0 }}>
               Send only Bitcoin to this address, on {isMainnet ? "the Bitcoin network" : "Bitcoin testnet"}.
               It is not an Ethereum address and coins sent from another network will not arrive.
@@ -895,12 +905,15 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
             <code className="reveal-key" style={{ wordBreak: "break-all" }}>
               {address}
             </code>
-          </Card>
+          </section>
         </DetailPane>
       )}
 
       {panel === "send" && (
         <DetailPane
+          view="send"
+          crumb={step === "review" ? "Review before signing" : "Send Bitcoin"}
+          label={step === "review" ? "Review before signing" : "Send Bitcoin"}
           onBack={() => {
             setPanel(null);
             setStep("form");
@@ -908,7 +921,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
             setSendPassword("");
           }}
         >
-          <Card
+          <PageHeader
             title={step === "review" ? "Review before signing" : "Send Bitcoin"}
             action={
               <Button
@@ -925,7 +938,8 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
                 <X size={15} />
               </Button>
             }
-          >
+          />
+          <section className="card">
             {sendError && (
               <div className="alert alert-error" role="alert" style={{ marginBottom: 12 }}>
                 <TriangleAlert size={15} />
@@ -1092,7 +1106,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
                 </div>
               </form>
             )}
-          </Card>
+          </section>
         </DetailPane>
       )}
     </>

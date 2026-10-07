@@ -2282,14 +2282,6 @@ button.coin-result:focus-visible {
   }
 }
 
-.mm-stage + .mm-stage {
-  margin-top: 0;
-}
-
-.ws-list .mm-setup {
-  margin: 16px 20px;
-}
-
 .mm-setup {
   display: grid;
   justify-items: center;
@@ -2322,9 +2314,8 @@ button.coin-result:focus-visible {
 .mm-top {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--line);
 }
 
 .mm-acct {
@@ -2332,13 +2323,13 @@ button.coin-result:focus-visible {
   align-items: center;
   gap: 8px;
   min-height: 36px;
-  margin: 0 auto;
-  padding: 4px 10px;
+  margin: 0 0 0 -8px;
+  padding: 4px 10px 4px 8px;
   border: 0;
-  border-radius: var(--r);
+  border-radius: 999px;
   background: none;
   color: var(--ink);
-  font-size: 13.5px;
+  font-size: 14px;
 }
 
 .mm-acct:hover {
@@ -2367,7 +2358,7 @@ button.coin-result:focus-visible {
   height: 36px;
   padding: 0;
   border: 0;
-  border-radius: 10px;
+  border-radius: 50%;
   background: transparent;
   color: var(--muted);
   flex: none;
@@ -2507,9 +2498,11 @@ button.coin-result:focus-visible {
 .mm-notice {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
   padding: 14px 16px;
-  background: var(--due-soft);
+  border: 2px solid var(--warn);
+  border-radius: var(--r);
+  background: var(--warn-soft);
   font-size: 14px;
   line-height: 1.5;
 }
@@ -2517,11 +2510,21 @@ button.coin-result:focus-visible {
 .mm-notice > svg {
   flex: none;
   margin-top: 2px;
-  color: var(--due);
+  color: var(--warn);
 }
 
-.mm-notice .mm-icon {
-  margin: -8px -8px -8px 0;
+.mm-notice .btn-icon {
+  margin: -8px -10px -8px 0;
+}
+
+.mm-details {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px 28px;
+}
+
+.mm-details .detail-stat:has(.net-switcher) {
+  grid-column: span 2;
 }
 
 .mm-linkish {
@@ -2531,9 +2534,9 @@ button.coin-result:focus-visible {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent-ink);
+  color: var(--link);
   font: inherit;
-  font-weight: 600;
+  font-weight: 700;
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
@@ -2546,14 +2549,15 @@ button.coin-result:focus-visible {
 
 .mm-hero {
   display: grid;
-  justify-items: center;
+  justify-items: start;
   gap: 4px;
-  padding: 34px 16px 22px;
-  text-align: center;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
 }
 
 .mm-fiat {
-  font-size: 44px;
+  font-size: 32px;
   font-weight: 600;
   letter-spacing: -0.03em;
   line-height: 1.1;
@@ -2568,7 +2572,7 @@ button.coin-result:focus-visible {
 }
 
 .mm-caveat {
-  max-width: 46ch;
+  max-width: 72ch;
   margin-top: 6px;
   color: var(--muted);
   font-size: 13.5px;
@@ -2576,40 +2580,9 @@ button.coin-result:focus-visible {
 
 .mm-actions {
   display: flex;
-  gap: 10px;
-  max-width: 420px;
-  margin: 0 auto;
-  padding: 0 20px 26px;
-}
-
-.mm-action {
-  flex: 1 1 0;
-  min-width: 0;
-  display: grid;
-  justify-items: center;
-  gap: 6px;
-  padding: 12px 8px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r);
-  background: var(--panel);
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.mm-action:hover:not(:disabled) {
-  background: var(--soft);
-  border-color: var(--muted);
-}
-
-.mm-action:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.mm-action .ring {
-  display: inline-flex;
-  color: var(--accent-ink);
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 .mm-found {
@@ -2701,13 +2674,13 @@ button.coin-result:focus-visible {
   align-items: center;
   gap: 6px;
   height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
+  padding: 0 14px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
   background: var(--panel);
   color: var(--ink);
   font-size: 13.5px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .mm-found-btn:hover:not(:disabled) {
@@ -2716,8 +2689,8 @@ button.coin-result:focus-visible {
 
 .mm-found-btn.primary {
   border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent-ink);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .mm-found-btn:disabled {
@@ -2725,32 +2698,12 @@ button.coin-result:focus-visible {
   cursor: not-allowed;
 }
 
+.card-flush.mm-panel {
+  padding-top: 4px;
+}
+
 .mm-tabs {
-  display: flex;
-  padding: 0 16px;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
-
-.mm-tab {
-  flex: 1;
-  padding: 12px 2px;
-  margin-bottom: -1px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: none;
-  color: var(--muted);
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.mm-tab:hover {
-  color: var(--ink);
-}
-
-.mm-tab.active {
-  color: var(--ink);
-  border-bottom-color: var(--accent);
+  padding: 0 20px;
 }
 
 .mm-list {
@@ -2761,7 +2714,7 @@ button.coin-result:focus-visible {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 13px 16px;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -2818,8 +2771,17 @@ button.coin-result:focus-visible {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px 12px;
-  padding: 10px 14px 10px 16px;
-  background: var(--soft);
+  padding: 12px 20px 10px;
+}
+
+@media (max-width: 899px) {
+  .mm-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mm-details .detail-stat:has(.net-switcher) {
+    grid-column: auto;
+  }
 }
 
 .mm-mark {
@@ -2886,9 +2848,9 @@ button.coin-result:focus-visible {
 }
 
 .faucet-link {
-  color: var(--accent-ink);
+  color: var(--link);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .chain-chip {
@@ -2896,9 +2858,9 @@ button.coin-result:focus-visible {
   align-items: center;
   gap: 6px;
   height: 26px;
-  padding: 0 8px;
+  padding: 0 10px;
   border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
+  border-radius: 999px;
   background: var(--panel);
   color: var(--ink);
   font-size: 12.5px;
@@ -2911,9 +2873,9 @@ button.coin-result:focus-visible {
   align-items: flex-start;
   gap: 10px;
   padding: 12px 14px;
-  border: 1px solid var(--line);
+  border: 2px solid var(--accent);
   border-radius: var(--r);
-  background: var(--soft);
+  background: var(--accent-soft);
   font-size: 14px;
 }
 
@@ -2924,22 +2886,26 @@ button.coin-result:focus-visible {
 }
 
 .net-scope-notice.warning {
-  border-color: transparent;
+  border-color: var(--warn);
   background: var(--warn-soft);
 }
 
 .net-scope-icon {
   flex: none;
   margin-top: 3px;
-  color: var(--muted);
+  color: var(--accent-ink);
 }
 
 .net-scope-notice.warning .net-scope-icon {
   color: var(--warn);
 }
 
+.net-scope-notice .net-scope-body {
+  color: var(--ink);
+}
+
 .net-scope-link {
-  color: var(--accent-ink);
+  color: var(--link);
 }
 
 .wallet-guarantee,
@@ -2951,36 +2917,29 @@ button.coin-result:focus-visible {
   align-items: flex-start;
   gap: 10px;
   padding: 12px 14px;
+  border: 2px solid var(--accent);
   border-radius: var(--r);
+  background: var(--accent-soft);
+  color: var(--ink);
   font-size: 14px;
   line-height: 1.5;
 }
 
-.wallet-guarantee {
-  background: var(--money-soft);
-  color: var(--ink);
-}
-
-.wallet-guarantee > svg {
+.wallet-guarantee > svg,
+.alert > svg {
   flex: none;
   margin-top: 2px;
-  color: var(--money-ink);
+  color: var(--accent-ink);
 }
 
-.wallet-guarantee.subtle {
-  border: 1px solid var(--line);
-  background: var(--soft);
-}
-
-.wallet-guarantee.subtle > svg {
-  color: var(--muted);
-}
-
-.wallet-warning {
+.wallet-warning,
+.alert.alert-error {
+  border-color: var(--due);
   background: var(--due-soft);
 }
 
-.wallet-warning > svg {
+.wallet-warning > svg,
+.alert.alert-error > svg {
   flex: none;
   margin-top: 2px;
   color: var(--due);
@@ -2988,6 +2947,7 @@ button.coin-result:focus-visible {
 
 .self-send-block,
 .review-chain-banner {
+  border-color: var(--warn);
   background: var(--warn-soft);
 }
 
@@ -2998,47 +2958,29 @@ button.coin-result:focus-visible {
   color: var(--warn);
 }
 
-.alert {
-  border: 1px solid var(--line);
-  background: var(--soft);
-}
-
-.alert.alert-error {
-  border-color: transparent;
-  background: var(--due-soft);
-}
-
-.alert > svg {
-  flex: none;
-  margin-top: 2px;
-}
-
 .tx-summary {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 18px 28px;
   margin: 0;
-  border-top: 1px solid var(--line-strong);
-  font-size: 14.5px;
+  font-size: 14px;
 }
 
 .tx-summary > div {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 16px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
 }
 
 .tx-summary dt {
-  color: var(--muted);
-  flex: none;
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .tx-summary dd {
   margin: 0;
   min-width: 0;
-  font-weight: 600;
-  text-align: right;
   overflow-wrap: anywhere;
 }
 
@@ -3110,12 +3052,14 @@ button.coin-result:focus-visible {
   align-items: flex-start;
   gap: 10px;
   padding: 12px 14px;
+  border: 2px solid var(--due);
   border-radius: var(--r);
   background: var(--due-soft);
   font-size: 14px;
 }
 
 .reveal-warning.warn {
+  border-color: var(--warn);
   background: var(--warn-soft);
 }
 
@@ -3285,45 +3229,17 @@ button.coin-result:focus-visible {
 }
 
 @media (max-width: 899px) {
-  .ws-list .mm-setup {
-    margin: 16px;
-  }
-
-  .mm-top {
-    flex-wrap: wrap;
-    gap: 4px;
-    padding: 8px 4px 8px 12px;
-  }
-
-  .mm-acct {
-    order: 3;
-    width: 100%;
-    justify-content: center;
-    margin: 0 0 2px;
-  }
-
-  .mm-icons {
-    margin-left: auto;
-  }
-
   .mm-icon {
     width: 44px;
     height: 44px;
   }
 
   .mm-fiat {
-    font-size: 38px;
-  }
-
-  .mm-actions {
-    padding: 0 16px 22px;
-  }
-
-  .mm-tab {
-    padding: 13px 2px;
+    font-size: 28px;
   }
 
   .mm-row {
+    padding: 12px 16px;
     min-height: 56px;
   }
 

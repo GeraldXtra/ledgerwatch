@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ShieldCheck, X } from "lucide-react";
-import { Button, Field, Input, Segmented } from "../../components/ui";
+import { Button, Field, Input, Segmented, PageHeader } from "../../components/ui";
 import { Modal } from "../../components/ui";
 import {
   importFromMnemonic,
@@ -80,20 +80,22 @@ export default function ImportWalletModal({ onClose, onDone }) {
   }
 
   return (
-    <Modal label="Import wallet" onClose={onClose}>
-      <div className="row space-between">
-        <h3 className="section-title">Import a wallet</h3>
-        <Button variant="ghost" icon title="Close" onClick={onClose}>
-          <X size={15} />
-        </Button>
-      </div>
+    <Modal label="Import wallet" view="import" crumb="Import a wallet" onClose={onClose}>
+      <PageHeader
+        title="Import a wallet"
+        action={
+          <Button variant="ghost" icon title="Close" onClick={onClose}>
+            <X size={15} />
+          </Button>
+        }
+      />
 
       <div className="wallet-guarantee">
         <ShieldCheck size={16} />
         <span>Your key is encrypted in your browser. Only the encrypted keystore is stored here.</span>
       </div>
 
-      <form className="stack" onSubmit={submit}>
+      <form className="card stack" onSubmit={submit}>
         <Segmented
           value={mode}
           onChange={setMode}

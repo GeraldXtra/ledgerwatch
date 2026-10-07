@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, Eye, EyeOff, ShieldCheck, X } from "lucide-react";
-import { Button, Field, Input, Modal } from "../../components/ui";
+import { Button, Field, Input, Modal, PageHeader } from "../../components/ui";
 import { createWallet, encryptAndStore } from "./keystore";
 import { saveAddress } from "./walletApi";
 import { assessWalletPassword, MIN_WALLET_PASSWORD } from "./passwordStrength";
@@ -45,16 +45,18 @@ export default function CreateWalletModal({ onClose, onDone }) {
   }
 
   return (
-    <Modal label="Create wallet" onClose={onClose}>
-      <div className="row space-between">
-        <h3 className="section-title">Create a wallet</h3>
-        <Button variant="ghost" icon title="Close" onClick={onClose}>
-          <X size={15} />
-        </Button>
-      </div>
+    <Modal label="Create wallet" view="create" crumb="Create a wallet" onClose={onClose}>
+      <PageHeader
+        title="Create a wallet"
+        action={
+          <Button variant="ghost" icon title="Close" onClick={onClose}>
+            <X size={15} />
+          </Button>
+        }
+      />
 
       {step === "generate" && (
-        <div className="stack">
+        <div className="card stack">
           <div className="wallet-guarantee">
             <ShieldCheck size={16} />
             <span>
@@ -76,7 +78,7 @@ export default function CreateWalletModal({ onClose, onDone }) {
       )}
 
       {step === "backup" && (
-        <div className="stack">
+        <div className="card stack">
           <div className="wallet-warning">
             <AlertTriangle size={16} />
             <span>Anyone with this phrase can control the wallet. Never share it.</span>
@@ -122,7 +124,7 @@ export default function CreateWalletModal({ onClose, onDone }) {
       )}
 
       {step === "password" && (
-        <form className="stack" onSubmit={finish}>
+        <form className="card stack" onSubmit={finish}>
           <p className="muted small">
             Set a password to encrypt the wallet on this device. You will enter it to send.
           </p>

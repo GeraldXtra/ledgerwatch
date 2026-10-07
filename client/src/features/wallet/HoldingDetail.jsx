@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ShieldAlert, Trash2, X } from "lucide-react";
 import http from "../../api/http";
-import { Button, Modal, SkeletonLines } from "../../components/ui";
+import { Button, Modal, SkeletonLines, PageHeader } from "../../components/ui";
 import TokenLogo from "../../components/TokenLogo";
 import CoinDetailModal from "../market/CoinDetailModal";
 import { coinIdForSymbol, stableUsdPrice, isVerifiedRow } from "./usdValue";
@@ -65,24 +65,27 @@ export default function HoldingDetail({ balance, chain, price, onRemove, onClose
   const loading = Boolean(coinId) && !failed;
 
   return (
-    <Modal label={`${symbol} details`} onClose={onClose}>
-      <div className="row space-between coin-detail-head">
-        <div className="row">
-          <TokenLogo
-            symbol={verified ? symbol : balance.address || symbol}
-            size={34}
-            unknown={balance.unknown}
-          />
-          <div>
-            <h3 className="section-title">{symbol}</h3>
-            <div className="muted caption">{chain ? chain.name : "Unknown network"}</div>
-          </div>
-        </div>
-        <Button variant="ghost" icon title="Close" onClick={onClose}>
-          <X size={16} />
-        </Button>
-      </div>
+    <Modal label={`${symbol} details`} view="token" crumb={symbol} onClose={onClose}>
+      <PageHeader
+        title={
+          <span className="coin-title">
+            <TokenLogo
+              symbol={verified ? symbol : balance.address || symbol}
+              size={34}
+              unknown={balance.unknown}
+            />
+            <span>{symbol}</span>
+          </span>
+        }
+        support={chain ? chain.name : "Unknown network"}
+        action={
+          <Button variant="ghost" icon title="Close" onClick={onClose}>
+            <X size={16} />
+          </Button>
+        }
+      />
 
+      <section className="card stack">
       {loading ? (
         <SkeletonLines count={4} />
       ) : (
@@ -139,9 +142,11 @@ export default function HoldingDetail({ balance, chain, price, onRemove, onClose
         </p>
       )}
 
+      </section>
+
       {onRemove && (
-        <div className="row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
-          <Button variant="danger" size="sm" onClick={onRemove}>
+        <div className="pv-foot">
+          <Button variant="danger" onClick={onRemove}>
             <Trash2 size={14} /> Remove from my wallet
           </Button>
         </div>

@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { Button, Card, SkeletonLines, ToastProvider, useToast } from "../../components/ui";
+import { Button, Card, SkeletonLines, ToastProvider, useToast, PageHeader } from "../../components/ui";
 import { DetailPane } from "../../components/ui/Modal";
 import { useAuth } from "../../context/AuthContext";
 import { getProvider, ERC20_ABI, rpcErrorReason } from "./provider";
@@ -507,6 +507,7 @@ function WalletInner() {
   if (!hasWallet() || !address) {
     return (
       <>
+        <PageHeader title="Wallet" />
         {user?.walletAddress && (
           <div className="mm-stage">
             <Card className="mm-setup">
@@ -589,160 +590,160 @@ function WalletInner() {
     );
   }
 
+  const panelTitle =
+    panel === "send" ? "Send" : panel === "receive" ? "Receive" : "Collected on invoices";
+
   return (
     <>
-      <div className="mm-stage">
-        <div className="mm">
-          <div className="mm-top">
-            <NetworkSwitcher
-              chains={selectableChains}
-              chainId={chainId}
-              address={address}
-              onChange={setChainId}
-            />
-
-            {!isBitcoin && (
-              <>
-            <button type="button" className="mm-acct" onClick={copyAddr} title="Copy your address">
-              <Identicon address={address} size={22} />
-              <span className="addr num">{shorten(address)}</span>
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-            </button>
-
-            <div className="mm-icons">
+      <PageHeader
+        title="Wallet"
+        action={
+          !isBitcoin ? (
+            <>
               <button
                 type="button"
-                className="mm-icon"
-                onClick={() => loadBalances()}
-                title="Refresh balances"
-                aria-label="Refresh balances"
-              >
-                <RefreshCw size={15} className={balLoading ? "spin" : undefined} />
-              </button>
-              <button
-                type="button"
-                className="mm-icon"
+                className="btn btn-icon"
                 onClick={removeWallet}
                 title="Remove this wallet from this device"
                 aria-label="Remove this wallet from this device"
               >
                 <Trash2 size={15} />
               </button>
-            </div>
-              </>
-            )}
-          </div>
-
-          {isBitcoin && (
-            <BitcoinPanel
-              userId={user?._id}
-              network={selected.chainId === "bitcoin" ? "mainnet" : "testnet"}
-              evmAddress={address}
-            />
-          )}
-
-          {!isBitcoin && (
-            <>
-
-          {!backedUp && !backupDismissed && (
-            <div className="mm-notice">
-              <TriangleAlert size={16} />
-              <span className="grow">
-                <strong>Back this wallet up.</strong> You have not seen your recovery phrase yet.
-                Without it, clearing this browser or losing this device means the funds are gone for
-                good, for you and for us.{" "}
-                <Link className="mm-linkish" to="/app/settings?section=wallet-backup">
-                  Do it now
-                </Link>
-              </span>
               <button
                 type="button"
-                className="mm-icon"
-                onClick={() => setBackupDismissed(true)}
-                title="Dismiss"
-                aria-label="Dismiss"
+                className="btn btn-icon"
+                onClick={() => loadBalances()}
+                title="Refresh balances"
+                aria-label="Refresh balances"
               >
-                <X size={15} />
+                <RefreshCw size={15} className={balLoading ? "spin" : undefined} />
               </button>
+              <Button onClick={() => openPanel("collected")} disabled={!chain}>
+                <Inbox size={16} /> Collected
+              </Button>
+              <Button onClick={() => openPanel("send")} disabled={!chain}>
+                <ArrowUpRight size={16} /> Send
+              </Button>
+              <Button variant="primary" onClick={() => openPanel("receive")}>
+                <ArrowDownToLine size={16} /> Receive
+              </Button>
+            </>
+          ) : null
+        }
+      />
+
+      {!isBitcoin && !backedUp && !backupDismissed && (
+        <div className="mm-notice">
+          <TriangleAlert size={16} />
+          <span className="grow">
+            <strong>Back this wallet up.</strong> You have not seen your recovery phrase yet.
+            Without it, clearing this browser or losing this device means the funds are gone for
+            good, for you and for us.{" "}
+            <Link className="mm-linkish" to="/app/settings?section=wallet-backup">
+              Do it now
+            </Link>
+          </span>
+          <button
+            type="button"
+            className="btn btn-icon btn-sm"
+            onClick={() => setBackupDismissed(true)}
+            title="Dismiss"
+            aria-label="Dismiss"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
+
+      <section className="card mm">
+        <div className="card-head">
+          <div className="card-head-main">
+            <h3 className="card-title">Details</h3>
+          </div>
+        </div>
+        <div className="mm-details">
+          <div className="detail-stat">
+            <span className="overline">Network</span>
+            <span>
+              <NetworkSwitcher
+                chains={selectableChains}
+                chainId={chainId}
+                address={address}
+                onChange={setChainId}
+              />
+            </span>
+          </div>
+          {!isBitcoin && (
+            <div className="detail-stat">
+              <span className="overline">Address</span>
+              <span>
+                <button type="button" className="mm-acct" onClick={copyAddr} title="Copy your address">
+                  <Identicon address={address} size={22} />
+                  <span className="addr num">{shorten(address)}</span>
+                  {copied ? <Check size={14} /> : <Copy size={14} />}
+                </button>
+              </span>
             </div>
           )}
-
+        </div>
+        {!isBitcoin && (
           <div className="mm-hero">
-            {balances ? (
-              <>
-                <span className="mm-fiat">{usd(worth.total)}</span>
-                <span className="mm-sub">
-                  {chain ? `Held on ${chain.name}` : "Select a network"}
-                </span>
-
-                {!worth.complete && (
-                  <span className="mm-caveat">
-                    {worth.unread.length > 0 &&
-                      `${worth.unread.join(", ")} could not be read just now, so ${
-                        worth.unread.length === 1 ? "it is" : "they are"
-                      } missing from this total. `}
-                    {worth.unpriced.length > 0 &&
-                      `There is no dollar price for ${worth.unpriced.join(", ")}, so ${
-                        worth.unpriced.length === 1 ? "it is" : "they are"
-                      } not counted here.`}
+              {balances ? (
+                <>
+                  <span className="mm-fiat">{usd(worth.total)}</span>
+                  <span className="mm-sub">
+                    {chain ? `Held on ${chain.name}` : "Select a network"}
                   </span>
-                )}
-                {pricesFailed && (
-                  <span className="mm-caveat">
-                    Prices are unavailable right now, so this total is incomplete. The amounts below
-                    are still correct.
+
+                  {!worth.complete && (
+                    <span className="mm-caveat">
+                      {worth.unread.length > 0 &&
+                        `${worth.unread.join(", ")} could not be read just now, so ${
+                          worth.unread.length === 1 ? "it is" : "they are"
+                        } missing from this total. `}
+                      {worth.unpriced.length > 0 &&
+                        `There is no dollar price for ${worth.unpriced.join(", ")}, so ${
+                          worth.unpriced.length === 1 ? "it is" : "they are"
+                        } not counted here.`}
+                    </span>
+                  )}
+                  {pricesFailed && (
+                    <span className="mm-caveat">
+                      Prices are unavailable right now, so this total is incomplete. The amounts below
+                      are still correct.
+                    </span>
+                  )}
+                </>
+              ) : balLoading ? (
+                <span style={{ display: "block", width: 200, maxWidth: "70%" }}>
+                  <SkeletonLines count={1} />
+                </span>
+              ) : (
+                <>
+                  <span className="mm-fiat" style={{ fontSize: 24 }}>
+                    Balance unavailable
                   </span>
-                )}
-              </>
-            ) : balLoading ? (
-              <span style={{ display: "block", width: 200, maxWidth: "70%" }}>
-                <SkeletonLines count={1} />
-              </span>
-            ) : (
-              <>
-                <span className="mm-fiat" style={{ fontSize: 24 }}>
-                  Balance unavailable
-                </span>
-                <span className="mm-caveat">
-                  {balError
-                    ? `The network did not answer: ${balError}. Your funds are untouched, this is a connection problem.`
-                    : "The network did not answer. Your funds are untouched, this is a connection problem."}
-                </span>
-              </>
-            )}
+                  <span className="mm-caveat">
+                    {balError
+                      ? `The network did not answer: ${balError}. Your funds are untouched, this is a connection problem.`
+                      : "The network did not answer. Your funds are untouched, this is a connection problem."}
+                  </span>
+                </>
+              )}
           </div>
+        )}
+      </section>
 
-          <div className="mm-actions">
-            <button type="button" className="mm-action brass" onClick={() => openPanel("receive")}>
-              <span className="ring">
-                <ArrowDownToLine size={19} />
-              </span>
-              Receive
-            </button>
-            <button
-              type="button"
-              className="mm-action"
-              onClick={() => openPanel("send")}
-              disabled={!chain}
-            >
-              <span className="ring">
-                <ArrowUpRight size={19} />
-              </span>
-              Send
-            </button>
-            <button
-              type="button"
-              className="mm-action"
-              onClick={() => openPanel("collected")}
-              disabled={!chain}
-            >
-              <span className="ring">
-                <Inbox size={19} />
-              </span>
-              Collected
-            </button>
-          </div>
+      {isBitcoin && (
+        <BitcoinPanel
+          userId={user?._id}
+          network={selected.chainId === "bitcoin" ? "mainnet" : "testnet"}
+          evmAddress={address}
+        />
+      )}
 
+      {!isBitcoin && (
+        <>
           {chain && discovered && (
             <NewTokensCard
               chain={chain}
@@ -756,165 +757,174 @@ function WalletInner() {
             />
           )}
 
-          <div className="mm-tabs">
-            <button
-              type="button"
-              className={tab === "tokens" ? "mm-tab active" : "mm-tab"}
-              onClick={() => setTab("tokens")}
-            >
-              Tokens
-            </button>
-            <button
-              type="button"
-              className={tab === "activity" ? "mm-tab active" : "mm-tab"}
-              onClick={() => setTab("activity")}
-            >
-              Activity
-            </button>
-          </div>
+          <section className="card card-flush mm-panel">
+            <div className="tabs mm-tabs" role="tablist" aria-label="Wallet">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "tokens"}
+                className="tab"
+                onClick={() => setTab("tokens")}
+              >
+                Tokens
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "activity"}
+                className="tab"
+                onClick={() => setTab("activity")}
+              >
+                Activity
+              </button>
+            </div>
 
-          {tab === "tokens" ? (
-            <>
-              <div className="mm-list">
-                {balLoading && !balances ? (
-                  <div style={{ padding: 16 }}>
-                    <SkeletonLines count={3} />
-                  </div>
-                ) : balances ? (
-                  visibleBalances.map((b) => {
-                    const verified = isVerifiedRow(b);
-                    const price = verified ? usdPrices[String(b.symbol).toUpperCase()] : undefined;
-                    const value =
-                      !b.unknown && Number.isFinite(price) ? Number(b.amount) * price : null;
-                    const impersonates =
-                      !verified &&
-                      (chain?.tokens || []).some(
-                        (t) =>
-                          String(t.symbol).toUpperCase() === String(b.symbol).toUpperCase() &&
-                          String(t.address).toLowerCase() !== String(b.address).toLowerCase()
-                      )
-                        ? b.symbol
-                        : null;
-                    return (
-                      <div
-                        className="mm-row"
-                        key={`${b.symbol}-${b.address || "native"}`}
-                        role="button"
-                        tabIndex={0}
-                        title={`About ${b.symbol}`}
-                        style={{ cursor: "pointer" }}
-                        onClick={() => setDetail(b)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            setDetail(b);
-                          }
-                        }}
-                      >
-                        <TokenLogo
-                          symbol={verified ? b.symbol : b.address || b.symbol}
-                          native={b.native}
-                          unknown={b.unknown}
-                        />
-                        <span className="mm-row-main">
-                          <span className="mm-row-name">
-                            {b.symbol}
-                            {b.custom && (
-                              <span className="lw-label" style={{ letterSpacing: "0.12em" }}>
-                                {impersonates ? "unverified" : "added"}
+            {tab === "tokens" ? (
+              <>
+                <div className="mm-list">
+                  {balLoading && !balances ? (
+                    <div style={{ padding: 16 }}>
+                      <SkeletonLines count={3} />
+                    </div>
+                  ) : balances ? (
+                    visibleBalances.map((b) => {
+                      const verified = isVerifiedRow(b);
+                      const price = verified ? usdPrices[String(b.symbol).toUpperCase()] : undefined;
+                      const value =
+                        !b.unknown && Number.isFinite(price) ? Number(b.amount) * price : null;
+                      const impersonates =
+                        !verified &&
+                        (chain?.tokens || []).some(
+                          (t) =>
+                            String(t.symbol).toUpperCase() === String(b.symbol).toUpperCase() &&
+                            String(t.address).toLowerCase() !== String(b.address).toLowerCase()
+                        )
+                          ? b.symbol
+                          : null;
+                      return (
+                        <div
+                          className="mm-row"
+                          key={`${b.symbol}-${b.address || "native"}`}
+                          role="button"
+                          tabIndex={0}
+                          title={`About ${b.symbol}`}
+                          style={{ cursor: "pointer" }}
+                          onClick={() => setDetail(b)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setDetail(b);
+                            }
+                          }}
+                        >
+                          <TokenLogo
+                            symbol={verified ? b.symbol : b.address || b.symbol}
+                            native={b.native}
+                            unknown={b.unknown}
+                          />
+                          <span className="mm-row-main">
+                            <span className="mm-row-name">
+                              {b.symbol}
+                              {b.custom && (
+                                <span className="lw-label" style={{ letterSpacing: "0.12em" }}>
+                                  {impersonates ? "unverified" : "added"}
+                                </span>
+                              )}
+                            </span>
+                            {impersonates && (
+                              <span className="mm-row-note warn">
+                                Calls itself {impersonates}, but this is not the verified{" "}
+                                {impersonates} contract on {chain ? chain.name : "this network"}.
+                                Anyone can deploy a token with any name.
                               </span>
                             )}
+                            {b.unknown ? (
+                              <span className="mm-row-note warn" title={b.reason || undefined}>
+                                {b.reason ? `Could not be read: ${b.reason}` : "Could not be read"}
+                              </span>
+                            ) : b.native ? (
+                              <span className="mm-row-note">Pays the network fees</span>
+                            ) : null}
                           </span>
-                          {impersonates && (
-                            <span className="mm-row-note warn">
-                              Calls itself {impersonates}, but this is not the verified{" "}
-                              {impersonates} contract on {chain ? chain.name : "this network"}.
-                              Anyone can deploy a token with any name.
+                          <span className="mm-row-right">
+                            <span className="mm-row-fiat">
+                              {b.unknown ? "Unknown" : value != null ? usd(value) : "No price"}
                             </span>
-                          )}
-                          {b.unknown ? (
-                            <span className="mm-row-note warn" title={b.reason || undefined}>
-                              {b.reason ? `Could not be read: ${b.reason}` : "Could not be read"}
+                            <span className="mm-row-qty">
+                              {b.unknown
+                                ? "amount unavailable"
+                                : `${Number(b.amount).toLocaleString(undefined, {
+                                    maximumFractionDigits: 6,
+                                  })} ${b.symbol}`}
                             </span>
-                          ) : b.native ? (
-                            <span className="mm-row-note">Pays the network fees</span>
-                          ) : null}
-                        </span>
-                        <span className="mm-row-right">
-                          <span className="mm-row-fiat">
-                            {b.unknown ? "Unknown" : value != null ? usd(value) : "No price"}
                           </span>
-                          <span className="mm-row-qty">
-                            {b.unknown
-                              ? "amount unavailable"
-                              : `${Number(b.amount).toLocaleString(undefined, {
-                                  maximumFractionDigits: 6,
-                                })} ${b.symbol}`}
-                          </span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="mm-row">
+                      <span className="mm-row-main">
+                        <span className="mm-row-name">Nothing could be read</span>
+                        <span className="mm-row-note warn">
+                          {balError || "The network did not answer."}
                         </span>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="mm-row">
-                    <span className="mm-row-main">
-                      <span className="mm-row-name">Nothing could be read</span>
-                      <span className="mm-row-note warn">
-                        {balError || "The network did not answer."}
                       </span>
-                    </span>
-                  </div>
-                )}
-              </div>
+                    </div>
+                  )}
+                </div>
 
-              <div className="mm-foot">
-                <label className="toggle-inline">
-                  <input
-                    type="checkbox"
-                    checked={hideZero}
-                    onChange={(e) => setHideZero(e.target.checked)}
-                  />
-                  <span className="muted small">
-                    Hide empty balances{hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
-                  </span>
-                </label>
-                <button type="button" className="mm-linkish" onClick={() => setAddTokenOpen(true)}>
-                  <PlusCircle size={14} /> Import a token
-                </button>
+                <div className="mm-foot">
+                  <label className="toggle-inline">
+                    <input
+                      type="checkbox"
+                      checked={hideZero}
+                      onChange={(e) => setHideZero(e.target.checked)}
+                    />
+                    <span className="muted small">
+                      Hide empty balances{hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
+                    </span>
+                  </label>
+                  <button type="button" className="mm-linkish" onClick={() => setAddTokenOpen(true)}>
+                    <PlusCircle size={14} /> Import a token
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="mm-list" style={{ padding: 16 }}>
+                <TxHistory
+                  txs={txs}
+                  error={txsError}
+                  onRetry={() => loadTxs()}
+                  chain={chain}
+                  chains={chains}
+                  onReceive={() => {
+                    setTab("tokens");
+                    setPanel("receive");
+                  }}
+                />
               </div>
-            </>
-          ) : (
-            <div className="mm-list" style={{ padding: 16 }}>
-              <TxHistory
-                txs={txs}
-                error={txsError}
-                onRetry={() => loadTxs()}
-                chain={chain}
-                chains={chains}
-                onReceive={() => {
-                  setTab("tokens");
-                  setPanel("receive");
-                }}
-              />
-            </div>
-          )}
-            </>
-          )}
-        </div>
-      </div>
+            )}
+          </section>
+        </>
+      )}
 
       {!isBitcoin && panel && (
-        <DetailPane key={panel} onBack={() => setPanel(null)}>
-          <Card
-            title={
-              panel === "send" ? "Send" : panel === "receive" ? "Receive" : "Collected on invoices"
-            }
+        <DetailPane
+          key={panel}
+          view={panel}
+          crumb={panelTitle}
+          label={panelTitle}
+          onBack={() => setPanel(null)}
+        >
+          <PageHeader
+            title={panelTitle}
             action={
               <Button variant="ghost" icon title="Close" onClick={() => setPanel(null)}>
                 <X size={15} />
               </Button>
             }
-          >
+          />
+          <section className="card">
             {panel === "send" && chain && (
               <SendForm
                 key={chain.chainId}
@@ -948,7 +958,7 @@ function WalletInner() {
                 }}
               />
             )}
-          </Card>
+          </section>
         </DetailPane>
       )}
 

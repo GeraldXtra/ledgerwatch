@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, Eye, KeyRound, ShieldAlert, TriangleAlert, X } from "lucide-react";
-import { Button, Field, Input, Modal } from "../../components/ui";
+import { Check, Copy, Eye, ShieldAlert, TriangleAlert, X } from "lucide-react";
+import { Button, Field, Input, Modal, PageHeader } from "../../components/ui";
 import { revealSecrets, markBackedUp } from "./keystore";
 import { verifySecurityAnswers, getSecurityQuestions } from "./walletApi";
 
@@ -136,18 +136,18 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
   const title = isPhrase ? "Secret recovery phrase" : "Private key";
 
   return (
-    <Modal label={title} onClose={closeAll}>
-      <div className="row space-between">
-        <h3 className="section-title row">
-          <KeyRound size={17} /> {title}
-        </h3>
-        <Button variant="ghost" icon title="Close" onClick={closeAll}>
-          <X size={15} />
-        </Button>
-      </div>
+    <Modal label={title} view="reveal" crumb={title} onClose={closeAll}>
+      <PageHeader
+        title={title}
+        action={
+          <Button variant="ghost" icon title="Close" onClick={closeAll}>
+            <X size={15} />
+          </Button>
+        }
+      />
 
       {step === "warn" && (
-        <div className="stack">
+        <div className="card stack">
           <div className="reveal-warning">
             <ShieldAlert size={20} />
             <div>
@@ -191,7 +191,7 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
       )}
 
       {step === "auth" && (
-        <form className="stack" onSubmit={authenticate}>
+        <form className="card stack" onSubmit={authenticate}>
           <p className="muted small" style={{ margin: 0 }}>
             Unlocking happens entirely in this browser. Nothing secret is sent anywhere.
           </p>
@@ -272,7 +272,7 @@ export default function RevealSecretModal({ open, mode = "phrase", onClose }) {
       )}
 
       {step === "shown" && (
-        <div className="stack">
+        <div className="card stack">
           {mode === "phrase" && !hasMnemonic && (
             <div className="reveal-warning warn">
               <TriangleAlert size={18} />
