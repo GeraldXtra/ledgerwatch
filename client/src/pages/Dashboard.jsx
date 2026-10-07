@@ -131,8 +131,10 @@ function SideNav({ section, view }) {
         LedgerWatch
       </Link>
       {NAV_ITEMS.slice(0, 2).map((s) => (
-        <div key={s.id} className="aw-nav-group">
-          <p className="aw-grp">{s.label}</p>
+        <div key={s.id} className="aw-nav-group" role="group" aria-labelledby={`aw-grp-${s.id}`}>
+          <p className="aw-grp" id={`aw-grp-${s.id}`}>
+            {s.label}
+          </p>
           {VIEWS[s.id].map((v) => (
             <Link
               key={v.id}
@@ -144,12 +146,14 @@ function SideNav({ section, view }) {
           ))}
         </div>
       ))}
-      <hr className="aw-hr" />
-      {NAV_ITEMS.slice(2).map(({ id, label, to }) => (
-        <NavLink key={id} to={to}>
-          {label}
-        </NavLink>
-      ))}
+      <div className="aw-nav-group" role="group" aria-labelledby="aw-grp-account">
+        <p className="aw-grp" id="aw-grp-account">Account</p>
+        {NAV_ITEMS.slice(2).map(({ id, label, to }) => (
+          <NavLink key={id} to={to}>
+            {label}
+          </NavLink>
+        ))}
+      </div>
       <hr className="aw-hr" />
       <Link to="/docs">Guide</Link>
       <Link to="/contact">Contact</Link>

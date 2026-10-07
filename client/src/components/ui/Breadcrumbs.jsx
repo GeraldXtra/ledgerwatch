@@ -4,7 +4,7 @@ import { ChevronRight } from "lucide-react";
 export default function Breadcrumbs({ items }) {
   if (!items || items.length === 0) return null;
   return (
-    <nav className="crumbs" aria-label="Breadcrumbs">
+    <nav className="crumbs">
       <ol>
         {items.map((item, i) => {
           const last = i === items.length - 1;
