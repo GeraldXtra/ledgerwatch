@@ -120,12 +120,12 @@ export default function DebtorProfile({ debtorKey, onClose }) {
           />
 
           <Card title="Details">
-          <div className="detail-stats">
-            <div className="detail-stat"><span className="overline">Borrowed in total</span><span className="num">{ngn(debtor.totalBorrowed)}</span></div>
-            <div className="detail-stat"><span className="overline">Outstanding</span><span className={`num ${debtor.totalOutstanding > 0 ? "value-neg" : "value-pos"}`}>{ngn(debtor.totalOutstanding)}</span></div>
-            <div className="detail-stat"><span className="overline">On time rate</span><span className="num">{debtor.onTimeRate != null ? `${Math.round(debtor.onTimeRate * 100)}%` : "Not yet"}</span></div>
-            <div className="detail-stat"><span className="overline">Avg days to pay</span><span className="num">{debtor.avgDaysToPay != null ? debtor.avgDaysToPay : "Not yet"}</span></div>
-          </div>
+            <div className="detail-stats">
+              <div className="detail-stat"><span className="overline">Borrowed in total</span><span className="num">{ngn(debtor.totalBorrowed)}</span></div>
+              <div className="detail-stat"><span className="overline">Outstanding</span><span className={`num ${debtor.totalOutstanding > 0 ? "value-neg" : "value-pos"}`}>{ngn(debtor.totalOutstanding)}</span></div>
+              <div className="detail-stat"><span className="overline">On time rate</span><span className="num">{debtor.onTimeRate != null ? `${Math.round(debtor.onTimeRate * 100)}%` : "Not yet"}</span></div>
+              <div className="detail-stat"><span className="overline">Avg days to pay</span><span className="num">{debtor.avgDaysToPay != null ? debtor.avgDaysToPay : "Not yet"}</span></div>
+            </div>
           </Card>
 
           <Card

@@ -129,7 +129,7 @@ export default function DebtList({
                 <td data-label="Due date" className="num" onClick={() => onOpen(debt)}>
                   {shortDate(debt.dueDate)}
                 </td>
-                <td data-label="Status" onClick={() => onOpen(debt)}>
+                <td data-label="Status" className="cell-badge" onClick={() => onOpen(debt)}>
                   <StatusPill status={status} />
                 </td>
                 <td data-label="" className="cell-end" onClick={(e) => e.stopPropagation()}>

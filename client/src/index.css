@@ -628,6 +628,10 @@ textarea.input {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
+.input[type="date"] {
+  min-width: 0;
+}
+
 textarea.input {
   height: auto;
   min-height: 120px;
@@ -1964,6 +1968,18 @@ button.chip:hover {
   .page-head:has(> .page-head-actions > .btn-icon:only-child) > .page-head-main {
     padding-right: 40px;
   }
+
+  .page-head-actions > .btn-icon:last-child:not(:first-child),
+  .page-head-actions > .row > .btn-icon:last-child:not(:first-child) {
+    position: absolute;
+    top: -6px;
+    right: -10px;
+  }
+
+  .page-head:has(> .page-head-actions > .btn-icon:last-child:not(:first-child)) > .page-head-main,
+  .page-head:has(> .page-head-actions > .row > .btn-icon:last-child:not(:first-child)) > .page-head-main {
+    padding-right: 40px;
+  }
 }
 
 @media (max-width: 759px) {
@@ -2117,8 +2133,8 @@ button.chip:hover {
 
   .table-stack td.check-col {
     position: absolute;
-    left: 0;
-    top: 2px;
+    left: 16px;
+    top: 15px;
     width: auto;
     padding: 0;
   }
@@ -2136,6 +2152,29 @@ button.chip:hover {
 
   .table-stack tr:has(td.cell-end) td.cell-title {
     padding-right: 44px;
+  }
+
+  .table-stack td.cell-badge {
+    position: absolute;
+    right: 16px;
+    top: 14px;
+    justify-items: end;
+  }
+
+  .table-stack td.cell-badge::before {
+    content: none;
+  }
+
+  .table-stack tr:has(td.cell-end) td.cell-badge {
+    right: 48px;
+  }
+
+  .table-stack tr:has(td.cell-badge) td.cell-title {
+    padding-right: 116px;
+  }
+
+  .table-stack tr:has(td.cell-badge):has(td.cell-end) td.cell-title {
+    padding-right: 148px;
   }
 }
 

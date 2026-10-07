@@ -10,7 +10,6 @@ export default function Breadcrumbs({ items }) {
           const last = i === items.length - 1;
           return (
             <li key={i}>
-              {i > 0 && <ChevronRight size={14} aria-hidden="true" />}
               {last ? (
                 <span aria-current="page">{item.label}</span>
               ) : item.to ? (
@@ -20,6 +19,7 @@ export default function Breadcrumbs({ items }) {
                   {item.label}
                 </button>
               )}
+              {!last && <ChevronRight size={14} aria-hidden="true" />}
             </li>
           );
         })}
