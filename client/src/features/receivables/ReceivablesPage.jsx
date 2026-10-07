@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Sparkles } from "lucide-react";
 import http from "../../api/http";
@@ -16,6 +16,17 @@ import DebtorsView from "./DebtorsView";
 import { kpiNgn } from "./format";
 
 const VIEWS = ["overview", "debts", "debtors"];
+
+const PARENT = {
+  debt: "debts",
+  record: "debts",
+  edit: "debts",
+  reminder: "debts",
+  crypto: "debts",
+  sweep: "debts",
+  debtor: "debtors",
+  statement: "debtors",
+};
 
 function AssistantCard() {
   const [question, setQuestion] = useState("");
@@ -65,7 +76,11 @@ function AssistantCard() {
 function Receivables() {
   const [params] = useSearchParams();
   const wanted = params.get("view");
-  const tab = VIEWS.includes(wanted) ? wanted : "overview";
+  const lastTab = useRef("overview");
+  const tab = VIEWS.includes(wanted)
+    ? wanted
+    : PARENT[wanted] || (wanted ? lastTab.current : "overview");
+  lastTab.current = tab;
 
   const [analytics, setAnalytics] = useState(null);
   const [analyticsError, setAnalyticsError] = useState("");

@@ -1,44 +1,55 @@
-import { Suspense, useEffect, useRef } from "react";
-import { NavLink, Outlet, Link, useLocation } from "react-router-dom";
-import {
-  BellRing,
-  BookOpen,
-  CandlestickChart,
-  ChevronLeft,
-  FlaskConical,
-  LayoutDashboard,
-  LogOut,
-  Receipt,
-  Settings as SettingsIcon,
-  Users,
-  Wallet,
-} from "lucide-react";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { NavLink, Outlet, Link, useLocation, useNavigate } from "react-router-dom";
+import { BookOpen, LogOut, Menu } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { Avatar, Footer, ToastProvider, useToast } from "../components/ui";
-import { WorkspaceProvider, useWorkspace } from "../components/ui/Modal";
+import Breadcrumbs from "../components/ui/Breadcrumbs";
+import { TrailProvider, WorkspaceProvider, useWorkspace } from "../components/ui/Modal";
 import LogoMark from "../components/LogoMark";
 import ThemeToggle from "../components/ThemeToggle";
 import { ensureServiceWorker, onForegroundPush } from "../api/push";
 
 const NAV_ITEMS = [
-  { id: "receivables", label: "Receivables", icon: Receipt, to: "/app/receivables" },
-  { id: "market", label: "Market Watch", icon: CandlestickChart, to: "/app/market" },
-  { id: "wallet", label: "Wallet", icon: Wallet, to: "/app/wallet" },
-  { id: "settings", label: "Settings", icon: SettingsIcon, to: "/app/settings" },
+  { id: "receivables", label: "Receivables", to: "/app/receivables" },
+  { id: "market", label: "Market Watch", to: "/app/market" },
+  { id: "wallet", label: "Wallet", to: "/app/wallet" },
+  { id: "settings", label: "Settings", to: "/app/settings" },
 ];
 
 const VIEWS = {
   receivables: [
-    { id: "overview", label: "Overview", icon: LayoutDashboard, wide: true },
-    { id: "debts", label: "Debts", icon: Receipt },
-    { id: "debtors", label: "Debtors", icon: Users },
+    { id: "overview", label: "Overview" },
+    { id: "debts", label: "Debts" },
+    { id: "debtors", label: "Debtors" },
   ],
   market: [
-    { id: "alerts", label: "Alerts", icon: BellRing },
-    { id: "watchlist", label: "Watchlist", icon: CandlestickChart },
-    { id: "portfolio", label: "Portfolio", icon: FlaskConical, wide: true },
+    { id: "alerts", label: "Alerts" },
+    { id: "watchlist", label: "Watchlist" },
+    { id: "portfolio", label: "Portfolio" },
   ],
 };
+
+const PARENT = {
+  receivables: {
+    debt: "debts",
+    record: "debts",
+    edit: "debts",
+    reminder: "debts",
+    crypto: "debts",
+    sweep: "debts",
+    debtor: "debtors",
+    statement: "debtors",
+  },
+  market: {
+    buy: "alerts",
+    sell: "alerts",
+    swap: "alerts",
+    coin: "watchlist",
+    watch: "watchlist",
+  },
+};
+
+const PAGE_PARAMS = ["step"];
 
 function sectionOf(pathname) {
   const id = pathname.replace(/^\/app\/?/, "").split("/")[0];
@@ -49,7 +60,36 @@ function viewOf(sectionId, search) {
   const views = VIEWS[sectionId];
   if (!views) return null;
   const wanted = new URLSearchParams(search).get("view");
-  return views.find((v) => v.id === wanted) || views[0];
+  const mapped = (PARENT[sectionId] && PARENT[sectionId][wanted]) || wanted;
+  return views.find((v) => v.id === mapped) || views[0];
+}
+
+function listSearch(sectionId, search) {
+  const p = new URLSearchParams(search);
+  PAGE_PARAMS.forEach((k) => p.delete(k));
+  const wanted = p.get("view");
+  const views = VIEWS[sectionId];
+  if (wanted && !(views && views.some((v) => v.id === wanted))) {
+    const parent = PARENT[sectionId] && PARENT[sectionId][wanted];
+    if (parent) p.set("view", parent);
+    else p.delete("view");
+  }
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
+function pageSearch(entry, base) {
+  const p = new URLSearchParams(base);
+  PAGE_PARAMS.forEach((k) => p.delete(k));
+  p.set("view", entry.view);
+  if (entry.paramsKey) {
+    Object.entries(JSON.parse(entry.paramsKey)).forEach(([k, v]) => p.set(k, String(v)));
+  }
+  return `?${p.toString()}`;
+}
+
+function depthOf(location) {
+  return (location.state && location.state.lwDepth) || 0;
 }
 
 function PushBridge() {
@@ -84,174 +124,235 @@ function PushBridge() {
   return null;
 }
 
-function ViewLink({ section, view, current, children, className }) {
-  return (
-    <Link
-      to={`${section.to}?view=${view.id}`}
-      className={className}
-      aria-current={current ? "page" : undefined}
-    >
-      {children}
-    </Link>
-  );
-}
-
 function SideNav({ section, view }) {
   return (
     <>
+      <Link to="/app/receivables" className="aw-nav-head">
+        LedgerWatch
+      </Link>
       {NAV_ITEMS.slice(0, 2).map((s) => (
-        <div key={s.id}>
-          <p className="ws-grp">{s.label}</p>
-          <nav className="ws-nav" aria-label={s.label}>
-            {VIEWS[s.id].map((v) => {
-              const Icon = v.icon;
-              return (
-                <ViewLink
-                  key={v.id}
-                  section={s}
-                  view={v}
-                  current={section.id === s.id && view && view.id === v.id}
-                >
-                  <Icon size={18} aria-hidden="true" />
-                  <span>{v.label}</span>
-                </ViewLink>
-              );
-            })}
-          </nav>
+        <div key={s.id} className="aw-nav-group">
+          <p className="aw-grp">{s.label}</p>
+          {VIEWS[s.id].map((v) => (
+            <Link
+              key={v.id}
+              to={`${s.to}?view=${v.id}`}
+              aria-current={section.id === s.id && view && view.id === v.id ? "page" : undefined}
+            >
+              {v.label}
+            </Link>
+          ))}
         </div>
       ))}
-      <p className="ws-grp">Account</p>
-      <nav className="ws-nav" aria-label="Account">
-        {NAV_ITEMS.slice(2).map(({ id, label, icon: Icon, to }) => (
-          <NavLink key={id} to={to}>
-            <Icon size={18} aria-hidden="true" />
-            <span>{label}</span>
-          </NavLink>
-        ))}
-      </nav>
+      <hr className="aw-hr" />
+      {NAV_ITEMS.slice(2).map(({ id, label, to }) => (
+        <NavLink key={id} to={to}>
+          {label}
+        </NavLink>
+      ))}
+      <hr className="aw-hr" />
+      <Link to="/docs">Guide</Link>
+      <Link to="/contact">Contact</Link>
     </>
   );
+}
+
+function useUrlPages(ws, location, navigate) {
+  const entries = ws.entries;
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+  const locRef = useRef(location);
+  locRef.current = location;
+  const section = sectionOf(location.pathname);
+  const baseRef = useRef(listSearch(section.id, location.search));
+  if (entries.length === 0 && depthOf(location) === 0) {
+    baseRef.current = listSearch(section.id, location.search);
+  }
+
+  useEffect(() => {
+    const list = entriesRef.current;
+    const d = depthOf(location);
+    const sectionId = sectionOf(location.pathname).id;
+    if (d < list.length) {
+      list
+        .slice(d)
+        .reverse()
+        .forEach((e) => e.back());
+      const t = setTimeout(() => {
+        const now = entriesRef.current;
+        const loc = locRef.current;
+        const dn = depthOf(loc);
+        for (let i = dn; i < now.length; i++) {
+          navigate(
+            { pathname: loc.pathname, search: pageSearch(now[i], baseRef.current) },
+            { state: { lwDepth: i + 1 } }
+          );
+        }
+      }, 80);
+      return () => clearTimeout(t);
+    }
+    if (d > list.length || (list.length === 0 && listSearch(sectionId, location.search) !== location.search)) {
+      const top = list[list.length - 1];
+      navigate(
+        {
+          pathname: location.pathname,
+          search: top
+            ? pageSearch(top, baseRef.current)
+            : listSearch(sectionId, location.search),
+        },
+        { replace: true, state: list.length ? { lwDepth: list.length } : null }
+      );
+    }
+    return undefined;
+  }, [location, navigate]);
+
+  const prevRef = useRef(entries);
+  useEffect(() => {
+    if (prevRef.current === entries) return;
+    prevRef.current = entries;
+    const loc = locRef.current;
+    const d = depthOf(loc);
+    const n = entries.length;
+    if (n > d) {
+      for (let i = d; i < n; i++) {
+        navigate(
+          { pathname: loc.pathname, search: pageSearch(entries[i], baseRef.current) },
+          { state: { lwDepth: i + 1 } }
+        );
+      }
+    } else if (n < d) {
+      navigate(-(d - n));
+    } else if (n > 0) {
+      const want = pageSearch(entries[n - 1], baseRef.current);
+      if (want !== loc.search) {
+        navigate({ pathname: loc.pathname, search: want }, { replace: true, state: { lwDepth: n } });
+      }
+    }
+  }, [entries, navigate]);
+
+  return baseRef.current;
+}
+
+function useScrollMemory(entries) {
+  const stackRef = useRef([]);
+  const prevRef = useRef({ n: 0, top: null });
+  const top = entries[entries.length - 1] || null;
+
+  useLayoutEffect(() => {
+    const n = entries.length;
+    const prev = prevRef.current;
+    if (n > prev.n) {
+      for (let i = prev.n; i < n; i++) stackRef.current[i] = window.scrollY;
+      window.scrollTo(0, 0);
+    } else if (n < prev.n) {
+      const y = stackRef.current[n] || 0;
+      stackRef.current.length = n;
+      window.scrollTo(0, y);
+    } else if (top && prev.top && top.id !== prev.top.id) {
+      window.scrollTo(0, 0);
+    }
+    prevRef.current = { n, top };
+  }, [entries, top]);
 }
 
 function Workspace() {
   const { user, logout } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const ws = useWorkspace();
-  const detailRef = useRef(null);
+  const [navOpen, setNavOpen] = useState(false);
+  const menuRef = useRef(null);
+  const navRef = useRef(null);
+
+  const base = useUrlPages(ws, location, navigate);
+  useScrollMemory(ws.entries);
 
   const section = sectionOf(location.pathname);
-  const view = viewOf(section.id, location.search);
-  const views = VIEWS[section.id] || null;
-  const listName = view ? view.label : section.label;
+  const view = viewOf(section.id, ws.entries.length ? base : location.search);
+  const open = ws.entries.length > 0;
 
-  const entries = ws.entries;
-  const top = entries[entries.length - 1] || null;
-  const phoneDetail = Boolean(top && top.screen === "screen");
-  const inline = Boolean(top && top.screen === "inline");
-  const wide = Boolean(view && view.wide);
+  const listTrail = [{ label: "LedgerWatch", to: "/app/receivables" }];
+  if (view) {
+    listTrail.push({ label: section.label, to: `${section.to}?view=${VIEWS[section.id][0].id}` });
+    listTrail.push({ label: view.label, to: `${section.to}?view=${view.id}` });
+  } else {
+    listTrail.push({ label: section.label, to: `${section.to}${base}` });
+  }
 
   useEffect(() => {
-    if (detailRef.current) detailRef.current.scrollTop = 0;
-    if (
-      phoneDetail &&
-      typeof window !== "undefined" &&
-      window.matchMedia &&
-      window.matchMedia("(max-width: 899px)").matches
-    ) {
-      window.scrollTo(0, 0);
+    setNavOpen(false);
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!navOpen) return undefined;
+    const first = navRef.current && navRef.current.querySelector("a");
+    if (first) first.focus();
+    function onKey(e) {
+      if (e.key === "Escape") {
+        setNavOpen(false);
+        if (menuRef.current) menuRef.current.focus();
+      }
     }
-  }, [top, phoneDetail]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen]);
 
   return (
-    <div
-      className={wide ? "ws wide" : "ws"}
-      data-view={phoneDetail ? "detail" : "list"}
-      data-inline={inline ? "" : undefined}
-      data-open={top ? "" : undefined}
-    >
-      <aside className="ws-side">
-        <NavLink to="/app/receivables" className="ws-brand" aria-label="LedgerWatch home">
-          <LogoMark size={24} />
+    <div className="aw-app">
+      <header className="aw-top">
+        <button
+          type="button"
+          className="aw-icon aw-burger"
+          aria-label="Menu"
+          aria-controls="aw-nav"
+          aria-expanded={navOpen}
+          ref={menuRef}
+          onClick={() => setNavOpen((o) => !o)}
+        >
+          <Menu size={20} aria-hidden="true" />
+        </button>
+        <NavLink to="/app/receivables" className="aw-brand" aria-label="LedgerWatch home">
+          <LogoMark size={26} />
           <span className="brand-name">
             Ledger<em>Watch</em>
           </span>
         </NavLink>
-
-        <SideNav section={section} view={view} />
-
-        <div className="ws-me">
-          <NavLink to="/app/settings" className="ws-account" title="Your account" aria-label="Your account">
+        <div className="aw-top-r">
+          <Link to="/docs" className="aw-icon aw-help" title="Help and documentation" aria-label="Help">
+            <BookOpen size={18} />
+          </Link>
+          <ThemeToggle className="aw-icon" />
+          <NavLink to="/app/settings" className="aw-acct" title="Your account" aria-label="Your account">
             <Avatar name={user.name} src={user.avatarUrl} />
             <span>{user.name}</span>
           </NavLink>
-          <Link to="/docs" className="ws-icon" title="Help and documentation" aria-label="Help">
-            <BookOpen size={17} />
-          </Link>
-          <ThemeToggle className="ws-icon" />
-          <button type="button" className="ws-icon" onClick={logout} title="Sign out" aria-label="Sign out">
-            <LogOut size={17} />
-          </button>
-        </div>
-      </aside>
-
-      <header className="ws-mtop">
-        <div className="ws-mtop-row">
-          <NavLink to="/app/receivables" className="ws-mtop-brand" aria-label="LedgerWatch home">
-            <LogoMark size={26} />
-          </NavLink>
-          <b>{section.label}</b>
-          <Link to="/docs" className="ws-icon" title="Help and documentation" aria-label="Help">
-            <BookOpen size={18} />
-          </Link>
-          <ThemeToggle className="ws-icon" />
-          <button type="button" className="ws-icon" onClick={logout} title="Sign out" aria-label="Sign out">
+          <button type="button" className="aw-icon" onClick={logout} title="Sign out" aria-label="Sign out">
             <LogOut size={18} />
           </button>
-          <NavLink to="/app/settings" className="ws-mav" title="Your account" aria-label="Your account">
-            <Avatar name={user.name} src={user.avatarUrl} />
-          </NavLink>
         </div>
-        {views && (
-          <nav className="ws-subnav" aria-label={section.label}>
-            {views.map((v) => (
-              <ViewLink key={v.id} section={section} view={v} current={view && view.id === v.id}>
-                {v.label}
-              </ViewLink>
-            ))}
-          </nav>
-        )}
       </header>
 
-      <main className={wide ? "ws-main" : "ws-pane ws-list"}>
-        <Suspense fallback={<p className="fallback-text">Loading this section...</p>}>
-          <Outlet />
-        </Suspense>
-        <Footer />
-      </main>
-
-      <section className="ws-pane ws-detail" ref={detailRef}>
-        {top && (
-          <button type="button" className="ws-back" onClick={() => top.back()}>
-            <ChevronLeft size={18} aria-hidden="true" />
-            {listName}
-          </button>
+      <div className="aw">
+        <nav className={navOpen ? "aw-nav show" : "aw-nav"} id="aw-nav" aria-label="LedgerWatch" ref={navRef}>
+          <SideNav section={section} view={view} />
+        </nav>
+        {navOpen && (
+          <div className="aw-scrim" aria-hidden="true" onClick={() => setNavOpen(false)} />
         )}
-        <div className="ws-detail-body" ref={ws.setPane} />
-        {!top && (
-          <div className="ws-detail-empty" aria-hidden="true">
-            <LogoMark size={40} />
-          </div>
-        )}
-      </section>
 
-      <nav className="ws-tabbar" aria-label="Sections">
-        {NAV_ITEMS.map(({ id, label, icon: Icon, to }) => (
-          <NavLink key={id} to={to}>
-            <Icon size={21} aria-hidden="true" />
-            <span>{label === "Market Watch" ? "Market" : label}</span>
-          </NavLink>
-        ))}
-      </nav>
+        <main className="aw-main">
+          <TrailProvider trail={listTrail}>
+            <div className="aw-view" hidden={open}>
+              <Breadcrumbs items={listTrail} />
+              <Suspense fallback={<p className="fallback-text">Loading this section...</p>}>
+                <Outlet />
+              </Suspense>
+            </div>
+          </TrailProvider>
+          <div className="aw-pages" ref={ws.setPane} />
+          <Footer />
+        </main>
+      </div>
     </div>
   );
 }

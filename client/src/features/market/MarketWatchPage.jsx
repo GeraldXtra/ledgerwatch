@@ -48,6 +48,14 @@ const STARTING_CASH = 1000000;
 
 const MARKET_VIEWS = ["alerts", "watchlist", "portfolio"];
 
+const MARKET_PARENT = {
+  buy: "alerts",
+  sell: "alerts",
+  swap: "alerts",
+  coin: "watchlist",
+  watch: "watchlist",
+};
+
 const ALLOC_COLORS = [
   "var(--accent-500)",
   "var(--accent-400)",
@@ -61,7 +69,11 @@ function MarketWatch() {
   const { user } = useAuth();
   const [params] = useSearchParams();
   const wantedView = params.get("view");
-  const view = MARKET_VIEWS.includes(wantedView) ? wantedView : "alerts";
+  const lastView = useRef("alerts");
+  const view = MARKET_VIEWS.includes(wantedView)
+    ? wantedView
+    : MARKET_PARENT[wantedView] || (wantedView ? lastView.current : "alerts");
+  lastView.current = view;
   const [mode, setMode] = useState(user?.tradingMode === "live" ? "live" : "paper");
   const [liveChains, setLiveChains] = useState([]);
   const [liveChainId, setLiveChainId] = useState(null);
