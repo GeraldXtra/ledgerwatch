@@ -54,6 +54,18 @@
   --tint-4-ink: #A61E4D;
   --tint-5-bg: #E3EDDC;
   --tint-5-ink: #3F5A2B;
+  --brand-ink: #16191F;
+  --brand-cover: #FF9900;
+  --brand-paper: #FFF3DD;
+  --brand-rule: #B89A6A;
+  --brand-face: #FFFFFF;
+  --book-spine: #C26A00;
+  --book-page: #FFF8EC;
+  --book-line: #EAD9BC;
+  --book-col: #E3CFAE;
+  --book-inside: #FFF1D6;
+  --book-shadow: rgba(0, 7, 22, 0.22);
+  --book-crease: rgba(0, 0, 0, 0.42);
   color-scheme: light;
 
   --accent-500: var(--ink);

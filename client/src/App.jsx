@@ -19,20 +19,96 @@ function Booting() {
   return (
     <div className="center-screen boot" aria-busy="true">
       <div className="boot-inner">
-        <svg className="boot-mark" viewBox="0 0 64 64" fill="none" aria-hidden="true">
-          <rect className="boot-sq" width="64" height="64" rx="16" />
-          <g transform="translate(32 32.4) scale(.74) translate(-32 -32.4)">
-            <path className="boot-rule boot-r1" d="M14 44H50" strokeWidth="5.5" />
-            <path className="boot-rule boot-r2" d="M14 52H50" strokeWidth="5.5" />
-            <path
-              className="boot-tick"
-              d="M18 25L27.5 34.5L46 14"
-              strokeWidth="8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </g>
-        </svg>
+        <div className="lb" aria-hidden="true">
+          <div className="lb-book">
+            <i className="lb-base l" />
+            <i className="lb-base r" />
+            <div className="lb-page ruled">
+              <i className="lb-hd" />
+              <i className="lb-col" />
+              <i className="w w1" />
+              <i className="a a1" />
+              <i className="w w2" />
+              <i className="a a2" />
+              <i className="w w3" />
+              <i className="a a3" />
+              <i className="lb-tot" />
+              <svg className="lb-tick" viewBox="0 0 24 24">
+                <path d="M4 12.5l5 5L20 6" />
+              </svg>
+            </div>
+            <div className="lb-leaf p2">
+              <i className="f" />
+              <i className="b ruled">
+                <i className="s s1" />
+                <i className="s s2" />
+                <i className="s s3" />
+                <i className="s s4" />
+              </i>
+            </div>
+            <div className="lb-leaf p1">
+              <i className="f" />
+              <i className="b ruled" />
+            </div>
+            <div className="lb-cover">
+              <i className="f">
+                <svg viewBox="9.5 4.5 40 51" fill="none">
+                  <path d="M17.5 5.2v49.6" stroke="var(--brand-ink)" strokeWidth="2" />
+                  <path
+                    d="M11 14.5h5M11 30h5M11 45.5h5"
+                    stroke="var(--brand-ink)"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M41.5 5.7h3.8a3 3 0 0 1 3 3v3.8z M48.3 46.5v3.8a3 3 0 0 1-3 3h-3.8z"
+                    fill="var(--brand-ink)"
+                  />
+                  <circle
+                    cx="33.5"
+                    cy="28.5"
+                    r="10.3"
+                    fill="var(--brand-face)"
+                    stroke="var(--brand-ink)"
+                    strokeWidth="2"
+                  />
+                  <path
+                    d="M33.5 20.7v1.8M41.3 28.5h-1.8M33.5 36.3v-1.8M25.7 28.5h1.8"
+                    stroke="var(--brand-ink)"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M33.5 28.5l-4.3-3.1M33.5 28.5l5.4-3.9"
+                    stroke="var(--brand-ink)"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                  />
+                  <circle
+                    cx="33.5"
+                    cy="28.5"
+                    r="1.6"
+                    fill="var(--brand-cover)"
+                    stroke="var(--brand-ink)"
+                    strokeWidth=".9"
+                  />
+                  <rect x="32" y="15.5" width="3" height="2.8" rx=".8" fill="var(--brand-ink)" />
+                  <rect
+                    x="26.5"
+                    y="44"
+                    width="14"
+                    height="5.2"
+                    rx="1.4"
+                    fill="var(--brand-paper)"
+                    stroke="var(--brand-ink)"
+                    strokeWidth="1.5"
+                  />
+                </svg>
+              </i>
+              <i className="b" />
+            </div>
+          </div>
+        </div>
         <div className="wordmark boot-word">
           Ledger<span className="tick">Watch</span>
         </div>
