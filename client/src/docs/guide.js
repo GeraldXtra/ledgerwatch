@@ -92,7 +92,7 @@ export const GUIDE = [
       h2("A tour of the interface"),
       img("debt-detail.webp", "The console: the side navigation on the left, the breadcrumbs and the page header at the top, and the item you pick on a page of its own."),
       ul([
-        "**The side navigation.** Receivables has three views, **Overview**, **Debts** and **Debtors**. Market Watch has three, **Alerts**, **Watchlist** and **Portfolio**. **Wallet** and **Settings** are one view each, with **Guide** and **Contact** under them. The view you are on is marked in orange. In the dark bar across the top, the book icon opens this guide, the moon or sun switches between the light and dark theme, your name opens Settings, and the last icon signs you out.",
+        "**The side navigation.** Receivables has three views, **Overview**, **Debts** and **Debtors**. Market Watch has three, **Alerts**, **Watchlist** and **Portfolio**. **Wallet** and **Settings** are one view each, under **Account**, with **Guide** and **Contact** below them. The view you are on is marked in orange. In the dark bar across the top, the book icon opens this guide, the moon or sun switches between the light and dark theme, your name opens Settings, and the last icon signs you out.",
         "**The list and the detail.** Most views are a list, a table with its search and filters above it. Pick an item, whether an invoice, a customer, an alert, a coin or a token, and it opens in full on a page of its own, with breadcrumbs above its title that lead back. Overview and Portfolio are dashboards with no list, and each settings section is a tab.",
         "**Nothing pops up.** Recording a debt, reading an invoice, trading and every wallet action open as a page of their own rather than over the page. The cross, Escape, the back button or a breadcrumb takes you back to where you were. Nothing is saved until you press the button that names the action.",
         "**On a phone** the side navigation folds behind the **Menu** button at the top left, and each item still opens as a page of its own with its breadcrumbs. See [On your phone](/docs/on-your-phone).",
@@ -670,7 +670,7 @@ export const GUIDE = [
     blocks: [
       h2("Create a wallet"),
       img("wallet-setup.webp", "The Wallet page before a wallet exists."),
-      p("Open **Wallet** in the side navigation and press **Create a wallet**. The steps open on a page of their own."),
+      p("Open **Wallet**, under Account in the side navigation, and press **Create a wallet**. The steps open on a page of their own."),
       img("wallet-create-phrase.webp", "The recovery phrase step. The words are hidden in this picture; yours are shown once."),
       ol([
         "Read the note about where your keys live, then press **Show recovery phrase**.",
