@@ -1,16 +1,6 @@
-import { useState } from "react";
-import {
-  BellRing,
-  ChevronRight,
-  Coins,
-  KeyRound,
-  Landmark,
-  ShieldCheck,
-  TriangleAlert,
-  User as UserIcon,
-} from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader, ToastProvider } from "../components/ui";
-import { DetailPane } from "../components/ui/Modal";
+import { Tabs } from "../components/ui/Tabs";
 import ProfileSection from "../features/settings/ProfileSection";
 import PayoutSection from "../features/settings/PayoutSection";
 import CryptoSection from "../features/settings/CryptoSection";
@@ -20,59 +10,59 @@ import NotificationsSection from "../features/settings/NotificationsSection";
 import DangerSection from "../features/settings/DangerSection";
 
 const SECTIONS = [
-  { id: "profile", label: "Profile", icon: <UserIcon size={16} />, Component: ProfileSection },
-  { id: "payout", label: "Payout details", icon: <Landmark size={16} />, Component: PayoutSection },
-  { id: "crypto", label: "Crypto payments", icon: <Coins size={16} />, Component: CryptoSection },
-  { id: "security", label: "Security", icon: <ShieldCheck size={16} />, Component: SecuritySection },
-  { id: "wallet-backup", label: "Wallet backup", icon: <KeyRound size={16} />, Component: WalletBackupSection },
-  { id: "notifications", label: "Notifications", icon: <BellRing size={16} />, Component: NotificationsSection },
-  { id: "danger", label: "Danger zone", icon: <TriangleAlert size={16} />, Component: DangerSection },
+  { id: "profile", label: "Profile", Component: ProfileSection },
+  { id: "payout", label: "Payout details", Component: PayoutSection },
+  { id: "crypto", label: "Crypto payments", Component: CryptoSection },
+  { id: "security", label: "Security", Component: SecuritySection },
+  { id: "wallet-backup", label: "Wallet backup", Component: WalletBackupSection },
+  { id: "notifications", label: "Notifications", Component: NotificationsSection },
+  { id: "danger", label: "Danger zone", Component: DangerSection },
 ];
 
 function SettingsInner() {
-  const [active, setActive] = useState(() => {
-    const wanted = new URLSearchParams(window.location.search).get("section");
-    return SECTIONS.some((s) => s.id === wanted) ? wanted : "profile";
-  });
-  const [picked, setPicked] = useState(() =>
-    SECTIONS.some((s) => s.id === new URLSearchParams(window.location.search).get("section"))
-  );
+  const [params, setParams] = useSearchParams();
+  const wanted = params.get("section");
+  const active = SECTIONS.some((s) => s.id === wanted) ? wanted : "profile";
   const Section = (SECTIONS.find((s) => s.id === active) || SECTIONS[0]).Component;
+
+  function choose(id) {
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("section", id);
+        return next;
+      },
+      { replace: true }
+    );
+  }
 
   return (
     <>
-      <div className="ws-view settings-view">
-        <PageHeader
-          eyebrow="Account"
-          title="Settings"
-          support="Your profile, how you get paid, and how LedgerWatch reaches your clients."
+      <PageHeader
+        eyebrow="Account"
+        title="Settings"
+        support="Your profile, how you get paid, and how LedgerWatch reaches your clients."
+      />
+
+      <div className="settings-view">
+        <Tabs
+          tabs={SECTIONS}
+          value={active}
+          onChange={choose}
+          label="Settings sections"
+          idPrefix="settings"
         />
 
-        <nav className="settings-nav" aria-label="Settings sections">
-          {SECTIONS.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className={active === s.id ? "nav-item active" : "nav-item"}
-              aria-current={active === s.id ? "page" : undefined}
-              onClick={() => {
-                setActive(s.id);
-                setPicked(true);
-              }}
-            >
-              <span className="nav-item-icon">{s.icon}</span>
-              <span className="nav-item-label">{s.label}</span>
-              <ChevronRight size={16} className="nav-item-chev" aria-hidden="true" />
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      <DetailPane screen={picked ? "screen" : "none"} onBack={() => setPicked(false)}>
-        <div key={active} className="settings-panel">
+        <section
+          key={active}
+          className="card settings-panel"
+          role="tabpanel"
+          id={`settings-${active}-panel`}
+          aria-labelledby={`settings-${active}`}
+        >
           <Section />
-        </div>
-      </DetailPane>
+        </section>
+      </div>
     </>
   );
 }
