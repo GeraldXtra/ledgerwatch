@@ -30,7 +30,9 @@ export const GUIDE = [
         "It was built for a small business that sells on credit: a distributor, a contractor, a supplier, anyone who does the work first and gets paid later. Amounts are in naira, reminders can go out over WhatsApp, and a customer can pay by bank transfer or, if you choose to offer it, in a dollar stablecoin on the blockchain."
       ),
       h2("The four sections"),
-      p("Everything in LedgerWatch lives in one of four sections, always one click away in the bar across the top of the screen."),
+      p(
+        "Everything in LedgerWatch lives in one of four sections. On a computer they are listed in the sidebar on the left, with the views inside each one; on a phone they sit in the tab bar along the bottom of the screen."
+      ),
       table(
         ["Section", "What it does"],
         [
@@ -88,26 +90,27 @@ export const GUIDE = [
         "Press **Forgot your password?** on the sign in page, enter your email, and a six digit code arrives. It is valid for fifteen minutes. Enter the code and a new password of at least eight characters, then sign in with it. Resetting your password does not touch your wallet, which has its own password."
       ),
       h2("A tour of the interface"),
-      img("receivables-overview.webp", "The bar across the top holds the four sections. On the right: your account, the guide, the theme switch and sign out."),
+      img("debt-detail.webp", "The workspace: the sidebar on the left, the list in the middle, and the item you pick open on the right."),
       ul([
-        "**The top bar.** The four sections sit in the middle. Your name on the right opens Settings. The book icon opens this guide. The moon or sun switches between the light and dark theme, and the last icon signs you out.",
-        "**The page.** Every page begins with its name, one line about it, and, where it has figures, a strip of them.",
-        "**On a phone** the four sections move to a bar along the bottom of the screen. See [On your phone](/docs/on-your-phone).",
-        "**Dialogs.** Recording a debt, viewing an invoice, trading and every wallet action open in a dialog over the page. Press Escape or the cross to close one. Nothing is saved until you press the button that names the action.",
+        "**The sidebar.** Receivables has three views, **Overview**, **Debts** and **Debtors**. Market Watch has three, **Alerts**, **Watchlist** and **Portfolio**. **Wallet** and **Settings** are one view each, under **Account**. The view you are on is marked in yellow. At the foot of the sidebar, your name opens Settings, the book icon opens this guide, the moon or sun switches between the light and dark theme, and the last icon signs you out.",
+        "**The list and the detail.** Most views are a list in the middle. Pick an item, whether an invoice, a customer, an alert, a coin, a token or a settings section, and it opens in full in the pane on the right. Overview and Portfolio are wide views with no list.",
+        "**Nothing pops up.** Recording a debt, reading an invoice, trading and every wallet action open in the pane on the right rather than over the page, so the list stays in view beside them. The cross or Escape closes what is open. Nothing is saved until you press the button that names the action.",
+        "**On a phone** the four sections move to a tab bar along the bottom, the views of the section sit along the top, and each item opens as its own screen with a back link. See [On your phone](/docs/on-your-phone).",
+        "**On a tablet or a narrow window** the sidebar stays, and an item you open takes the place of the list, with the same back link.",
       ]),
       h2("The first five things to do"),
       ol([
         "**Add your payout details** in Settings, so every reminder tells the customer exactly where to pay. See [Settings](/docs/settings#payout-details).",
-        "**Record your first debt** on the Receivables page: a name, an amount and a due date. See [Debts](/docs/debts).",
+        "**Record your first debt** in Receivables, on the Debts view: a name, an amount and a due date. See [Debts](/docs/debts).",
         "**Turn on notifications** in Settings, so a due reminder, a received payment or a price alert reaches your phone or computer. See [Notifications](/docs/settings#notifications).",
         "**Create a wallet** if you want to accept stablecoin payments or trade. Write down the recovery phrase before anything else. See [The wallet](/docs/wallet).",
-        "**Add a watch** on the Market Watch page and see what an alert looks like, on paper, before any real money is involved. See [Watches and alerts](/docs/watches-and-alerts).",
+        "**Add a watch** in Market Watch, on the Watchlist view, and see what an alert looks like, on paper, before any real money is involved. See [Watches and alerts](/docs/watches-and-alerts).",
       ]),
       h2("Light and dark"),
       p(
-        "The theme switch in the top bar changes between a light and a dark interface. The choice is remembered on that device. With no choice made, LedgerWatch follows the system setting."
+        "The theme switch at the foot of the sidebar, or in the top bar on a phone, changes between a light and a dark interface. The choice is remembered on that device. With no choice made, LedgerWatch follows the system setting."
       ),
-      img("theme-dark.webp", "The same page in the dark theme."),
+      img("theme-dark.webp", "The Debts view with an invoice open, in the dark theme."),
     ],
   },
   {
@@ -116,10 +119,13 @@ export const GUIDE = [
     title: "On your phone",
     intro: "LedgerWatch is the same product on a phone, with the navigation moved to where your thumb is.",
     blocks: [
-      img("phone-home.webp", "Receivables on a phone. The four sections are along the bottom.", true),
+      img("phone-home.webp", "Receivables on a phone. The views run along the top and the four sections along the bottom.", true),
       h2("Navigation"),
       p(
-        "The four sections sit in a bar along the bottom of the screen. Tables become short cards, one invoice, customer or coin each, figures sit two to a row, and every text box is sized so the phone does not zoom in when you tap it."
+        "The four sections sit in a tab bar along the bottom of the screen, and the views of the section you are in, such as Overview, Debts and Debtors, sit along the top. A list comes first; tap an item and it opens as its own screen, with a back link at the top that returns you to the list."
+      ),
+      p(
+        "Tables become short cards, one invoice, customer or coin each, figures sit two to a row, and every text box is sized so the phone does not zoom in when you tap it."
       ),
       h2("Add it to your home screen"),
       p("Installed, LedgerWatch opens full screen like an app, and on iPhone that is also what allows notifications."),
@@ -131,8 +137,9 @@ export const GUIDE = [
       p(
         "Open the installed app, go to Settings, Notifications, and press **Enable notifications**. Your phone asks for permission once. After that, a due reminder, a detected payment or a price alert arrives as a notification, and a price alert carries Buy and Sell buttons that open the trade for you to confirm."
       ),
-      img("phone-debts.webp", "The ledger on a phone: each invoice is a card of three lines.", true),
-      img("phone-market.webp", "Market Watch on a phone.", true),
+      img("phone-debts.webp", "The Debts view on a phone: each invoice is a short card.", true),
+      img("phone-debt-detail.webp", "An invoice opened on a phone, with the back link to Debts.", true),
+      img("phone-market.webp", "Market Watch on a phone, on the Alerts view.", true),
       img("phone-wallet.webp", "The wallet on a phone.", true),
       h2("The wallet on a phone"),
       p(
@@ -149,12 +156,12 @@ export const GUIDE = [
   {
     slug: "receivables",
     group: "receivables",
-    title: "The Receivables page",
-    intro: "One page for everything you are owed: the figures at the top, three tabs underneath.",
+    title: "Receivables",
+    intro: "One section for everything you are owed, in three views: Overview, Debts and Debtors.",
     blocks: [
-      img("receivables-overview.webp", "The Receivables page on the Overview tab."),
+      img("receivables-overview.webp", "Receivables on the Overview view."),
       h2("The figures"),
-      p("The strip under the title states four numbers for the whole ledger. They are calculated from every open invoice, not just the ones on screen."),
+      p("The strip at the top of the Overview states four numbers for the whole ledger. They are calculated from every open invoice, not just the ones on screen."),
       table(
         ["Figure", "What it is"],
         [
@@ -164,13 +171,14 @@ export const GUIDE = [
           ["**Rate**", "Your collection rate: how much of everything you have ever invoiced has actually been paid."],
         ]
       ),
-      h2("The three tabs"),
+      h2("The three views"),
+      p("Pick a view in the sidebar under Receivables, or along the top on a phone."),
       ul([
         "**Overview** shows two charts and lets you ask questions about your ledger in plain words.",
         "**Debts** is the ledger itself: every invoice, with filters, sorting, selection, reminders and export. See [Debts](/docs/debts).",
         "**Debtors** groups the same invoices by customer and scores each customer on how reliably they pay. See [Debtors and reliability](/docs/debtors).",
       ]),
-      h2("The Overview tab"),
+      h2("The Overview view"),
       h3("Invoiced against collected"),
       p("Six months of money owed set against money that actually arrived, month by month. A gap that keeps widening means your customers are paying later and later."),
       h3("How old the money is"),
@@ -189,9 +197,9 @@ export const GUIDE = [
     title: "Recording and managing debts",
     intro: "A debt is one invoice: who owes it, how much, and when it was due.",
     blocks: [
-      img("receivables-debts.webp", "The Debts tab: four tiles, the filters, and the ledger."),
+      img("receivables-debts.webp", "The Debts view: four figures, the filters, and the ledger."),
       h2("Record a debt"),
-      img("debt-record.webp", "The record a debt form."),
+      img("debt-record.webp", "Record debt opens the form in the pane on the right."),
       p("Press **Record debt** at the top right of the ledger. The form asks for:"),
       table(
         ["Field", "Notes"],
@@ -225,7 +233,7 @@ export const GUIDE = [
       ul([
         "**Search** by name or phone. **Filter** by status, and by a due date range with the two date boxes.",
         "**Sort** by clicking any column heading. Click again to reverse the order.",
-        "**Open** an invoice by clicking anywhere on its row. See [Payments and receipts](/docs/payments).",
+        "**Open** an invoice by clicking anywhere on its row. It opens in the pane on the right, or as its own screen on a phone. See [Payments and receipts](/docs/payments).",
         "The **USDC** chip beside a customer means that invoice has a live crypto payment address waiting for a payment. See [Crypto payments](/docs/crypto-payments).",
         "The **menu** at the end of each row offers **Record payment**, **Generate reminder**, **Mark fully paid**, **Edit** and **Delete**.",
       ]),
@@ -241,7 +249,7 @@ export const GUIDE = [
       ]),
       h2("Edit a debt"),
       p(
-        "Choose **Edit** from the row menu or from the invoice dialog. Everything can be changed except one rule: the amount cannot be set below what has already been paid. If the invoice has a crypto payment address, the amount it asks for is updated to match the new balance."
+        "Choose **Edit** from the row menu or from the open invoice. Everything can be changed except one rule: the amount cannot be set below what has already been paid. If the invoice has a crypto payment address, the amount it asks for is updated to match the new balance."
       ),
       h2("Mark fully paid"),
       p(
@@ -249,9 +257,9 @@ export const GUIDE = [
       ),
       h2("Delete a debt"),
       p("Choose **Delete** and confirm. The invoice, its payments and its reminders are removed together. This cannot be undone."),
-      h2("The four tiles"),
+      h2("The four figures"),
       p(
-        "Above the ledger, four tiles summarise the invoices **currently shown**: total outstanding, how many are overdue, how much has been collected on them, and how many customers have an open balance. Change a filter and the tiles change with it, unlike the figures at the top of the page, which always cover the whole ledger."
+        "Under the heading of the Debts view, four figures summarise the invoices **currently shown**: total outstanding, how many are overdue, how much has been collected on them, and how many customers have an open balance. Change a filter and the figures change with it, unlike the figures on the Overview, which always cover the whole ledger."
       ),
     ],
   },
@@ -261,10 +269,10 @@ export const GUIDE = [
     title: "Payments and receipts",
     intro: "Open an invoice to record part payments, see the history, and produce a receipt.",
     blocks: [
-      img("debt-detail.webp", "An open invoice: the figures, the payment panel, and the actions."),
-      h2("The invoice dialog"),
+      img("debt-detail.webp", "An invoice open on the right: its actions, its figures and its payments."),
+      h2("The open invoice"),
       p(
-        "Click a row in the ledger. The dialog shows the customer, the status, and four figures: the original amount, what has been paid, the balance, and the due date. Under those sit the payment panel and, if one has been issued, the crypto payment address. The actions along the bottom are **Generate reminder**, **Crypto payment**, **Mark fully paid**, **Edit** and **Delete**."
+        "Click a row in the ledger and the invoice opens in the pane on the right, or as its own screen on a phone. At the top are the customer and the status, and under them the actions: **Generate reminder**, **Crypto payment**, **Mark fully paid**, **Edit** and **Delete**. Then come four figures, the original amount, what has been paid, the balance and the due date, followed by the payment panel and, if one has been issued, the crypto payment address."
       ),
       h2("Record a payment"),
       img("debt-payment.webp", "Recording a part payment."),
@@ -296,7 +304,7 @@ export const GUIDE = [
       img("debt-reminder.webp", "A generated reminder, the send buttons, and the log underneath."),
       h2("Generate a reminder"),
       p(
-        "Choose **Generate reminder** from a row's menu or from the invoice dialog. LedgerWatch writes a message for that invoice and opens it for you to read before anything is sent."
+        "Choose **Generate reminder** from a row's menu or from the open invoice. LedgerWatch writes a message for that invoice and opens it in the pane on the right for you to read before anything is sent. Close it and you are back on the invoice."
       ),
       h3("What the message contains"),
       ul([
@@ -351,10 +359,10 @@ export const GUIDE = [
     title: "Debtors and reliability",
     intro: "The same invoices, grouped by customer, with a score for how reliably each one pays.",
     blocks: [
-      img("debtors.webp", "The Debtors tab."),
+      img("debtors.webp", "The Debtors view."),
       h2("The table"),
       p(
-        "One row per customer, matched by phone number, or by name when there is no valid number: the name, the total they currently owe, their reliability, and the date of the last thing that happened on their account. Click a column heading to sort, and click a row to open the customer's profile."
+        "One row per customer, matched by phone number, or by name when there is no valid number: the name, the total they currently owe, their reliability, and the date of the last thing that happened on their account. Click a column heading to sort, and click a row to open the customer's profile on the right."
       ),
       h2("The reliability score"),
       p(
@@ -371,7 +379,7 @@ export const GUIDE = [
         ]
       ),
       h2("The customer profile"),
-      img("debtor-profile.webp", "A customer's profile."),
+      img("debtor-profile.webp", "A customer's profile, open beside the list."),
       ul([
         "**Borrowed in total**, **Outstanding**, **On time rate** and **Avg days to pay**, across every invoice they have had with you.",
         "**Payment behaviour**, a chart of money collected from them over time. It needs at least two payments to draw.",
@@ -405,7 +413,7 @@ export const GUIDE = [
       h2("Issue an address"),
       img("crypto-issue.webp", "Issuing a payment address for an invoice."),
       ol([
-        "Open the invoice and press **Crypto payment**.",
+        "Open the invoice and press **Crypto payment**. The form takes the invoice's place in the pane on the right, and once the address is created the invoice opens again with the address on it.",
         "Choose the **Network**. Your default from Settings is chosen for you. The quote updates for the network: the invoice balance, the exact stablecoin amount to request, the naira rate used and its age, the token accepted, and how long the address accepts payment.",
         "Enter your **wallet password** and press **Create payment address**. The password unlocks the wallet in your browser to derive the address; only the public address is saved.",
       ]),
@@ -464,39 +472,43 @@ export const GUIDE = [
   {
     slug: "market-watch",
     group: "market",
-    title: "The Market Watch page",
+    title: "Market Watch",
     intro: "Live prices for the coins you follow, alerts that wait for your answer, and a portfolio that is simulated until you say otherwise.",
     blocks: [
-      img("market-overview.webp", "Market Watch in paper mode."),
+      h2("Three views"),
+      p("Market Watch is split into three views, listed in the sidebar under Market Watch, or along the top on a phone."),
+      ul([
+        "**Alerts**: the alerts waiting for your decision, then the alert history. See [Watches and alerts](/docs/watches-and-alerts).",
+        "**Watchlist**: the coins you follow with their live prices, your active watches under them, and the **Watch a coin** form in the pane on the right, or under the list on a phone.",
+        "**Portfolio**: the switch between paper and live, the simulated portfolio or your live positions, the four figures, your holdings and the market agent.",
+      ]),
+      img("market-portfolio.webp", "The Portfolio view in paper mode."),
       h2("Paper and live"),
       p(
-        "The switch under the title chooses between **Paper trading** and **Live wallet**. Paper is the default for everyone: a simulated portfolio that starts with one million dollars and follows real prices, so you can try the agent without risking anything. Live uses real funds from your wallet. Watches, alerts and holdings are kept separately for each, so a paper position never appears beside real money. See [Paper trading](/docs/paper-trading) and [Live trading](/docs/live-trading)."
+        "The switch at the top of the Portfolio view chooses between **Paper trading** and **Live wallet**. Paper is the default for everyone: a simulated portfolio that starts with one million dollars and follows real prices, so you can try the agent without risking anything. Live uses real funds from your wallet. Watches, alerts and holdings are kept separately for each, so a paper position never appears beside real money. See [Paper trading](/docs/paper-trading) and [Live trading](/docs/live-trading)."
       ),
       h2("Check now"),
       p(
-        "LedgerWatch checks every watch on a schedule. **Check now** runs that check immediately and tells you how many new alerts it raised. The refresh icon beside it reloads the page's data."
+        "LedgerWatch checks every watch on a schedule. **Check now**, at the top of the Alerts and Portfolio views, runs that check immediately and tells you how many new alerts it raised. The refresh icon beside it reloads the data."
       ),
       h2("The watchlist"),
+      img("market-watchlist.webp", "The Watchlist view, with Watch a coin on the right."),
       p(
-        "Every coin you watch is a row: its logo and name, the live price, the change over 24 hours, and a small seven day chart. Click a column heading to sort. The label at the top right says how recently prices were updated, or **Prices delayed** when the price feed is slow. A coin whose price could not be read says **Unavailable** rather than showing a zero; your watch on it is still active."
+        "On the Watchlist view every coin you watch is a row: its logo and name, the live price, the change over 24 hours, and a small seven day chart. Click a column heading to sort. The label at the top right says how recently prices were updated, or **Prices delayed** when the price feed is slow. A coin whose price could not be read says **Unavailable** rather than showing a zero; your watch on it is still active."
       ),
       h2("Coin details"),
-      img("market-coin.webp", "The coin detail dialog."),
+      img("market-coin.webp", "A coin's details, open on the right."),
       p(
-        "Click a coin for a larger chart with timeframes, its market cap, 24 hour volume, high and low, your position in it, and the watches you have on it, which can be edited or removed right there."
+        "Click a coin for a larger chart with timeframes, its market cap, 24 hour volume, high and low, your position in it, and the watches you have on it, which can be edited or removed right there. The details open in the pane on the right, or as their own screen on a phone."
       ),
-      h2("The rest of the page"),
+      h2("The Portfolio view"),
       ul([
         "**Simulated portfolio** (paper only): total value, profit or loss against the start, and how the value is split between holdings and cash.",
         "**Live positions** (live only): what your wallet really holds on the chosen network. See [Live trading](/docs/live-trading).",
-        "**Holdings**: your simulated positions with quantity, average buy price, live price and value.",
-        "**Alerts awaiting your decision** and **Alert history**. See [Watches and alerts](/docs/watches-and-alerts).",
-        "**Watch a coin**, **Market agent** and **Active watches**, on the right.",
+        "**The four figures**: in paper mode, **Cash balance** and **Total P/L** against the one million start, then **Active watches** and **Pending alerts**. In live mode the two money figures are withheld, because a simulated figure next to real holdings would be misleading.",
+        "**Holdings** (paper only): your simulated positions with quantity, average buy price, live price and value.",
+        "**Market agent**, which answers in plain language. See [Watches and alerts](/docs/watches-and-alerts#the-market-agent).",
       ]),
-      h2("The four tiles"),
-      p(
-        "In paper mode: **Cash balance** and **Total P/L** against the one million start, then **Active watches** and **Pending alerts**. In live mode the two money tiles are withheld, because a simulated figure next to real holdings would be misleading."
-      ),
     ],
   },
   {
@@ -506,7 +518,8 @@ export const GUIDE = [
     intro: "A watch is a condition on a coin's price. When it is met, the agent raises an alert with a suggestion, and you decide.",
     blocks: [
       h2("Add a watch"),
-      img("market-add-watch.webp", "The watch a coin form."),
+      img("market-add-watch.webp", "The Watch a coin form, beside the watchlist."),
+      p("Open the Watchlist view. The **Watch a coin** form sits in the pane on the right, or under the list on a phone."),
       ol([
         "Pick a coin: tap one of the quick chips, **BTC**, **ETH**, **SOL**, **BNB**, **XRP** or **DOGE**, or type any coin's name into the search box and choose it from the list. Nearly every coin listed on the major exchanges can be found.",
         "Choose the **Condition** and the value.",
@@ -527,28 +540,28 @@ export const GUIDE = [
       h2("The market agent"),
       img("market-agent.webp", "Asking the agent in plain language."),
       p(
-        "Type what you want in plain words: **watch BTC drop 5%**, **watch ETH, SOL**, **how is my portfolio?** The agent creates the watches or answers the question. Three suggestions above the box are one tap away."
+        "The agent sits at the foot of the Portfolio view. Type what you want in plain words: **watch BTC drop 5%**, **watch ETH, SOL**, **how is my portfolio?** The agent creates the watches or answers the question. Three suggestions above the box are one tap away."
       ),
       h2("Active watches"),
       img("market-watches.webp", "The active watches."),
-      p("Every watch is listed as **when** and its condition, with the baseline where there is one. The pencil edits the condition in place; the cross stops watching."),
+      p("On the Watchlist view, under the coins, every watch is listed as **when** and its condition, with the baseline where there is one. The pencil edits the condition in place; the cross stops watching."),
       h2("Alerts"),
-      img("market-alerts.webp", "An alert waiting for a decision."),
+      img("market-alerts.webp", "The Alerts view: alerts waiting for a decision, then the history."),
       p(
-        "When a condition is met, the agent raises an alert: the coin, the price at that moment, its suggestion, and a sentence explaining why. A watch that has fired waits until you have answered before it can fire again, so one condition cannot flood you."
+        "When a condition is met, the agent raises an alert on the Alerts view: the coin, the price at that moment, its suggestion, and a sentence explaining why. A watch that has fired waits until you have answered before it can fire again, so one condition cannot flood you."
       ),
       p("Three answers are possible:"),
       ul([
-        "**Buy** or **Sell** opens the trade panel, where you choose the amount and confirm. The agent's suggestion is shown but not enforced; you can take the opposite side, and the history records that you did.",
+        "**Buy** or **Sell** opens the trade panel in the pane on the right, where you choose the amount and confirm. The agent's suggestion is shown but not enforced; you can take the opposite side, and the history records that you did.",
         "**Dismiss** closes the alert with no trade.",
       ]),
       p(
-        "A new alert appears within ten seconds while you are on the page, with a toast. Away from the page it arrives as a notification with **Buy** and **Sell** buttons that open the trade for you to confirm. See [Notifications](/docs/settings#notifications)."
+        "A new alert appears within ten seconds while Market Watch is open, with a toast. Away from the page it arrives as a notification with **Buy** and **Sell** buttons that open the trade for you to confirm. See [Notifications](/docs/settings#notifications)."
       ),
       h2("Alert history"),
       img("market-history.webp", "The alert history."),
       p(
-        "Every alert ever raised, with what the agent suggested, what you did, and the quantity and value of any trade. An alert where you went against the suggestion is marked **overrode**, so you can see over time whether the agent or your own judgement did better."
+        "Under the alerts on the same view: every alert ever raised, with what the agent suggested, what you did, and the quantity and value of any trade. An alert where you went against the suggestion is marked **overrode**, so you can see over time whether the agent or your own judgement did better."
       ),
     ],
   },
@@ -560,12 +573,12 @@ export const GUIDE = [
     blocks: [
       h2("The simulated portfolio"),
       p(
-        "Every account starts with one million dollars of simulated cash. Approving a buy alert opens a position at the live price at the moment you confirm, or at the alert's price if the feed is unavailable; selling closes some or all of it. The portfolio card at the top shows the total value, the profit or loss against the start, and an allocation bar of holdings and cash."
+        "Every account starts with one million dollars of simulated cash. Approving a buy alert opens a position at the live price at the moment you confirm, or at the alert's price if the feed is unavailable; selling closes some or all of it. The **Simulated portfolio** card at the top of the Portfolio view shows the total value, the profit or loss against the start, and an allocation bar of holdings and cash."
       ),
       h2("The trade panel"),
-      img("market-trade.webp", "The trade panel for a buy."),
+      img("market-trade.webp", "The trade panel for a buy, open beside the alerts."),
       ol([
-        "Press **Buy** or **Sell** on an alert. The panel shows the agent's recommendation and its reasoning. If you are going against it, a note says so.",
+        "Press **Buy** or **Sell** on an alert. The panel opens on the right and shows the agent's recommendation and its reasoning. If you are going against it, a note says so.",
         "Choose to enter the amount in the coin or in dollars, then type it or use the **25%**, **50%**, **75%** and **MAX** buttons, which are worked out from what you have available.",
         "Read the quote: what you spend, what you receive, the price, your cash afterwards and your position afterwards.",
         "Press **Review buy** or **Review sell**, check the summary, and press **Confirm buy** or **Confirm sell**. Nothing happens until that last press.",
@@ -573,7 +586,7 @@ export const GUIDE = [
       img("market-trade-confirm.webp", "The confirmation step."),
       h2("Holdings"),
       p(
-        "The **Holdings** card lists every simulated position with its quantity, average buy price, live price and value. Click one to open the coin's details."
+        "The **Holdings** card on the Portfolio view lists every simulated position with its quantity, average buy price, live price and value. Click one to open the coin's details on the right."
       ),
       h2("Starting again"),
       p("**Clear all my data** in Settings, Danger zone, resets the simulated portfolio to its starting cash along with the rest of your data."),
@@ -596,7 +609,7 @@ export const GUIDE = [
         "A real network selected. Live mode only ever shows real networks. Base is the cheapest to trade on.",
         "**USDC** or **USDT** on that network, to buy with, and a little of the network's own coin for fees. The wallet page shows both.",
       ]),
-      p("Press **Live wallet** under the title. The shared demo account cannot switch; every other account can, once it has a wallet."),
+      p("Press **Live wallet** at the top of the Portfolio view. The shared demo account cannot switch; every other account can, once it has a wallet."),
       h2("Live positions"),
       img("market-live.webp", "Live positions, read from the chain."),
       p(
@@ -606,7 +619,7 @@ export const GUIDE = [
       h2("A live trade, step by step"),
       ol([
         "Answer an alert with **Buy** or **Sell** and choose the amount exactly as in paper mode. The ceiling is what the wallet really holds.",
-        "Press **Review**, then **Confirm**. The live trade dialog opens and fetches a quote from Uniswap on the chosen network.",
+        "Press **Review**, then **Confirm**. The live trade screen opens in the pane on the right and fetches a quote from Uniswap on the chosen network.",
         "Read the quote: **You pay**, **You receive, about** with the fee tier it was routed through, the **Price impact**, the **Minimum received** after your slippage tolerance, and the **Network fee**.",
         "Choose a **Slippage tolerance** of 0.5%, 1% or 3%. If the price moves further than that before the trade lands, it fails and costs only the fee.",
         "If the exchange is not yet allowed to move this amount of the token you are paying with, press **Approve** followed by the token's name and enter your wallet password. This is a separate transaction that allows exactly this amount and no more, which is why it is asked for again on most trades.",
@@ -615,7 +628,7 @@ export const GUIDE = [
       p("A signed trade carries a deadline. If the network does not include it quickly it simply expires rather than executing later at a different price."),
       h2("Price impact"),
       p(
-        "Price impact is what the pool's depth costs you at your size. Above your threshold, 2% on a real network, the dialog asks you to tick a box accepting the loss before it lets you sign. A smaller amount costs less; the warning is there so the choice is yours."
+        "Price impact is what the pool's depth costs you at your size. Above your threshold, 2% on a real network, the trade screen asks you to tick a box accepting the loss before it lets you sign. A smaller amount costs less; the warning is there so the choice is yours."
       ),
       h2("The spending caps"),
       table(
@@ -657,7 +670,7 @@ export const GUIDE = [
     blocks: [
       h2("Create a wallet"),
       img("wallet-setup.webp", "The Wallet page before a wallet exists."),
-      p("Open the Wallet page and press **Create a wallet**."),
+      p("Open **Wallet**, under Account in the sidebar, and press **Create a wallet**. The steps open in the pane on the right."),
       img("wallet-create-phrase.webp", "The recovery phrase step. The words are hidden in this picture; yours are shown once."),
       ol([
         "Read the note about where your keys live, then press **Show recovery phrase**.",
@@ -681,13 +694,13 @@ export const GUIDE = [
       ]),
       p("Every account has its own wallet. Signing into a different account on the same device shows that account's wallet, or none."),
       h2("The wallet screen"),
-      img("wallet-main.webp", "The wallet on Base."),
+      img("wallet-main.webp", "The wallet on Base. Receive, Send, Collected and any token you pick open on the right."),
       ul([
         "**Top left**, the network. Red when it is a real network. See [Networks](/docs/networks).",
         "**Top centre**, your account: a small pattern unique to your address and the address itself, shortened. Click it to copy the full address.",
         "**Top right**, refresh the balances, and remove the wallet from this device.",
         "**The figure**, the dollar value of everything held on this network. If any balance could not be read or has no price, a note under the figure says which, and the total is marked incomplete rather than quietly wrong.",
-        "**Receive**, **Send** and **Collected** open a panel under the wallet. See [Send and receive](/docs/send-and-receive).",
+        "**Receive**, **Send** and **Collected** open in the pane on the right, or as their own screen on a phone. Press the same button again, or the cross, to close one. See [Send and receive](/docs/send-and-receive).",
         "**Tokens**, one row per token with its logo, value and quantity. The network's own coin is marked as the one that pays the fees. A row that could not be read says so instead of showing zero.",
         "**Activity**, the transactions sent from this wallet and the transfers that arrived at it, with their status and a link to the explorer.",
         "**Hide empty balances** tidies the list. **Import a token** adds one by contract address. See [Tokens](/docs/tokens).",
@@ -736,7 +749,7 @@ export const GUIDE = [
       ),
       h2("Real and test"),
       p(
-        "Test networks use coins that are free and worthless, handed out by faucets, and exist so you can practise every action here without risk. Real networks use real money. The network name is on every screen, the network pill turns red on a real network, and every send names the network in its summary before you sign."
+        "Test networks use coins that are free and worthless, handed out by faucets, and exist so you can practise every action here without risk. Real networks use real money. The network name is on every screen, the network button turns red on a real network, and every send names the network in its summary before you sign."
       ),
       h2("Getting test coins"),
       p(
@@ -752,12 +765,12 @@ export const GUIDE = [
     slug: "send-and-receive",
     group: "wallet",
     title: "Send, receive and collected payments",
-    intro: "The three panels under the wallet, and the review step that stands between you and every transaction.",
+    intro: "The three panels that open beside the wallet, and the review step that stands between you and every transaction.",
     blocks: [
       h2("Receive"),
       img("wallet-receive.webp", "The Receive panel."),
       p(
-        "Press **Receive**. The panel shows your address as text and as a QR code, with **Copy address**. It names the network and repeats that anything sent on a different network will not appear here. Give the sender both the address and the network."
+        "Press **Receive**. The panel opens on the right and shows your address as text and as a QR code, with **Copy address**. It names the network and repeats that anything sent on a different network will not appear here. Give the sender both the address and the network."
       ),
       h2("Send"),
       img("wallet-send.webp", "The Send form."),
@@ -767,7 +780,7 @@ export const GUIDE = [
         "Read the summary: the network, the asset, the recipient, the amount and the estimated fee. If the fee cannot be paid, the summary says how much of the network's coin is short and the password box is withheld.",
         "Enter your **wallet password** and press **Sign & send**. The key is decrypted in your browser for this one signature and discarded.",
       ]),
-      img("wallet-send-review.webp", "The review step, with the network named first."),
+      img("wallet-send-review.webp", "The review step, with the network named first. This wallet is empty, so the network has refused the transfer in advance and the password box is withheld."),
       p("The transaction appears under **Activity** as pending, then confirmed or failed, with a link to the explorer. A toast names the network so a transfer can never be mistaken for a move between networks."),
       h3("Two mistakes LedgerWatch refuses"),
       ul([
@@ -779,10 +792,10 @@ export const GUIDE = [
       p(
         "Press **Collected**. Every invoice payment address on this network that holds money is listed, with the customer, the balance read live from the network, and its naira value at the rate the invoice was quoted. Tick the ones to move, or **Select all** when there are several, and press **Sweep**, which names how many addresses it will move."
       ),
-      h3("The sweep dialog"),
+      h3("The sweep screen"),
       ol([
         "Each address is listed with its amount. The totals show what will move, its naira value, and the destination: this wallet, or the sweep destination set in Settings, in which case a warning asks you to check it.",
-        "An invoice address holds only stablecoin and cannot pay its own fee, so your main wallet first sends it a little of the network's coin. The dialog says how much and that it is a separate transaction you are approving.",
+        "An invoice address holds only stablecoin and cannot pay its own fee, so your main wallet first sends it a little of the network's coin. The sweep screen says how much and that it is a separate transaction you are approving.",
         "Enter your **wallet password** once for the whole batch and press **Sign and sweep**, which counts the addresses when there are several. Each transfer is signed and sent in turn, with its progress shown on its row.",
       ]),
       p("Swept money lands in your main wallet on the same network, and the balances update."),
@@ -824,7 +837,7 @@ export const GUIDE = [
       h2("Token details"),
       img("wallet-token-detail.webp", "A token's details, opened from its row."),
       p(
-        "Click any row. A token the price feed knows opens the same detail dialog as the Market Watch page, with a chart and your position. A token it does not know shows the network, the balance read from the chain, its value if a price exists, and the contract address."
+        "Click any row. It opens in the pane on the right. A token the price feed knows shows the same details as a coin in Market Watch, with a chart and your position. A token it does not know shows the network, the balance read from the chain, its value if a price exists, and the contract address."
       ),
     ],
   },
@@ -845,11 +858,11 @@ export const GUIDE = [
         "The address, beginning bc1 on the real network and tb1 on testnet, is at the top; click it to copy. The balance is shown in BTC, with any amount still confirming named separately. **Holdings** shows the balance in satoshis; **Activity** lists recent transactions with links to the explorer."
       ),
       h2("Receive"),
-      p("Press **Receive** for the address. Send only Bitcoin to it, on the Bitcoin network. It is not an Ethereum address, and coins sent from another network will not arrive."),
+      p("Press **Receive** and the address opens on the right. Send only Bitcoin to it, on the Bitcoin network. It is not an Ethereum address, and coins sent from another network will not arrive."),
       h2("Send"),
-      img("wallet-bitcoin-send.webp", "Sending Bitcoin: the form and the review."),
+      img("wallet-bitcoin-send.webp", "Sending Bitcoin: the form opens on the right."),
       ol([
-        "Press **Send**. Enter the destination, which is checked as you type, and the amount in BTC. Amounts below the dust limit are refused because the network will not relay them.",
+        "Press **Send** and the form opens on the right. Enter the destination, which is checked as you type, and the amount in BTC. Amounts below the dust limit are refused because the network will not relay them.",
         "Choose a fee: **Fast**, **Normal** or **Slow**, each showing the current rate in satoshis per vbyte, fetched for this network and refreshed before every send. The fee goes to miners.",
         "Press **Review**. The summary shows the exact fee, what leaves the wallet, which coins are used, what returns as change, and the balance afterwards. Nothing has been signed.",
         "Enter your **wallet password** and press **Sign and send**. What you reviewed is what is signed, to the satoshi.",
@@ -870,9 +883,10 @@ export const GUIDE = [
     slug: "settings",
     group: "settings",
     title: "Settings",
-    intro: "Seven sections, in the list on the left. On a phone they run along the top.",
+    intro: "Seven sections, listed in the middle of the screen. Pick one and it opens on the right; on a phone it opens as its own screen.",
     blocks: [
-      img("phone-settings.webp", "Settings on a phone: the sections run along the top and scroll sideways.", true),
+      img("phone-settings.webp", "Settings on a phone: the list of sections comes first.", true),
+      img("phone-settings-section.webp", "A section opened on a phone, with the back link to Settings.", true),
       h2("Profile"),
       img("settings-profile.webp", "Profile."),
       p(
@@ -887,7 +901,7 @@ export const GUIDE = [
         "**Offer crypto payment on invoices.** Off hides the action and stops new addresses being issued. Addresses already issued keep being watched.",
         "**Notify me as soon as a payment is detected.** Off means you are told only once it has confirmed and settled.",
         "**Default network** for new addresses, and **Accept payment for (hours)**, between 1 and 720. After that an address is still watched for thirty days.",
-        "**Sweep destination.** Blank means the wallet on this device. Anything else is checked against you carefully in the sweep dialog, because a transfer to a wrong address cannot be reversed.",
+        "**Sweep destination.** Blank means the wallet on this device. Anything else is checked against you carefully on the sweep screen, because a transfer to a wrong address cannot be reversed.",
         "**Confirmations before settling**, per network. Blank uses the recommended depth. Setting one lower settles faster and risks a reorganised transaction being counted; the page warns you when you do.",
       ]),
       h2("Security"),
@@ -901,7 +915,7 @@ export const GUIDE = [
       img("settings-notifications.webp", "Notifications."),
       h3("On this device"),
       p(
-        "The current browser permission is shown as a pill. **Enable notifications** asks the browser for permission and registers this device. **Send test notification** proves it works; the test appears when this tab is not in front, because while it is in front you get a toast instead. Then choose what to be told about: **Market alerts**, **Reminders due** and **Transaction updates**."
+        "The current browser permission is shown as a small label. **Enable notifications** asks the browser for permission and registers this device. **Send test notification** proves it works; the test appears when this tab is not in front, because while it is in front you get a toast instead. Then choose what to be told about: **Market alerts**, **Reminders due** and **Transaction updates**."
       ),
       p("If Chrome has blocked notifications for the site, it will not ask again; the page explains how to allow them from the address bar and try again."),
       h3("Automatic reminders"),

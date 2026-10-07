@@ -13,6 +13,8 @@ const SECTIONS = String(process.env.SECTIONS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 const WALLET_PW = "docs-screenshots-only-1";
+const DIALOG = ".ws-sheet-dialog:not([hidden])";
+const PANE = ".ws-sheet-base:not([hidden])";
 const results = { ok: [], failed: [] };
 
 function isLocal(url) {
@@ -62,6 +64,8 @@ async function clickText(page, selector, text, { exact = false, index = 0 } = {}
   const handles = await page.$$(selector);
   let seen = 0;
   for (const h of handles) {
+    const visible = await h.evaluate((e) => e.offsetParent !== null || e.getClientRects().length > 0);
+    if (!visible) continue;
     const t = ((await h.evaluate((e) => e.textContent)) || "").replace(/\s+/g, " ").trim();
     const hit = exact ? t === text : t.includes(text);
     if (hit) {
@@ -89,6 +93,15 @@ async function goto(page, route, wait = 1500) {
   await page.waitForSelector("#root > *", { timeout: 30000 });
   await page.addStyleTag({ content: ".turnstile-missing { display: none !important; }" });
   await sleep(wait);
+}
+
+async function waitDialog(page, timeout = 10000) {
+  await page.waitForSelector(DIALOG, { timeout });
+}
+
+async function closeDialog(page) {
+  await page.keyboard.press("Escape");
+  await sleep(500);
 }
 
 async function newPage(browser, { phone = false, token = null, theme = "light" } = {}) {
@@ -128,6 +141,43 @@ async function section(name, fn) {
   }
 }
 
+async function openOpenDebt(page, pattern = /Partial|Overdue|Pending/) {
+  const rows = await page.$$(".debts-table tbody tr");
+  for (const r of rows) {
+    const status = (await r.evaluate((e) => (e.querySelector(".pill") || {}).textContent || "")) || "";
+    if (pattern.test(status)) {
+      await (await r.$("td:nth-child(2)")).click();
+      return;
+    }
+  }
+  await (await rows[0].$("td:nth-child(2)")).click();
+}
+
+async function createWallet(page) {
+  await clickText(page, "button", "Create a wallet");
+  await waitDialog(page);
+  await clickText(page, `${DIALOG} button`, "Show recovery phrase");
+  await page.waitForSelector(".mnemonic-grid", { timeout: 10000 });
+  await page.click(`${DIALOG} .toggle-row input[type=checkbox]`);
+  await clickText(page, `${DIALOG} button`, "Continue");
+  await sleep(400);
+  await typeInto(page, `${DIALOG} input[type=password]`, WALLET_PW, { index: 0 });
+  await typeInto(page, `${DIALOG} input[type=password]`, WALLET_PW, { index: 1 });
+  await clickText(page, `${DIALOG} button[type=submit]`, "Create wallet");
+  await page.waitForSelector(".mm", { timeout: 90000 });
+}
+
+async function cardWith(page, text) {
+  const cards = await page.$$(".card");
+  for (const c of cards) {
+    const visible = await c.evaluate((e) => e.offsetParent !== null);
+    if (!visible) continue;
+    const t = (await c.evaluate((e) => e.textContent)) || "";
+    if (t.includes(text)) return c;
+  }
+  return null;
+}
+
 (async () => {
   if (!TOKEN) throw new Error("TOKEN env var is required");
   const browser = await puppeteer.launch({
@@ -146,284 +196,235 @@ async function section(name, fn) {
     await clickText(page, "button", "Create an account");
     await sleep(2500);
     await shot(page, "signup");
-    await goto(page, "/contact", 3500);
-    await goto(page, "/docs/wallet", 2500);
     await page.close();
   });
 
   await section("receivables", async () => {
     const page = await newPage(browser, { token: TOKEN });
-    await page.setViewport({ width: 1280, height: 980 });
     await goto(page, "/app/receivables", 5000);
     await shot(page, "receivables-overview");
 
-    await clickText(page, ".subtab", "Debts");
+    await goto(page, "/app/receivables?view=debts", 1000);
     await page.waitForSelector(".debts-table tbody tr", { timeout: 20000 });
     await sleep(2000);
     await shot(page, "receivables-debts");
 
     await clickText(page, "button", "Record debt");
-    await page.waitForSelector(".modal-panel", { timeout: 10000 });
+    await waitDialog(page);
     await sleep(600);
-    await shotEl(page, ".modal-panel", "debt-record");
-    await page.keyboard.press("Escape");
-    await sleep(500);
+    await shot(page, "debt-record");
+    await closeDialog(page);
 
-    const rows = await page.$$(".debts-table tbody tr");
-    let opened = false;
-    for (const r of rows) {
-      const t = (await r.evaluate((e) => e.textContent)) || "";
-      if (/Partial|Overdue|Pending/i.test(t) && !/Paid\b/.test(t.replace(/Partial|Unpaid/g, ""))) {
-        const cell = await r.$("td:nth-child(2)");
-        await cell.click();
-        opened = true;
-        break;
-      }
-    }
-    if (!opened) {
-      const cell = await rows[0].$("td:nth-child(2)");
-      await cell.click();
-    }
-    await page.waitForSelector(".modal-panel", { timeout: 10000 });
+    await openOpenDebt(page);
+    await waitDialog(page);
     await sleep(2500);
-    await shotEl(page, ".modal-panel", "debt-detail");
+    await shot(page, "debt-detail");
 
     try {
-      await clickText(page, ".modal-panel button", "Record payment");
+      await clickText(page, `${DIALOG} button`, "Record payment");
       await sleep(700);
-      await shotEl(page, ".modal-panel", "debt-payment");
-      await clickText(page, ".modal-panel button", "Cancel");
+      await page.evaluate(() => {
+        const f = document.querySelector(".ws-sheet-dialog:not([hidden]) form");
+        if (f) f.scrollIntoView({ block: "center" });
+      });
+      await sleep(400);
+      await shot(page, "debt-payment");
+      await clickText(page, `${DIALOG} button`, "Cancel");
       await sleep(400);
     } catch (e) {
       results.failed.push("debt-payment: " + e.message);
     }
 
-    await clickText(page, ".modal-panel button", "Generate reminder");
-    await page.waitForFunction(() => document.querySelectorAll(".modal-panel").length >= 1 && document.querySelector(".reminder-box"), { timeout: 30000 });
+    await page.evaluate(() => {
+      const d = document.querySelector(".ws-detail");
+      if (d) d.scrollTop = 0;
+    });
+    await clickText(page, `${DIALOG} button`, "Generate reminder");
+    await page.waitForSelector(`${DIALOG} .reminder-box`, { timeout: 30000 });
     await sleep(1500);
-    const panels = await page.$$(".modal-panel");
-    await shot(panels[panels.length - 1], "debt-reminder");
-    await page.keyboard.press("Escape");
-    await sleep(400);
-    await page.keyboard.press("Escape");
-    await sleep(400);
+    await shot(page, "debt-reminder");
+    await closeDialog(page);
+    await closeDialog(page);
 
-    await clickText(page, ".subtab", "Debtors");
+    await goto(page, "/app/receivables?view=debtors", 1000);
     await page.waitForSelector(".debtors-table tbody tr", { timeout: 20000 });
     await sleep(1500);
     await shot(page, "debtors");
     const drows = await page.$$(".debtors-table tbody tr");
     await drows[0].click();
-    await page.waitForSelector(".modal-panel .timeline", { timeout: 20000 });
+    await page.waitForSelector(`${DIALOG} .timeline`, { timeout: 20000 });
     await sleep(1500);
-    await shotEl(page, ".modal-panel", "debtor-profile");
-    await clickText(page, ".modal-panel button", "Statement");
+    await shot(page, "debtor-profile");
+    await clickText(page, `${DIALOG} button`, "Statement");
     await page.waitForSelector(".statement", { timeout: 20000 });
     await sleep(800);
-    await shotEl(page, ".modal-panel", "debtor-statement");
-    await page.keyboard.press("Escape");
-    await sleep(300);
+    await shot(page, "debtor-statement");
     await page.close();
   });
 
   await section("dark theme", async () => {
     const page = await newPage(browser, { token: TOKEN, theme: "dark" });
-    await page.setViewport({ width: 1280, height: 900 });
-    await goto(page, "/app/receivables", 5000);
+    await goto(page, "/app/receivables?view=debts", 1000);
+    await page.waitForSelector(".debts-table tbody tr", { timeout: 20000 });
+    await sleep(1500);
+    await openOpenDebt(page);
+    await waitDialog(page);
+    await sleep(2500);
     await shot(page, "theme-dark");
     await page.close();
   });
 
   await section("market (paper)", async () => {
     const page = await newPage(browser, { token: TOKEN });
-    await page.setViewport({ width: 1280, height: 1000 });
     await goto(page, "/app/market", 7000);
     try {
       await clickText(page, "button", "Check now");
       await sleep(6000);
     } catch {}
-    await shot(page, "market-overview");
-
-    const cards = await page.$$(".card");
-    async function cardWith(text) {
-      for (const c of cards) {
-        const t = (await c.evaluate((e) => e.textContent)) || "";
-        if (t.includes(text)) return c;
-      }
-      return null;
-    }
-    const addWatch = await cardWith("Watch a coin");
-    if (addWatch) await shot(addWatch, "market-add-watch");
-    const agent = await cardWith("Market agent");
-    if (agent) await shot(agent, "market-agent");
-    const watches = await cardWith("Active watches");
-    if (watches) await shot(watches, "market-watches");
-    const alerts = await cardWith("Alerts awaiting your decision");
-    if (alerts) await shot(alerts, "market-alerts");
-    const history = await cardWith("Alert history");
+    await page.waitForSelector(".alert-card", { timeout: 20000 }).catch(() => {});
+    await shot(page, "market-alerts");
+    const history = await cardWith(page, "Alert history");
     if (history) await shot(history, "market-history");
 
-    const alertCard = await page.$(".alert-card");
-    if (alertCard) {
+    if (await page.$(".alert-card")) {
       await clickText(page, ".alert-card button", "Buy");
-      await page.waitForSelector(".modal-panel", { timeout: 10000 });
+      await waitDialog(page);
       await sleep(600);
-      await shotEl(page, ".modal-panel", "market-trade");
-      await typeInto(page, ".modal-panel input[type=number]", "2500");
+      await shot(page, "market-trade");
+      await typeInto(page, `${DIALOG} input[type=number]`, "2500");
       await sleep(400);
-      await clickText(page, ".modal-panel button", "Review");
+      await clickText(page, `${DIALOG} button`, "Review");
       await sleep(600);
-      await shotEl(page, ".modal-panel", "market-trade-confirm");
-      await page.keyboard.press("Escape");
-      await sleep(400);
+      await shot(page, "market-trade-confirm");
+      await closeDialog(page);
     } else {
       results.failed.push("market-trade: no pending alert to open");
     }
 
+    await goto(page, "/app/market?view=watchlist", 6000);
+    await shot(page, "market-watchlist");
+    await shotEl(page, PANE, "market-add-watch");
+    const watches = await cardWith(page, "Active watches");
+    if (watches) await shot(watches, "market-watches");
+
     const row = await page.$(".market-table tbody tr");
     if (row) {
       await row.click();
-      await page.waitForSelector(".modal-panel", { timeout: 10000 });
-      await sleep(4000);
-      await shotEl(page, ".modal-panel", "market-coin");
-      await page.keyboard.press("Escape");
+      await waitDialog(page);
+      await sleep(4500);
+      await shot(page, "market-coin");
+      await closeDialog(page);
     }
+
+    await goto(page, "/app/market?view=portfolio", 6000);
+    await shot(page, "market-portfolio");
+    const agent = await cardWith(page, "Market agent");
+    if (agent) await shot(agent, "market-agent");
     await page.close();
   });
 
   await section("wallet", async () => {
     const page = await newPage(browser, { token: TOKEN });
-    await page.setViewport({ width: 1280, height: 900 });
     await goto(page, "/app/wallet", 4000);
     await shot(page, "wallet-setup");
-    await page.addStyleTag({ content: ".topbar { position: static !important; }" });
 
     await clickText(page, "button", "Create a wallet");
-    await page.waitForSelector(".modal-panel", { timeout: 10000 });
+    await waitDialog(page);
     await sleep(500);
-    await clickText(page, ".modal-panel button", "Show recovery phrase");
+    await clickText(page, `${DIALOG} button`, "Show recovery phrase");
     await page.waitForSelector(".mnemonic-grid", { timeout: 10000 });
     await page.addStyleTag({ content: ".mnemonic-grid li { filter: blur(7px); } .pk-value { filter: blur(7px); }" });
     await sleep(500);
-    await shotEl(page, ".modal-panel", "wallet-create-phrase");
-    await page.click(".modal-panel .toggle-row input[type=checkbox]");
-    await clickText(page, ".modal-panel button", "Continue");
+    await shot(page, "wallet-create-phrase");
+    await page.click(`${DIALOG} .toggle-row input[type=checkbox]`);
+    await clickText(page, `${DIALOG} button`, "Continue");
     await sleep(500);
-    await shotEl(page, ".modal-panel", "wallet-create-password");
-    await page.keyboard.press("Escape");
-    await sleep(500);
+    await shot(page, "wallet-create-password");
+    await closeDialog(page);
 
     await clickText(page, "button", "Import one");
-    await page.waitForSelector(".modal-panel", { timeout: 10000 });
+    await waitDialog(page);
     await sleep(500);
-    await shotEl(page, ".modal-panel", "wallet-import");
-    await page.keyboard.press("Escape");
-    await sleep(500);
+    await shot(page, "wallet-import");
+    await closeDialog(page);
 
-    await clickText(page, "button", "Create a wallet");
-    await page.waitForSelector(".modal-panel", { timeout: 10000 });
-    await clickText(page, ".modal-panel button", "Show recovery phrase");
-    await page.waitForSelector(".mnemonic-grid", { timeout: 10000 });
-    await page.click(".modal-panel .toggle-row input[type=checkbox]");
-    await clickText(page, ".modal-panel button", "Continue");
-    await sleep(400);
-    await typeInto(page, ".modal-panel input[type=password]", WALLET_PW, { index: 0 });
-    await typeInto(page, ".modal-panel input[type=password]", WALLET_PW, { index: 1 });
-    await clickText(page, ".modal-panel button[type=submit]", "Create wallet");
-    await page.waitForSelector(".mm", { timeout: 90000 });
+    await createWallet(page);
     await sleep(3000);
 
     await page.click(".net-trigger");
     await sleep(2500);
-    await shotEl(page, ".mm-stage", "wallet-networks");
+    await shot(page, "wallet-networks");
     await clickText(page, ".net-item", "Base", { exact: false });
     await sleep(6000);
-    await shotEl(page, ".mm-stage", "wallet-main");
+    await shot(page, "wallet-main");
 
     await clickText(page, ".mm-action", "Receive");
+    await page.waitForSelector(`${PANE} .receive-card`, { timeout: 10000 });
     await sleep(1200);
-    await shotEl(page, ".mm-drawer", "wallet-receive");
+    await shot(page, "wallet-receive");
 
     await clickText(page, ".mm-action", "Send");
-    try {
-      await page.waitForSelector(".mm-drawer input", { timeout: 8000 });
-    } catch {
-      await clickText(page, ".mm-action", "Send");
-      await page.waitForSelector(".mm-drawer input", { timeout: 8000 });
-    }
+    await page.waitForSelector(`${PANE} input`, { timeout: 8000 });
     await sleep(800);
-    await shotEl(page, ".mm-drawer", "wallet-send");
-    await typeInto(page, ".mm-drawer input", "0x000000000000000000000000000000000000dEaD", { index: 0 });
-    await typeInto(page, ".mm-drawer input[type=number]", "0.001");
-    await clickText(page, ".mm-drawer button", "Review transaction");
+    await shot(page, "wallet-send");
+    await typeInto(page, `${PANE} input`, "0x000000000000000000000000000000000000dEaD", { index: 0 });
+    await typeInto(page, `${PANE} input[type=number]`, "0.001");
+    await clickText(page, `${PANE} button`, "Review transaction");
     await sleep(6000);
-    await shotEl(page, ".mm-drawer", "wallet-send-review");
+    await shot(page, "wallet-send-review");
 
     await clickText(page, ".mm-action", "Collected");
     await sleep(4000);
-    await shotEl(page, ".mm-drawer", "wallet-collected");
+    await shot(page, "wallet-collected");
     await clickText(page, ".mm-action", "Collected");
     await sleep(400);
 
     await clickText(page, ".mm-linkish", "Import a token");
-    await page.waitForSelector(".modal-panel", { timeout: 10000 });
+    await waitDialog(page);
     await sleep(500);
-    await shotEl(page, ".modal-panel", "wallet-import-token");
-    await page.keyboard.press("Escape");
-    await sleep(400);
+    await shot(page, "wallet-import-token");
+    await closeDialog(page);
 
     await clickText(page, ".mm-tab", "Activity");
     await sleep(800);
-    await shotEl(page, ".mm-stage", "wallet-activity");
+    await shot(page, "wallet-activity");
     await clickText(page, ".mm-tab", "Tokens");
     await sleep(400);
 
-    const firstRow = await page.$(".mm-row");
+    const firstRow = await page.$(".mm-row[role=button]");
     if (firstRow) {
       await firstRow.click();
-      await page.waitForSelector(".modal-panel", { timeout: 10000 });
+      await waitDialog(page);
       await sleep(4500);
-      await shotEl(page, ".modal-panel", "wallet-token-detail");
-      await page.keyboard.press("Escape");
-      await sleep(400);
+      await shot(page, "wallet-token-detail");
+      await closeDialog(page);
     }
 
     await page.click(".net-trigger");
     await sleep(800);
     await clickText(page, ".net-item", "Bitcoin", { exact: false, index: 0 });
     await sleep(1500);
-    await shotEl(page, ".mm-stage", "wallet-bitcoin-setup");
+    await shot(page, "wallet-bitcoin-setup");
     await typeInto(page, ".mm input[type=password]", WALLET_PW);
     await clickText(page, ".mm button", "Set up Bitcoin");
     await page.waitForSelector(".mm-actions", { timeout: 60000 });
     await sleep(4000);
-    await shotEl(page, ".mm-stage", "wallet-bitcoin");
+    await shot(page, "wallet-bitcoin");
     await clickText(page, ".mm-action", "Send");
     await sleep(3500);
-    await shotEl(page, ".mm-stage", "wallet-bitcoin-send");
+    await shot(page, "wallet-bitcoin-send");
     await page.close();
   });
 
   await section("market (live)", async () => {
     if (!TOKEN2) throw new Error("TOKEN2 is required for the live section");
     const page = await newPage(browser, { token: TOKEN2 });
-    await page.setViewport({ width: 1280, height: 1000 });
     await goto(page, "/app/wallet", 4000);
     if (!(await page.$(".mm"))) {
-      await clickText(page, "button", "Create a wallet");
-      await page.waitForSelector(".modal-panel", { timeout: 10000 });
-      await clickText(page, ".modal-panel button", "Show recovery phrase");
-      await page.waitForSelector(".mnemonic-grid", { timeout: 10000 });
-      await page.click(".modal-panel .toggle-row input[type=checkbox]");
-      await clickText(page, ".modal-panel button", "Continue");
-      await sleep(400);
-      await typeInto(page, ".modal-panel input[type=password]", WALLET_PW, { index: 0 });
-      await typeInto(page, ".modal-panel input[type=password]", WALLET_PW, { index: 1 });
-      await clickText(page, ".modal-panel button[type=submit]", "Create wallet");
-      await page.waitForSelector(".mm", { timeout: 90000 });
+      await createWallet(page);
       await sleep(2000);
     }
-    await goto(page, "/app/market", 5000);
+    await goto(page, "/app/market?view=portfolio", 5000);
     await clickText(page, ".mode-btn", "Live wallet");
     await sleep(3000);
     try {
@@ -431,14 +432,9 @@ async function section(name, fn) {
     } catch {}
     await page.waitForSelector(".live-zero-state, .live-total, .live-read-error", { timeout: 90000 });
     await sleep(2500);
-    const cards = await page.$$(".card");
-    for (const c of cards) {
-      const t = (await c.evaluate((e) => e.textContent)) || "";
-      if (t.includes("Live positions")) {
-        await shot(c, "market-live");
-        break;
-      }
-    }
+    const live = await cardWith(page, "Live positions");
+    if (live) await shot(live, "market-live");
+    else results.failed.push("market-live: no Live positions card");
     await clickText(page, ".mode-btn", "Paper trading");
     await sleep(1500);
     await page.close();
@@ -446,58 +442,48 @@ async function section(name, fn) {
 
   await section("crypto payment address", async () => {
     const page = await newPage(browser, { token: TOKEN });
-    await page.setViewport({ width: 1280, height: 980 });
-    await goto(page, "/app/receivables", 4000);
-    await clickText(page, ".subtab", "Debts");
+    await goto(page, "/app/receivables?view=debts", 1000);
     await page.waitForSelector(".debts-table tbody tr", { timeout: 20000 });
     await sleep(1500);
-    const rows = await page.$$(".debts-table tbody tr");
-    let target = null;
-    for (const r of rows) {
-      const t = (await r.evaluate((e) => e.textContent)) || "";
-      if (/Pending/.test(t)) {
-        target = r;
-        break;
-      }
-    }
-    if (!target) target = rows[0];
-    await (await target.$("td:nth-child(2)")).click();
-    await page.waitForSelector(".modal-panel", { timeout: 10000 });
+    await openOpenDebt(page, /Pending/);
+    await waitDialog(page);
     await sleep(2000);
-    await clickText(page, ".modal-panel button", "Crypto payment");
+    await clickText(page, `${DIALOG} button`, "Crypto payment");
     await page.waitForFunction(
-      () => Array.from(document.querySelectorAll(".modal-panel")).some((p) => /Crypto payment for/.test(p.textContent)),
+      () =>
+        Array.from(document.querySelectorAll(".ws-sheet-dialog:not([hidden])")).some((p) =>
+          /Crypto payment for/.test(p.textContent)
+        ),
       { timeout: 120000 }
     );
-    await page.waitForSelector(".modal-panel .trade-quote", { timeout: 60000 });
+    await page.waitForSelector(`${DIALOG} .trade-quote`, { timeout: 60000 });
     await sleep(1500);
-    await shotEl(page, ".modal-panel", "crypto-issue");
+    await shot(page, "crypto-issue");
 
-    await typeInto(page, ".modal-panel input[type=password]", WALLET_PW);
-    await clickText(page, ".modal-panel button[type=submit]", "Create payment address");
+    await typeInto(page, `${DIALOG} input[type=password]`, WALLET_PW);
+    await clickText(page, `${DIALOG} button[type=submit]`, "Create payment address");
     await page.waitForSelector(".crypto-card", { timeout: 180000 });
     await sleep(7000);
     const card = await page.$(".crypto-card");
     await card.evaluate((e) => e.scrollIntoView({ block: "start" }));
     await sleep(600);
-    await shotEl(page, ".modal-panel", "crypto-panel");
+    await shot(page, "crypto-panel");
     await page.close();
   });
 
   await section("settings", async () => {
     const page = await newPage(browser, { token: TOKEN });
-    await page.setViewport({ width: 1280, height: 900 });
     for (const s of ["profile", "payout", "crypto", "security", "notifications", "danger"]) {
       await goto(page, `/app/settings?section=${s}`, 2500);
-      await shotEl(page, ".settings-layout", `settings-${s}`);
+      await shot(page, `settings-${s}`);
     }
     await goto(page, "/app/settings?section=wallet-backup", 2500);
-    await shotEl(page, ".settings-layout", "settings-backup");
+    await shot(page, "settings-backup");
     await clickText(page, ".backup-option", "Reveal secret recovery phrase");
-    await page.waitForSelector(".modal-panel", { timeout: 10000 });
+    await waitDialog(page);
     await sleep(600);
-    await shotEl(page, ".modal-panel", "settings-backup-reveal");
-    await page.keyboard.press("Escape");
+    await shot(page, "settings-backup-reveal");
+    await closeDialog(page);
     await page.close();
   });
 
@@ -505,40 +491,26 @@ async function section(name, fn) {
     const page = await newPage(browser, { phone: true, token: TOKEN });
     await goto(page, "/app/receivables", 5000);
     await shot(page, "phone-home");
-    await clickText(page, ".subtab", "Debts");
+    await goto(page, "/app/receivables?view=debts", 1000);
     await page.waitForSelector(".debts-table tbody tr", { timeout: 20000 });
     await sleep(1500);
-    await page.evaluate(() => document.querySelector(".debts-table").scrollIntoView({ block: "start" }));
-    await sleep(500);
     await shot(page, "phone-debts");
-    const rows = await page.$$(".debts-table tbody tr");
-    await rows[0].evaluate((r) => r.querySelector("td:nth-child(2)").click());
-    await page.waitForSelector(".modal-panel", { timeout: 10000 });
+    await openOpenDebt(page);
+    await waitDialog(page);
     await sleep(2000);
-    await page.keyboard.press("Escape");
-    await sleep(400);
+    await shot(page, "phone-debt-detail");
+    await closeDialog(page);
 
     await goto(page, "/app/market", 7000);
     await shot(page, "phone-market");
     await goto(page, "/app/wallet", 6000);
     await shot(page, "phone-wallet");
-    try {
-      await page.click(".net-trigger");
-      await sleep(2000);
-      await page.keyboard.press("Escape");
-    } catch {}
-    await goto(page, "/app/settings", 1500);
-    await page.waitForSelector(".settings-layout", { timeout: 30000 });
-    await sleep(1200);
+    await goto(page, "/app/settings", 2500);
     await shot(page, "phone-settings");
+    await clickText(page, ".nav-item", "Notifications");
+    await sleep(1500);
+    await shot(page, "phone-settings-section");
     await page.close();
-
-    const pub = await newPage(browser, { phone: true });
-    await goto(pub, "/", 2500);
-    await goto(pub, "/login", 3500);
-    await goto(pub, "/docs/receivables", 2500);
-    await goto(pub, "/contact", 3000);
-    await pub.close();
   });
 
   await browser.close();

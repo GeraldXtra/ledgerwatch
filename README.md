@@ -11,7 +11,10 @@ I built LedgerWatch because that gap is a software problem rather than a discipl
 
 ### What it does
 
-Two agents share one dashboard.
+Two agents share one workspace: a sidebar of sections on the left, the list you are working through in
+the middle, and whatever you pick from it open in full on the right. On a phone the same thing
+becomes a list first, with each item opening as its own screen and the four sections in a bar along
+the bottom.
 
 **Receivables** keeps track of who owes you and when it was due. It drafts the reminder, sends it
 over WhatsApp or email with your bank details already in it, and stops chasing the moment an invoice
@@ -51,7 +54,8 @@ There is a user guide at [useledgerwatch.co/docs](https://useledgerwatch.co/docs
 through every page and every feature with pictures of the real interface, a
 [privacy policy](https://useledgerwatch.co/privacy) and [terms](https://useledgerwatch.co/terms)
 written in plain words, and a [contact page](https://useledgerwatch.co/contact) that reaches me
-directly. The guide is also one tap away inside the app, from the book icon in the top bar.
+directly. The guide is also one tap away inside the app, from the book icon at the foot of the sidebar, or
+in the top bar on a phone.
 
 The rule I kept coming back to while building it: the agent prepares, the person approves. It is
 fully automatic in how it thinks and deliberately manual where it matters. When software touches
