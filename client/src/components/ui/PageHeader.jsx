@@ -1,24 +1,33 @@
 import CountUp from "./CountUp";
 
-export default function PageHeader({ title, support, figures, action }) {
+export default function PageHeader({ title, count, eyebrow, support, figures, action }) {
   const hasFigures = Array.isArray(figures) && figures.length > 0;
 
   return (
     <>
       <div className="page-head">
-        <div>
-          <h1>{title}</h1>
+        <div className="page-head-main">
+          {eyebrow && <div className="page-head-eyebrow">{eyebrow}</div>}
+          <h1>
+            {title}
+            {count != null && (
+              <>
+                {" "}
+                <span className="page-count num">({count})</span>
+              </>
+            )}
+          </h1>
           {support && <p className="page-head-desc">{support}</p>}
         </div>
         {action && <div className="page-head-actions">{action}</div>}
       </div>
 
       {hasFigures && (
-        <div className="stat-strip">
+        <section className="stat-strip">
           {figures.map((f) => (
             <Figure key={f.label} {...f} />
           ))}
-        </div>
+        </section>
       )}
     </>
   );

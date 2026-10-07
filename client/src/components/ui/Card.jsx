@@ -1,5 +1,6 @@
 export default function Card({
   title,
+  count,
   subtitle,
   eyebrow,
   icon,
@@ -19,7 +20,17 @@ export default function Card({
             {icon && <span className="icon-tile neutral">{icon}</span>}
             <div>
               {eyebrow && <div className="overline card-eyebrow">{eyebrow}</div>}
-              {title && <h3 className="card-title">{title}</h3>}
+              {title && (
+                <h3 className="card-title">
+                  {title}
+                  {count != null && (
+                    <>
+                      {" "}
+                      <span className="page-count num">({count})</span>
+                    </>
+                  )}
+                </h3>
+              )}
               {subtitle && <div className="card-sub">{subtitle}</div>}
             </div>
           </div>

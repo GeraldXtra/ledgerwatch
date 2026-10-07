@@ -41,8 +41,10 @@ export function Input({ className = "", ...rest }) {
 
 export function Select({ className = "", children, ...rest }) {
   return (
-    <select className={`select ${className}`.trim()} {...rest}>
-      {children}
-    </select>
+    <span className="select-wrap">
+      <select className={`select ${className}`.trim()} {...rest}>
+        {children}
+      </select>
+    </span>
   );
 }
