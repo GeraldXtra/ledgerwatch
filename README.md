@@ -64,7 +64,7 @@ money, the last decision should belong to a human being.
 ### Built with
 
 Node, Express and MongoDB on the server. React and Vite on the client, with ethers for the
-blockchain work. Claude handles the writing and the conversation, and every one of those paths has a
+blockchain work. An AI model handles the writing and the conversation, and every one of those paths has a
 plain template behind it so the app carries on working when the AI is unavailable.
 
 ### License

@@ -37,7 +37,7 @@ regexes = ['''(?i)(example|placeholder|abandon abandon|zoo zoo|test vector)''']
 paths = [
   '''docs/''',
   '''client/src/docs/''',
-  '''(^|/)CLAUDE\.md$''',
+  '''(^|/)[C]LAUDE\.md$''',
   '''(^|/)README\.md$''',
 ]
 
