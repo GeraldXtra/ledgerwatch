@@ -12,7 +12,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { Button, Field, Input, Modal, SkeletonLines } from "../../components/ui";
+import { Button, Field, Input, Modal, PageHeader, SkeletonLines } from "../../components/ui";
 import { unlockWallet } from "../wallet/keystore";
 import { canDerive } from "../wallet/derivation";
 import { executeSweepBatch, friendlySweepError, planSweep } from "./sweep";
@@ -106,8 +106,9 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
 
   if (cannotDerive) {
     return (
-      <Modal label="Sweep funds" onClose={onClose}>
+      <Modal label="Sweep funds" view="sweep" onClose={onClose}>
         <Head title="Sweep funds" onClose={onClose} />
+        <section className="card">
         <div className="crypto-blocked">
           <span className="icon-tile neutral">
             <KeyRound size={16} />
@@ -121,7 +122,8 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
             </p>
           </div>
         </div>
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+        </section>
+        <div className="pv-foot">
           <Button variant="ghost" onClick={onClose}>
             Close
           </Button>
@@ -134,7 +136,12 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
   }
 
   return (
-    <Modal label="Sweep funds" onClose={phase === "running" ? () => {} : onClose} size="lg">
+    <Modal
+      label="Sweep funds"
+      view="sweep"
+      onClose={phase === "running" ? () => {} : onClose}
+      size="lg"
+    >
       <Head
         title={addresses.length === 1 ? "Sweep to your wallet" : `Sweep ${addresses.length} addresses`}
         onClose={onClose}
@@ -149,6 +156,7 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
         <SkeletonLines count={4} />
       ) : (
         <>
+          <section className="card stack">
           <p className="muted small" style={{ margin: 0 }}>
             This moves the stablecoin sitting at each invoice address into your main wallet. You
             sign every transfer yourself with your wallet password.
@@ -298,14 +306,17 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
             </p>
           )}
 
+          </section>
+
           {phase === "finished" ? (
-            <div className="row" style={{ justifyContent: "flex-end" }}>
+            <div className="pv-foot">
               <Button variant="primary" onClick={onClose}>
                 Done
               </Button>
             </div>
           ) : (
-            <form className="stack" onSubmit={run}>
+            <form className="pv-form" onSubmit={run}>
+              <section className="card stack">
               <Field label="Wallet password">
                 <Input
                   type="password"
@@ -328,8 +339,9 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
                   <span>{error}</span>
                 </div>
               )}
+              </section>
 
-              <div className="row" style={{ justifyContent: "flex-end" }}>
+              <div className="pv-foot">
                 <Button variant="ghost" onClick={onClose} disabled={phase === "running"}>
                   Cancel
                 </Button>
@@ -357,13 +369,13 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
 
 function Head({ title, onClose, disabled }) {
   return (
-    <div className="row space-between">
-      <h3 className="section-title row">
-        <ArrowDownToLine size={17} /> {title}
-      </h3>
-      <Button variant="ghost" icon title="Close" onClick={onClose} disabled={disabled}>
-        <X size={15} />
-      </Button>
-    </div>
+    <PageHeader
+      title={title}
+      action={
+        <Button variant="ghost" icon title="Close" onClick={onClose} disabled={disabled}>
+          <X size={15} />
+        </Button>
+      }
+    />
   );
 }

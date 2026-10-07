@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Sparkles } from "lucide-react";
 import http from "../../api/http";
 import {
   Button,
@@ -54,7 +53,7 @@ function AssistantCard() {
       subtitle="Ordinary questions, answered over your own figures. Who owes most, who never pays on time."
     >
       <div className="stack">
-        <form onSubmit={ask} className="row wrap">
+        <form onSubmit={ask} className="ask-row">
           <Input
             className="grow"
             placeholder="Try: who owes me the most?"
@@ -63,7 +62,7 @@ function AssistantCard() {
             aria-label="Ask about your receivables"
           />
           <Button type="submit" variant="secondary" disabled={asking}>
-            <Sparkles size={14} /> {asking ? "Thinking..." : "Ask"}
+            {asking ? "Thinking..." : "Ask"}
           </Button>
         </form>
         {asking && <SkeletonLines count={2} />}
@@ -150,7 +149,7 @@ function Receivables() {
         />
       )}
 
-      <div key={tab} className={tab === "overview" ? "stack subtab-panel" : "subtab-panel ws-view"}>
+      <div key={tab} className="page-stack subtab-panel">
         {tab === "overview" && (
           <>
             <ReceivablesOverview data={analytics} error={analyticsError} />

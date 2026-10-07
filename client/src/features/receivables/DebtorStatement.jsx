@@ -1,5 +1,5 @@
 import { Download, Printer, X } from "lucide-react";
-import { Button, Modal, StatusPill } from "../../components/ui";
+import { Button, Modal, PageHeader, StatusPill } from "../../components/ui";
 import { ngn, shortDate, dateTime, METHOD_LABEL } from "./format";
 import { downloadCsv } from "./csv";
 
@@ -22,17 +22,27 @@ export default function DebtorStatement({ statement, onClose }) {
   }
 
   return (
-    <Modal label={`Statement for ${debtor.debtorName}`} onClose={onClose} size="lg">
-      <div className="row space-between no-print">
-        <h3 className="section-title">Statement</h3>
-        <div className="row">
-          <Button size="sm" onClick={exportCsv}><Download size={14} /> CSV</Button>
-          <Button size="sm" variant="ghost" onClick={() => window.print()}><Printer size={14} /> Print</Button>
-          <Button variant="ghost" icon title="Close" onClick={onClose}><X size={16} /></Button>
-        </div>
+    <Modal
+      label={`Statement for ${debtor.debtorName}`}
+      view="statement"
+      crumb="Statement"
+      onClose={onClose}
+      size="lg"
+    >
+      <div className="no-print">
+        <PageHeader
+          title="Statement"
+          action={
+            <>
+              <Button onClick={exportCsv}><Download size={14} /> CSV</Button>
+              <Button onClick={() => window.print()}><Printer size={14} /> Print</Button>
+              <Button variant="ghost" icon title="Close" onClick={onClose}><X size={16} /></Button>
+            </>
+          }
+        />
       </div>
 
-      <div className="statement printable">
+      <div className="card statement printable">
         <div className="statement-head">
           <div>
             <div className="statement-biz">{businessName}</div>

@@ -795,6 +795,49 @@
   font-size: 13px;
 }
 
+.page-stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 20px;
+  min-width: 0;
+}
+
+.card-flush {
+  padding: 16px 0 6px;
+}
+
+.card-flush > .card-head,
+.card-flush > .filters-row,
+.card-flush > .error-text,
+.card-flush > .stack-sm,
+.card-flush > .empty {
+  margin-left: 20px;
+  margin-right: 20px;
+}
+
+.card-flush > .filters-row {
+  margin-bottom: 14px;
+}
+
+.card-flush > .error-text {
+  margin-bottom: 12px;
+}
+
+.card-flush > .stack-sm {
+  margin-bottom: 16px;
+}
+
+.card-flush .table th:first-child,
+.card-flush .table td:first-child {
+  padding-left: 20px;
+}
+
+.card-flush .table th:last-child,
+.card-flush .table td:last-child {
+  padding-right: 20px;
+}
+
 .filters-row {
   display: flex;
   flex-wrap: wrap;
@@ -802,18 +845,22 @@
   gap: 8px;
 }
 
-.filters-row > .field {
-  flex: 1 1 120px;
+.filters-row > .search-field {
+  flex: 1 1 260px;
+  max-width: 440px;
 }
 
-.filters-row > .field:first-of-type {
-  flex: 1 1 160px;
+.filters-row > .field {
+  flex: 0 1 160px;
+}
+
+.filters-row > .search-field + .field {
+  flex: 0 0 180px;
 }
 
 .search-field {
   position: relative;
   display: block;
-  flex: 1 1 100%;
   min-width: 0;
 }
 
@@ -828,40 +875,6 @@
 
 .search-field .input {
   padding-left: 38px;
-}
-
-.debts-table,
-.debtors-table {
-  font-size: 14px;
-}
-
-.debts-table th,
-.debts-table td,
-.debtors-table th,
-.debtors-table td {
-  padding: 10px 6px;
-}
-
-.debts-table .lead-name,
-.debtors-table .lead-name {
-  min-width: 110px;
-}
-
-.debts-table th:first-child,
-.debts-table td:first-child {
-  padding-left: 2px;
-}
-
-.debts-table td:last-child {
-  padding-right: 0;
-}
-
-.ws-view .kpi-row {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.ws-view .kpi-row .stat-card {
-  padding: 11px 14px;
 }
 
 .debts-table td:nth-child(5) {
@@ -879,12 +892,12 @@
   align-items: center;
   gap: 4px;
   height: 20px;
-  padding: 0 6px;
-  border-radius: 5px;
+  padding: 0 8px;
+  border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent-ink);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .progress-wrap {
@@ -915,7 +928,7 @@
 
 .progress-sm .progress-track {
   flex: none;
-  width: 110px;
+  width: 120px;
   height: 3px;
 }
 
@@ -932,26 +945,26 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 8px 8px 8px 16px;
-  border-radius: var(--r-lg);
-  background: var(--ink);
-  color: var(--bg);
+  padding: 6px 6px 6px 18px;
+  border-radius: 999px;
+  background: var(--topbar);
+  color: var(--topbar-ink);
   box-shadow: var(--shadow);
   transform: translateX(-50%);
 }
 
 .bulk-count {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .bulk-bar .btn-ghost {
-  color: var(--bg);
+  color: var(--topbar-ink);
 }
 
 .bulk-bar .btn-ghost:hover {
-  background: transparent;
-  color: var(--accent);
+  background: var(--topbar-hover);
+  color: var(--topbar-ink);
 }
 
 .rel-badge {
@@ -968,12 +981,12 @@
   place-items: center;
   min-width: 32px;
   height: 24px;
-  padding: 0 6px;
-  border-radius: var(--r-sm);
+  padding: 0 8px;
+  border-radius: 999px;
   background: var(--soft);
   color: var(--muted);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .rel-band {
@@ -1020,6 +1033,7 @@
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
+  border: 2px solid var(--due);
   border-radius: var(--r);
   font-size: 14px;
 }
@@ -1034,40 +1048,15 @@
 }
 
 .rel-warning-title {
-  font-weight: 600;
+  font-weight: 700;
   color: var(--ink);
 }
 
 .rel-note {
   justify-content: space-between;
   flex-wrap: wrap;
-  border: 1px solid var(--line);
-  background: var(--soft);
-}
-
-.ws-sheet .coin-detail-head {
-  flex-wrap: nowrap;
-  align-items: flex-start;
-}
-
-.ws-sheet .coin-detail-head > .row:first-child {
-  flex: 1;
-  min-width: 0;
-  align-items: flex-start;
-  gap: 14px;
-}
-
-.ws-sheet .coin-detail-head > .row:first-child > div {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.ws-sheet .coin-detail-head > .row:last-child {
-  flex: none;
-}
-
-.ws-sheet .coin-detail-head .avatar-lg {
-  margin-top: 2px;
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .detail-actions {
@@ -1085,12 +1074,60 @@
 }
 
 .payment-summary .overline {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 400;
+  color: var(--muted);
 }
 
 .payment-summary .mono-strong {
-  font-size: 13.5px;
+  font-size: 14px;
+}
+
+.ask-row {
+  display: flex;
+  gap: 8px;
+}
+
+.ask-row .input {
+  flex: 1;
+}
+
+@media (max-width: 759px) {
+  .filters-row > .search-field {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .filters-row > .field,
+  .filters-row > .search-field + .field {
+    flex: 1 1 140px;
+  }
+
+  .table-stack .balance-cell {
+    justify-items: start;
+  }
+
+  .card-flush .table-stack tbody {
+    padding: 0 16px 10px;
+  }
+
+  .card-flush .table-stack td:first-child,
+  .card-flush .table-stack td:last-child {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .ask-row {
+    flex-direction: column;
+  }
+
+  .bulk-bar {
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    justify-content: space-between;
+    transform: none;
+  }
 }
 
 .reminder-box {
@@ -1105,17 +1142,16 @@
 }
 
 .log {
-  margin: 10px 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
+  border-top: 1px solid var(--line-strong);
 }
 
 .log-row {
   display: grid;
   gap: 8px;
-  padding: 12px 14px;
+  padding: 12px 0;
   border-top: 1px solid var(--line);
 }
 
@@ -1134,8 +1170,8 @@
   align-items: center;
   gap: 5px;
   height: 24px;
-  padding: 0 8px;
-  border-radius: 6px;
+  padding: 0 10px;
+  border-radius: 999px;
   background: var(--soft);
   color: var(--muted);
   font-size: 12.5px;
@@ -1210,15 +1246,13 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
 }
 
 .timeline-item {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 12px 0;
   border-top: 1px solid var(--line);
 }
 
@@ -1473,147 +1507,7 @@
   color: var(--warn);
 }
 
-.pill.warn {
-  background: var(--warn-soft);
-  color: var(--warn);
-}
-
-.pill.scheduled,
-.pill.cancelled,
-.pill.dismissed,
-.pill.hold {
-  background: var(--soft);
-  color: var(--muted);
-}
-
-@media (min-width: 900px) {
-  .ws-sheet .detail-actions .btn {
-    height: 36px;
-    padding: 0 12px;
-    font-size: 14px;
-  }
-}
-
-@media (max-width: 899px) {
-  .ws-main > .page-head h1 {
-    font-size: 26px;
-  }
-
-  .ws-main > .page-head {
-    padding: 8px 4px 4px;
-  }
-
-  .ws-main .card form.row {
-    flex-wrap: wrap;
-  }
-
-  .ws-main .card form.row .btn {
-    width: 100%;
-  }
-
-  .ws-view > .card {
-    padding: 0 16px 16px;
-  }
-
-  .ws-view > .card > .card-head {
-    position: static;
-    margin: 0 -16px;
-    padding: 16px 16px 12px;
-  }
-
-  .ws-sheet .detail-actions .btn {
-    flex: 1 1 auto;
-  }
-}
-
-@media (max-width: 640px) {
-  .ws-view .kpi-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .filters-row > .field:first-of-type {
-    flex: 1 1 140px;
-  }
-
-  .debts-table tbody tr {
-    display: grid;
-    grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) 44px;
-    column-gap: 10px;
-    row-gap: 8px;
-    padding: 14px 0;
-  }
-
-  .debts-table td,
-  .table-stack.debts-table td {
-    display: block;
-    padding: 0;
-    text-align: left;
-  }
-
-  .debts-table td::before {
-    display: block;
-    margin-bottom: 2px;
-    font-size: 12px;
-  }
-
-  .debts-table td[data-label="Debtor"]::before {
-    content: none;
-  }
-
-  .debts-table td:nth-child(1) {
-    grid-column: 1;
-    grid-row: 1;
-    padding-top: 6px;
-  }
-
-  .debts-table td:nth-child(2) {
-    grid-column: 2 / span 2;
-    grid-row: 1;
-  }
-
-  .debts-table td:nth-child(7) {
-    grid-column: 4;
-    grid-row: 1;
-  }
-
-  .debts-table td:nth-child(3) {
-    grid-column: 2;
-    grid-row: 2;
-  }
-
-  .debts-table td:nth-child(4) {
-    grid-column: 3;
-    grid-row: 2;
-    text-align: right;
-  }
-
-  .debts-table td:nth-child(5) {
-    grid-column: 2;
-    grid-row: 3;
-  }
-
-  .debts-table td:nth-child(6) {
-    grid-column: 3;
-    grid-row: 3;
-    text-align: right;
-  }
-
-  .debts-table .balance-cell {
-    justify-items: end;
-  }
-
-  .debts-table .progress-sm .progress-track {
-    width: 90px;
-  }
-
-  .bulk-bar {
-    left: 12px;
-    right: 12px;
-    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
-    justify-content: space-between;
-    transform: none;
-  }
-
+@media (max-width: 759px) {
   .statement-head {
     flex-direction: column;
   }
@@ -1627,59 +1521,12 @@
   }
 }
 
-.ws-view > .page-head {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  padding: 18px 20px 14px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
-}
-
-.ws-view > .page-head ~ .card > .card-head {
-  position: static;
-  margin: 0 -20px;
-  padding: 18px 20px 4px;
-  border-bottom: 0;
-  background: transparent;
-}
-
-.ws-view > .page-head ~ .card > .card-head .card-title {
-  font-size: 15px;
-}
-
-.ws-view > .card + .card {
-  border-top: 1px solid var(--line);
-}
-
-.ws-view > .card + .card > .card-head {
-  position: static;
-  padding-top: 18px;
-  padding-bottom: 4px;
-  border-bottom: 0;
-  background: transparent;
-}
-
-.ws-view > .card + .card > .card-head .card-title {
-  font-size: 15px;
-}
-
-.ws-view > .error-text,
-.ws-view > .deeplink-note,
-.ws-view > .skeleton {
-  margin: 14px 20px 0;
-}
-
-.ws-view > .skeleton {
-  width: auto;
-}
-
 .deeplink-note {
   gap: 10px;
-  padding: 8px 8px 8px 14px;
-  border: 1px solid var(--line);
+  padding: 10px 10px 10px 16px;
+  border: 2px solid var(--accent);
   border-radius: var(--r);
-  background: var(--soft);
+  background: var(--accent-soft);
   font-size: 14px;
 }
 
@@ -1690,20 +1537,7 @@
 .deeplink-note > .row > svg {
   flex: none;
   margin-top: 3px;
-  color: var(--muted);
-}
-
-.ws-main .kpi-row {
-  border-radius: var(--r-lg);
-}
-
-.ws-main .kpi-row .stat-card {
-  padding: 18px 20px;
-}
-
-.ws-main .kpi-row .stat-value {
-  font-size: 30px;
-  letter-spacing: -0.025em;
+  color: var(--accent-ink);
 }
 
 .mode-toggle-wrap {

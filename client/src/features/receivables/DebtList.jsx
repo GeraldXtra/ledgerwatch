@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, BellRing, Check, Coins, Inbox, Pencil, Trash2, Wallet } from "lucide-react";
-import { Avatar, EmptyState, KebabMenu, StatusPill } from "../../components/ui";
+import { EmptyState, KebabMenu, StatusPill } from "../../components/ui";
 import { ngn, shortDate } from "./format";
 import ProgressBar from "./ProgressBar";
 
@@ -7,7 +7,7 @@ const SORTABLE = [
   { key: "debtor", label: "Debtor" },
   { key: "amount", label: "Amount", align: "right" },
   { key: "balance", label: "Balance", align: "right" },
-  { key: "due", label: "Due date", align: "right" },
+  { key: "due", label: "Due date" },
   { key: "status", label: "Status" },
 ];
 
@@ -93,11 +93,12 @@ export default function DebtList({
                     onChange={() => onToggle(debt._id)}
                   />
                 </td>
-                <td data-label="Debtor" onClick={() => onOpen(debt)}>
+                <td data-label="Debtor" className="cell-title" onClick={() => onOpen(debt)}>
                   <div className="cell-lead">
-                    <Avatar name={debt.debtorName} />
                     <div>
-                      <div className="lead-name">{debt.debtorName}</div>
+                      <button type="button" className="lead-link">
+                        {debt.debtorName}
+                      </button>
                       <div className="lead-sub num">
                         {debt.debtorPhone || "no phone on file"}
                         {hasCrypto && (
@@ -125,13 +126,13 @@ export default function DebtList({
                     <ProgressBar paid={debt.amountPaid || 0} total={debt.amount} size="sm" />
                   </div>
                 </td>
-                <td data-label="Due date" align="right" className="ta-right num" onClick={() => onOpen(debt)}>
+                <td data-label="Due date" className="num" onClick={() => onOpen(debt)}>
                   {shortDate(debt.dueDate)}
                 </td>
                 <td data-label="Status" onClick={() => onOpen(debt)}>
                   <StatusPill status={status} />
                 </td>
-                <td data-label="" onClick={(e) => e.stopPropagation()}>
+                <td data-label="" className="cell-end" onClick={(e) => e.stopPropagation()}>
                   <div className="row" style={{ justifyContent: "flex-end" }}>
                     <KebabMenu
                       label={`Actions for ${debt.debtorName}`}

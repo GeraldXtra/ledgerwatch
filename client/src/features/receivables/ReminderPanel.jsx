@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Mail, MessageCircle, Send, TriangleAlert, X } from "lucide-react";
 import http from "../../api/http";
-import { Button, Modal, SkeletonLines, StatusPill, useToast } from "../../components/ui";
+import { Button, Modal, PageHeader, SkeletonLines, StatusPill, useToast } from "../../components/ui";
 
 function formatDateTime(value) {
   const d = new Date(value);
@@ -28,7 +28,7 @@ function DeliveryChip({ delivery }) {
   );
 }
 
-export default function ReminderPanel({ debt, result, onClose }) {
+export default function ReminderPanel({ debt, result, onClose, inline = false }) {
   const toast = useToast();
   const [reminders, setReminders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -120,22 +120,29 @@ export default function ReminderPanel({ debt, result, onClose }) {
     }
   }
 
-  return (
-    <Modal label={`Reminder for ${debt.debtorName}`} onClose={onClose}>
-      <div className="row space-between">
-        <h3 className="section-title">Reminder for {debt.debtorName}</h3>
-        <Button variant="ghost" icon title="Close" onClick={onClose}>
-          <X size={15} />
-        </Button>
-      </div>
+  const closeButton = (
+    <Button variant="ghost" icon title="Close" onClick={onClose}>
+      <X size={15} />
+    </Button>
+  );
 
+  const content = (
+    <>
       {result && (
-        <>
+        <section className="card">
+          {inline && (
+            <div className="card-head">
+              <div className="card-head-main">
+                <h3 className="card-title">Reminder for {debt.debtorName}</h3>
+              </div>
+              {closeButton}
+            </div>
+          )}
+          <div className="stack">
           <div className="reminder-box">{result.messageText}</div>
-
           <div className="row wrap">
             <Button
-              variant="primary"
+              variant="secondary"
               loading={sending === "whatsapp"}
               disabled={Boolean(sending) || !result.phoneValid}
               title={result.phoneValid ? "Send via WhatsApp provider" : "No valid phone number on file"}
@@ -198,11 +205,16 @@ export default function ReminderPanel({ debt, result, onClose }) {
               </span>
             </div>
           )}
-        </>
+          </div>
+        </section>
       )}
 
-      <div>
-        <div className="overline">Reminder log</div>
+      <section className="card">
+        <div className="card-head">
+          <div className="card-head-main">
+            <h3 className="card-title">Reminder log</h3>
+          </div>
+        </div>
         {logError && <p className="error-text">{logError}</p>}
         {loading ? (
           <div className="mt">
@@ -229,7 +241,21 @@ export default function ReminderPanel({ debt, result, onClose }) {
             ))}
           </ul>
         )}
-      </div>
+      </section>
+    </>
+  );
+
+  if (inline) return content;
+
+  return (
+    <Modal
+      label={`Reminder for ${debt.debtorName}`}
+      view="reminder"
+      crumb={`Reminder for ${debt.debtorName}`}
+      onClose={onClose}
+    >
+      <PageHeader title={<>Reminder for {debt.debtorName}</>} action={closeButton} />
+      {content}
     </Modal>
   );
 }

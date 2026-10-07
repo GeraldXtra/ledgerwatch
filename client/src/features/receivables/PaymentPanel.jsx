@@ -8,11 +8,30 @@ function newIdempotencyKey() {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
 }
 import http from "../../api/http";
-import { Button, EmptyState, SkeletonLines } from "../../components/ui";
+import { Button, Card, EmptyState, SkeletonLines } from "../../components/ui";
 import { ngn, dateTime, METHOD_LABEL } from "./format";
 import ProgressBar from "./ProgressBar";
 import RecordPaymentForm from "./RecordPaymentForm";
 import ReceiptCard from "./ReceiptCard";
+
+export function PaymentSummary({ debt }) {
+  const currency = debt.currency || "NGN";
+  const total = debt.amount || 0;
+  const paid = debt.amountPaid || 0;
+  const balance = debt.balance != null ? debt.balance : Math.max(0, total - paid);
+
+  return (
+    <div className="payment-summary">
+      <div className="row space-between">
+        <span className="overline">Paid {ngn(paid, currency)} of {ngn(total, currency)}</span>
+        <span className={`num mono-strong ${balance > 0 ? "value-neg" : "value-pos"}`}>
+          {balance > 0 ? `${ngn(balance, currency)} outstanding` : "Fully paid"}
+        </span>
+      </div>
+      <ProgressBar paid={paid} total={total} />
+    </div>
+  );
+}
 
 export default function PaymentPanel({ debt, onChange }) {
   const [payments, setPayments] = useState([]);
@@ -96,25 +115,17 @@ export default function PaymentPanel({ debt, onChange }) {
   }
 
   return (
-    <div className="stack">
-      <div className="payment-summary">
-        <div className="row space-between">
-          <span className="overline">Paid {ngn(paid, currency)} of {ngn(total, currency)}</span>
-          <span className={`num mono-strong ${balance > 0 ? "value-neg" : "value-pos"}`}>
-            {balance > 0 ? `${ngn(balance, currency)} outstanding` : "Fully paid"}
-          </span>
-        </div>
-        <ProgressBar paid={paid} total={total} />
-      </div>
-
-      <div className="row space-between">
-        <span className="overline">Payment history</span>
-        {balance > 0 && !adding && (
+    <Card
+      title="Payment history"
+      action={
+        balance > 0 && !adding ? (
           <Button size="sm" onClick={() => setAdding(true)}>
             <Plus size={14} /> Record payment
           </Button>
-        )}
-      </div>
+        ) : null
+      }
+    >
+    <div className="stack">
 
       {adding && (
         <RecordPaymentForm
@@ -137,7 +148,7 @@ export default function PaymentPanel({ debt, onChange }) {
           hint="Record a full or part payment and the balance updates instantly."
           action={
             balance > 0 && !adding ? (
-              <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
+              <button type="button" className="btn" onClick={() => setAdding(true)}>
                 Record payment
               </button>
             ) : null
@@ -171,5 +182,6 @@ export default function PaymentPanel({ debt, onChange }) {
         </div>
       )}
     </div>
+    </Card>
   );
 }

@@ -1576,6 +1576,17 @@ button.chip:hover {
   margin-bottom: -6px;
 }
 
+.pv-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  min-width: 0;
+}
+
+.card.stack > .card-head {
+  margin-bottom: 0;
+}
+
 .pv-foot,
 .form-foot {
   display: flex;
@@ -1732,6 +1743,10 @@ button.chip:hover {
 
 .detail-stat .num {
   font-size: 14px;
+}
+
+.detail-stat > * {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
@@ -1939,9 +1954,14 @@ button.chip:hover {
     width: 100%;
   }
 
-  .page-head-actions > .btn-primary {
+  .page-head-actions > .btn-primary,
+  .page-head-actions > .row > .btn-primary {
     order: -1;
     flex: 1 1 100%;
+  }
+
+  .page-head-actions > .row {
+    width: 100%;
   }
 }
 
@@ -2090,9 +2110,31 @@ button.chip:hover {
     content: none;
   }
 
+  .table-stack tbody tr {
+    position: relative;
+  }
+
+  .table-stack td.check-col {
+    position: absolute;
+    left: 0;
+    top: 2px;
+    width: auto;
+    padding: 0;
+  }
+
+  .table-stack tr:has(td.check-col) td.cell-title {
+    padding-left: 28px;
+  }
+
   .table-stack td.cell-end {
-    grid-column: 1 / -1;
-    justify-items: start;
+    position: absolute;
+    right: -10px;
+    top: -10px;
+    padding: 0;
+  }
+
+  .table-stack tr:has(td.cell-end) td.cell-title {
+    padding-right: 44px;
   }
 }
 

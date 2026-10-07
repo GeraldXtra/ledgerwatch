@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { BellRing, FileText, Receipt, Wallet, X } from "lucide-react";
 import http from "../../api/http";
-import { Avatar, Button, Modal, SkeletonBlock, StatusPill } from "../../components/ui";
+import { Button, Card, Modal, PageHeader, SkeletonBlock, StatusPill } from "../../components/ui";
 import { ngn, dateTime, shortDate, METHOD_LABEL } from "./format";
 import ReliabilityBadge from "./ReliabilityBadge";
 import DebtorStatement from "./DebtorStatement";
@@ -87,7 +87,13 @@ export default function DebtorProfile({ debtorKey, onClose }) {
   const debtor = data?.debtor;
 
   return (
-    <Modal label="Debtor profile" onClose={onClose} size="lg">
+    <Modal
+      label="Debtor profile"
+      view="debtor"
+      crumb={debtor ? debtor.debtorName : "Debtor profile"}
+      onClose={onClose}
+      size="lg"
+    >
       {error ? (
         <p className="error-text">{error}</p>
       ) : !data ? (
@@ -98,41 +104,42 @@ export default function DebtorProfile({ debtorKey, onClose }) {
         </>
       ) : (
         <>
-          <div className="row space-between coin-detail-head">
-            <div className="row">
-              <Avatar name={debtor.debtorName} size="lg" />
-              <div>
-                <h3 className="section-title">{debtor.debtorName}</h3>
-                <div className="muted small num">{debtor.debtorPhone || `${debtor.debtCount} debts`}</div>
-              </div>
-            </div>
-            <div className="row">
-              <ReliabilityBadge score={debtor.reliabilityScore} band={debtor.band} />
+          <PageHeader
+            title={debtor.debtorName}
+            support={
+              <span className="row wrap">
+                <ReliabilityBadge score={debtor.reliabilityScore} band={debtor.band} />
+                <span className="num">{debtor.debtorPhone || `${debtor.debtCount} debts`}</span>
+              </span>
+            }
+            action={
               <Button variant="ghost" icon title="Close" onClick={onClose}>
                 <X size={16} />
               </Button>
-            </div>
-          </div>
+            }
+          />
 
+          <Card title="Details">
           <div className="detail-stats">
-            <div className="detail-stat"><span className="overline">Borrowed in total</span><span className="num mono-strong">{ngn(debtor.totalBorrowed)}</span></div>
-            <div className="detail-stat"><span className="overline">Outstanding</span><span className={`num mono-strong ${debtor.totalOutstanding > 0 ? "value-neg" : "value-pos"}`}>{ngn(debtor.totalOutstanding)}</span></div>
-            <div className="detail-stat"><span className="overline">On time rate</span><span className="num mono-strong">{debtor.onTimeRate != null ? `${Math.round(debtor.onTimeRate * 100)}%` : "Not yet"}</span></div>
-            <div className="detail-stat"><span className="overline">Avg days to pay</span><span className="num mono-strong">{debtor.avgDaysToPay != null ? debtor.avgDaysToPay : "Not yet"}</span></div>
+            <div className="detail-stat"><span className="overline">Borrowed in total</span><span className="num">{ngn(debtor.totalBorrowed)}</span></div>
+            <div className="detail-stat"><span className="overline">Outstanding</span><span className={`num ${debtor.totalOutstanding > 0 ? "value-neg" : "value-pos"}`}>{ngn(debtor.totalOutstanding)}</span></div>
+            <div className="detail-stat"><span className="overline">On time rate</span><span className="num">{debtor.onTimeRate != null ? `${Math.round(debtor.onTimeRate * 100)}%` : "Not yet"}</span></div>
+            <div className="detail-stat"><span className="overline">Avg days to pay</span><span className="num">{debtor.avgDaysToPay != null ? debtor.avgDaysToPay : "Not yet"}</span></div>
           </div>
+          </Card>
 
-          <div className="detail-section">
-            <div className="row space-between">
-              <span className="overline">Payment behaviour</span>
-              <Button size="sm" variant="ghost" onClick={openStatement}>
+          <Card
+            title="Payment behaviour"
+            action={
+              <Button size="sm" onClick={openStatement}>
                 <FileText size={14} /> Statement
               </Button>
-            </div>
+            }
+          >
             <BehaviourChart timeline={data.timeline} />
-          </div>
+          </Card>
 
-          <div className="detail-section">
-            <span className="overline">Timeline</span>
+          <Card title="Timeline">
             <ul className="timeline">
               {data.timeline
                 .slice()
@@ -151,7 +158,7 @@ export default function DebtorProfile({ debtorKey, onClose }) {
                   </li>
                 ))}
             </ul>
-          </div>
+          </Card>
         </>
       )}
     </Modal>

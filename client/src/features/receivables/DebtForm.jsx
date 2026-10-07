@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import http from "../../api/http";
-import { Button, Field, Input } from "../../components/ui";
+import { Button, Field, Input, PageHeader } from "../../components/ui";
 import ReliabilityBadge from "./ReliabilityBadge";
 import { compactNgn } from "./format";
 
@@ -116,17 +116,18 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
   }
 
   return (
-    <div className="stack">
-      <div>
-        <h3 className="section-title">{editing ? "Edit debt" : "Record a debt"}</h3>
-        <p className="muted small" style={{ margin: "4px 0 0" }}>
-          {editing
+    <>
+      <PageHeader
+        title={editing ? "Edit debt" : "Record a debt"}
+        support={
+          editing
             ? "Update the details of this receivable."
-            : "Track a credit sale. LedgerWatch drafts the reminders for you."}
-        </p>
-      </div>
+            : "Track a credit sale. LedgerWatch drafts the reminders for you."
+        }
+      />
 
-      <form onSubmit={submit} className="stack">
+      <form onSubmit={submit} className="pv-form">
+        <section className="card stack">
         <div className="grid2 debt-form-grid">
           <Field label="Debtor name">
             <Input value={form.debtorName} onChange={update("debtorName")} required autoFocus />
@@ -200,8 +201,9 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
         )}
 
         {error && <p className="error-text">{error}</p>}
+        </section>
 
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+        <div className="pv-foot">
           <Button variant="ghost" onClick={onCancel} disabled={busy}>
             Cancel
           </Button>
@@ -210,6 +212,6 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
           </Button>
         </div>
       </form>
-    </div>
+    </>
   );
 }

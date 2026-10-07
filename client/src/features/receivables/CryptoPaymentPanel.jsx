@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { ArrowDownToLine, Ban, Check, Coins, Copy, ExternalLink, Hourglass, ShieldCheck, TriangleAlert } from "lucide-react";
-import { Button, Input, SkeletonLines } from "../../components/ui";
+import { Button, Card, Input, SkeletonLines } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { getStoredAddress, hasWallet } from "../wallet/keystore";
 import { verifyAddress } from "../wallet/derivation";
@@ -103,8 +103,8 @@ export default function CryptoPaymentPanel({ debt, refreshKey = 0 }) {
   if (addresses.length === 0) return null;
 
   return (
-    <div className="stack-sm">
-      <span className="overline">Crypto payment</span>
+    <Card title="Crypto payment">
+      <div className="stack-sm">
       {addresses.map((pa) => (
         <AddressCard
           key={pa._id}
@@ -116,7 +116,8 @@ export default function CryptoPaymentPanel({ debt, refreshKey = 0 }) {
           currentRate={currentRate}
         />
       ))}
-    </div>
+      </div>
+    </Card>
   );
 }
 

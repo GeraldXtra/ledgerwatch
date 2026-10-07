@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  Coins,
   ExternalLink,
   KeyRound,
   ShieldCheck,
@@ -9,7 +8,7 @@ import {
   Wallet,
   X,
 } from "lucide-react";
-import { Button, Field, Input, Modal, Select, SkeletonLines } from "../../components/ui";
+import { Button, Field, Input, Modal, PageHeader, Select, SkeletonLines } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { hasWallet, unlockWallet } from "../wallet/keystore";
 import { canDerive, deriveAddressFromWallet } from "../wallet/derivation";
@@ -169,8 +168,9 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
 
   if (!walletPresent) {
     return (
-      <Modal label="Crypto payment" onClose={onClose}>
+      <Modal label="Crypto payment" view="crypto" onClose={onClose}>
         <Head onClose={onClose} title="Crypto payment" />
+        <section className="card">
         <div className="crypto-blocked">
           <span className="icon-tile neutral">
             <Wallet size={16} />
@@ -183,7 +183,8 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
             </p>
           </div>
         </div>
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+        </section>
+        <div className="pv-foot">
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
@@ -197,8 +198,9 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
 
   if (cannotDerive) {
     return (
-      <Modal label="Crypto payment" onClose={onClose}>
+      <Modal label="Crypto payment" view="crypto" onClose={onClose}>
         <Head onClose={onClose} title="Crypto payment" />
+        <section className="card">
         <div className="crypto-blocked">
           <span className="icon-tile neutral">
             <KeyRound size={16} />
@@ -216,7 +218,8 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
             </p>
           </div>
         </div>
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+        </section>
+        <div className="pv-foot">
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
@@ -234,22 +237,27 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
   const blocked = Boolean(noChains || chainsError || nothingOwed || alreadyActive || quoteError);
 
   return (
-    <Modal label="Crypto payment" onClose={onClose}>
-      <Head onClose={onClose} title={`Crypto payment for ${debt.debtorName}`} />
+    <Modal label="Crypto payment" view="crypto" onClose={onClose}>
+      <Head
+        onClose={onClose}
+        title={`Crypto payment for ${debt.debtorName}`}
+        support={
+          <>
+            This invoice gets an address of its own, so anything arriving at it is matched to this
+            debt automatically. The address is derived from your wallet inside this browser and only
+            the public address is stored.
+          </>
+        }
+      />
 
-      <div className="row wrap">
-        {quote && quote.rateStale && (
+      {quote && quote.rateStale && (
+        <div className="row wrap">
           <span className="pill warn">Rate is a fallback, not live</span>
-        )}
-      </div>
+        </div>
+      )}
 
-      <p className="muted small" style={{ margin: 0 }}>
-        This invoice gets an address of its own, so anything arriving at it is matched to this
-        debt automatically. The address is derived from your wallet inside this browser and only
-        the public address is stored.
-      </p>
-
-      <form className="stack" onSubmit={issue}>
+      <form className="pv-form" onSubmit={issue}>
+        <section className="card stack">
         <Field label="Network">
           <Select
             value={chainId || ""}
@@ -383,7 +391,9 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
           </div>
         )}
 
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+        </section>
+
+        <div className="pv-foot">
           <Button variant="ghost" onClick={onClose} disabled={Boolean(busy)}>
             Cancel
           </Button>
@@ -396,15 +406,16 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
   );
 }
 
-function Head({ title, onClose }) {
+function Head({ title, support, onClose }) {
   return (
-    <div className="row space-between">
-      <h3 className="section-title row">
-        <Coins size={17} /> {title}
-      </h3>
-      <Button variant="ghost" icon title="Close" onClick={onClose}>
-        <X size={15} />
-      </Button>
-    </div>
+    <PageHeader
+      title={title}
+      support={support}
+      action={
+        <Button variant="ghost" icon title="Close" onClick={onClose}>
+          <X size={15} />
+        </Button>
+      }
+    />
   );
 }

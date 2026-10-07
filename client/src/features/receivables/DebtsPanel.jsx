@@ -3,10 +3,10 @@ import { BellRing, Download, Plus, Search } from "lucide-react";
 import http from "../../api/http";
 import {
   Button,
-  Card,
   Field,
   Input,
   Modal,
+  PageHeader,
   Select,
   SkeletonLines,
   StatCard,
@@ -284,27 +284,28 @@ export default function DebtsPanel({ onLedgerChanged }) {
   const k = kpis(debts);
   const overdueCount = debts.filter((d) => d.displayStatus === "overdue").length;
   const detailDebt = detailId ? debts.find((d) => d._id === detailId) : null;
+  const reminderInline = Boolean(reminder && detailDebt && reminder.debt._id === detailDebt._id);
 
   return (
     <>
-      <Card
+      <PageHeader
         eyebrow="Ledger"
         title="Debts"
-        subtitle={`${debts.length} result${debts.length === 1 ? "" : "s"}`}
+        count={debts.length}
         action={
-          <div className="row wrap">
-            <Button size="sm" variant="ghost" onClick={remindAllOverdue} disabled={bulkBusy || overdueCount === 0}>
+          <>
+            <Button onClick={remindAllOverdue} disabled={bulkBusy || overdueCount === 0}>
               <BellRing size={14} /> Remind all overdue
             </Button>
-            <Button size="sm" variant="ghost" onClick={exportCsv} disabled={debts.length === 0}>
+            <Button onClick={exportCsv} disabled={debts.length === 0}>
               <Download size={14} /> CSV
             </Button>
-            <Button size="sm" variant="primary" onClick={() => setAdding(true)}>
+            <Button variant="primary" onClick={() => setAdding(true)}>
               <Plus size={14} /> Record debt
             </Button>
-          </div>
+          </>
         }
-      >
+      />
         {loading && debts.length === 0 ? (
           <div className="kpi-row">
             <SkeletonBlockRow />
@@ -318,6 +319,7 @@ export default function DebtsPanel({ onLedgerChanged }) {
           </div>
         )}
 
+      <section className="card card-flush">
         <div className="filters-row">
           <div className="search-field grow">
             <Search size={15} className="search-icon" />
@@ -366,17 +368,22 @@ export default function DebtsPanel({ onLedgerChanged }) {
             cryptoIds={cryptoIds}
           />
         )}
-      </Card>
+      </section>
 
       <BulkActionBar count={selected.size} onRemind={remindSelected} onClear={clearSel} busy={bulkBusy} />
 
       {adding && (
-        <Modal label="Record a debt" onClose={() => setAdding(false)}>
+        <Modal label="Record a debt" view="record" onClose={() => setAdding(false)}>
           <DebtForm onSubmit={createDebt} onCancel={() => setAdding(false)} />
         </Modal>
       )}
       {editing && (
-        <Modal label={`Edit debt for ${editing.debtorName}`} onClose={() => setEditing(null)}>
+        <Modal
+          label={`Edit debt for ${editing.debtorName}`}
+          view="edit"
+          crumb="Edit debt"
+          onClose={() => setEditing(null)}
+        >
           <DebtForm initial={editing} onSubmit={saveEdit} onCancel={() => setEditing(null)} />
         </Modal>
       )}
@@ -391,6 +398,8 @@ export default function DebtsPanel({ onLedgerChanged }) {
           onChanged={reloadAll}
           onCrypto={(d) => { setDetailId(null); setCryptoDebt(d); }}
           cryptoKey={cryptoKey}
+          reminder={reminderInline ? reminder : null}
+          onCloseReminder={() => setReminder(null)}
         />
       )}
       {cryptoDebt && (
@@ -423,7 +432,7 @@ export default function DebtsPanel({ onLedgerChanged }) {
         />
         </Suspense>
       )}
-      {reminder && (
+      {reminder && !reminderInline && (
         <ReminderPanel debt={reminder.debt} result={reminder.result} onClose={() => setReminder(null)} />
       )}
     </>
