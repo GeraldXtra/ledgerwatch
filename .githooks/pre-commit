@@ -9,7 +9,8 @@
 #
 #     git config core.hooksPath .githooks
 #
-# CI runs gitleaks over the full history and is the real gate. This hook exists so
+# CI runs gitleaks over every commit pushed to main or proposed against it, and is
+# the real gate. This hook exists so
 # the failure happens in two seconds on the desk instead of two minutes later in a
 # pull request, and so a secret is never written into a commit object at all —
 # because once it is, removing it means rewriting history, which is what LW-001
@@ -50,13 +51,37 @@ done
 # ---------------------------------------------------------------------------
 # 2. A recovery phrase in the content
 #
-# Twelve or more lowercase words in a row on one line. Prose is punctuated and
-# capitalised; a BIP-39 phrase is exactly this and nothing else.
+# Twelve or more words in a row from the BIP-39 English wordlist, separated by
+# single spaces, in any case: the same rule and the same exact test phrases as
+# .gitleaks.toml. Ordinary prose almost always has a word that is not on the list.
 # ---------------------------------------------------------------------------
+wordlist=".githooks/bip39-english.txt"
+[ -f "$wordlist" ] || fail "the BIP-39 wordlist is missing" "$wordlist"
 phrase=$(git diff --cached -U0 -- $staged \
   | grep '^+' | grep -v '^+++' \
-  | grep -Ei '\b([a-z]{3,8} ){11,}[a-z]{3,8}\b' \
-  | grep -Eiv '(example|placeholder|abandon abandon|test vector)' \
+  | awk -v list="$wordlist" '
+      BEGIN { while ((getline w < list) > 0) { sub(/\r$/, "", w); bip[w] = 1 } }
+      function check() {
+        if (cnt >= 12 &&
+            run !~ /^(abandon )+(about|agent|art)$/ &&
+            run !~ /^(zoo )+(wrong|when|vote)$/ &&
+            run !~ /^abandon ability able about above absent absorb abstract absurd abuse access accident/) hit = 1
+        run = ""; cnt = 0
+      }
+      {
+        line = tolower(substr($0, 2))
+        gsub(/[^a-z ]/, "|", line)
+        hit = 0; run = ""; cnt = 0
+        nseg = split(line, seg, /[|]/)
+        for (s = 1; s <= nseg; s++) {
+          n = split(seg[s], tok, / /)
+          for (i = 1; i <= n; i++) {
+            if (tok[i] in bip) { run = cnt ? run " " tok[i] : tok[i]; cnt++ } else check()
+          }
+          check()
+        }
+        if (hit) print
+      }' \
   | head -3 || true)
 if [ -n "$phrase" ]; then
   fail "a line looks like a BIP-39 recovery phrase" "$phrase"
