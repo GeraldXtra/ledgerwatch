@@ -26,6 +26,47 @@ export function unsupportedReason() {
   return null;
 }
 
+const OFF_KEY = "ledgerwatch.push.off";
+const ENDPOINT_KEY = "ledgerwatch.push.endpoint";
+const SYNC_EVERY_MS = 10 * 60 * 1000;
+let lastSyncAt = 0;
+let syncing = null;
+
+function readStore(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStore(key, value) {
+  try {
+    if (value == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    return;
+  }
+}
+
+export function pushTurnedOffHere() {
+  return readStore(OFF_KEY) === "1";
+}
+
+function sameKey(subscription, publicKey) {
+  try {
+    const current = subscription.options && subscription.options.applicationServerKey;
+    if (!current) return true;
+    const a = new Uint8Array(current);
+    const b = urlBase64ToUint8Array(publicKey);
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 function urlBase64ToUint8Array(base64String) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -144,7 +185,14 @@ export async function enablePush() {
   }
 
   try {
-    await http.post("/api/push/subscribe", { subscription: sub.toJSON() });
+    const previous = readStore(ENDPOINT_KEY);
+    await http.post("/api/push/subscribe", {
+      subscription: sub.toJSON(),
+      replaces: previous && previous !== sub.endpoint ? previous : undefined,
+    });
+    writeStore(ENDPOINT_KEY, sub.endpoint);
+    writeStore(OFF_KEY, null);
+    lastSyncAt = Date.now();
     log("stored on the server");
   } catch (err) {
     warn("could not store the subscription", err);
@@ -152,6 +200,74 @@ export async function enablePush() {
   }
 
   return { ok: true };
+}
+
+async function doSync(force) {
+  if (!pushSupported() || unsupportedReason()) return { ok: false, reason: "unsupported" };
+  if (Notification.permission !== "granted") return { ok: false, reason: "no-permission" };
+  if (pushTurnedOffHere()) return { ok: false, reason: "off-here" };
+  if (!force && Date.now() - lastSyncAt < SYNC_EVERY_MS) return { ok: true, reason: "recent" };
+
+  let publicKey;
+  try {
+    const { data } = await http.get("/api/push/key");
+    publicKey = data.publicKey;
+  } catch (err) {
+    warn("sync: VAPID key request failed", err);
+    return { ok: false, reason: "no-key" };
+  }
+  if (!publicKey) return { ok: false, reason: "not-configured" };
+
+  const reg = await registerServiceWorker();
+  let sub = await reg.pushManager.getSubscription();
+  const previous = readStore(ENDPOINT_KEY);
+  if (sub && !sameKey(sub, publicKey)) {
+    log("sync: the server key changed, renewing the subscription");
+    await sub.unsubscribe().catch(() => {});
+    sub = null;
+  }
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+    log("sync: subscribed again", sub.endpoint.slice(0, 60) + "…");
+  }
+
+  await http.post("/api/push/subscribe", {
+    subscription: sub.toJSON(),
+    replaces: previous && previous !== sub.endpoint ? previous : undefined,
+  });
+  writeStore(ENDPOINT_KEY, sub.endpoint);
+  lastSyncAt = Date.now();
+  return { ok: true, endpoint: sub.endpoint };
+}
+
+export function syncPush({ force = false } = {}) {
+  if (syncing) return syncing;
+  syncing = doSync(force)
+    .catch((err) => {
+      warn("sync failed", err);
+      return { ok: false, reason: "failed", detail: err?.response?.data?.error || err.message };
+    })
+    .finally(() => {
+      syncing = null;
+    });
+  return syncing;
+}
+
+export async function releaseDeviceOnSignOut() {
+  if (!pushSupported()) return;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    const endpoint = (sub && sub.endpoint) || readStore(ENDPOINT_KEY);
+    if (endpoint) await http.post("/api/push/unsubscribe", { endpoint });
+  } catch (err) {
+    warn("could not release this device on sign out", err);
+  } finally {
+    lastSyncAt = 0;
+  }
 }
 
 export async function disablePush() {
@@ -174,6 +290,9 @@ export async function disablePush() {
         detail: err?.response?.data?.error || err.message,
       };
     }
+
+    writeStore(OFF_KEY, "1");
+    writeStore(ENDPOINT_KEY, null);
 
     try {
       await sub.unsubscribe();
@@ -199,7 +318,8 @@ export function onForegroundPush(handler) {
   if (!("serviceWorker" in navigator)) return () => {};
   const listener = (event) => {
     const data = event.data || {};
-    if (data.type === "push") handler({ kind: "push", payload: data.payload });
+    if (data.type === "push") handler({ kind: "push", payload: data.payload, shown: Boolean(data.shown) });
+    else if (data.type === "push-resubscribed") handler({ kind: "resubscribed", endpoint: data.endpoint });
     else if (data.type === "action-result") handler({ kind: "action-result", ...data });
   };
   navigator.serviceWorker.addEventListener("message", listener);

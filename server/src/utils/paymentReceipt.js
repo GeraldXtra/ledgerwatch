@@ -1,18 +1,4 @@
-const FONT = "'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
-const INK = "#0a1428";
-const GOLD = "#c0a053";
-const BODY = "#3a4658";
-const MUTED = "#64748b";
-const LINE = "#e1e7f0";
-const WELL = "#f4f7fa";
-const POS = "#1c7a52";
-
-function esc(s) {
-  return String(s == null ? "" : s).replace(
-    /[<>&"]/g,
-    (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c])
-  );
-}
+const { FONT, MONO, INK, BODY, MUTED, LINE, WELL, PAGE, POS, ACCENT_INK, esc, brandHeader } = require("./emailBrand");
 
 function ngn(amount) {
   return Number(amount || 0).toLocaleString("en-NG", { maximumFractionDigits: 2 });
@@ -82,10 +68,6 @@ function buildPaymentReceiptEmail({
 
   const text = lines.join("\n");
 
-  const logoCell = hasLogo
-    ? `<img src="cid:ledgerwatch-logo" width="36" height="36" alt="" style="display:block;border:0;border-radius:9px" />`
-    : "";
-
   const html = `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -93,29 +75,19 @@ function buildPaymentReceiptEmail({
 <meta name="x-apple-disable-message-reformatting">
 <title>Payment received</title>
 </head>
-<body style="margin:0;padding:0;background:#eef2f8;-webkit-text-size-adjust:100%">
-<div style="display:none;font-size:1px;color:#eef2f8;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${esc(
+<body style="margin:0;padding:0;background:${PAGE};-webkit-text-size-adjust:100%">
+<div style="display:none;font-size:1px;color:${PAGE};line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${esc(
     isCrypto
       ? `${Number(amountUsdc).toFixed(2)} ${tokenSymbol} received by ${supplier}`
       : `${ngn(creditNgn)} naira received by ${supplier}`
   )}</div>
 
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef2f8;padding:28px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${PAGE};padding:28px 12px">
   <tr><td align="center">
     <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
-           style="width:100%;max-width:600px;background:#ffffff;border:1px solid ${LINE};border-radius:16px;overflow:hidden">
+           style="width:100%;max-width:600px;background:#ffffff;border:1px solid ${LINE};border-radius:12px;overflow:hidden">
 
-      <tr><td style="height:4px;background:${GOLD};line-height:4px;font-size:0">&nbsp;</td></tr>
-
-      <tr><td style="padding:24px 28px 18px;border-bottom:1px solid ${LINE}">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-          ${logoCell ? `<td style="padding-right:12px;vertical-align:middle">${logoCell}</td>` : ""}
-          <td style="vertical-align:middle">
-            <div style="font:700 19px ${FONT};color:${INK};letter-spacing:-.2px">Ledger<span style="color:${GOLD}">Watch</span></div>
-            <div style="font:400 12px ${FONT};color:${MUTED};padding-top:2px">Payment receipt from ${supplier}</div>
-          </td>
-        </tr></table>
-      </td></tr>
+      ${brandHeader({ hasLogo, subtitle: `Payment receipt from ${businessName || "your supplier"}` })}
 
       <tr><td style="padding:24px 28px 4px">
         <div style="font:600 17px ${FONT};color:${POS};padding-bottom:12px">${headline}</div>
@@ -128,9 +100,7 @@ function buildPaymentReceiptEmail({
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
                style="background:${WELL};border:1px solid ${LINE};border-radius:12px">
           <tr><td style="padding:16px 18px">
-            <div style="font:600 11px ${FONT};letter-spacing:.08em;text-transform:uppercase;color:${MUTED}">Amount received</div>
-            <!-- Bank payments have no token and no chain. Reading chain.name
-                 unguarded here would throw on every bank receipt. -->
+            <div style="font:600 11px ${FONT};color:${MUTED}">Amount received</div>
             <div style="font:700 24px ${FONT};color:${INK};padding-top:5px">${
               isCrypto
                 ? `${Number(amountUsdc).toFixed(2)} ${esc(tokenSymbol)}`
@@ -148,7 +118,7 @@ function buildPaymentReceiptEmail({
       ${
         fullyPaid
           ? `<tr><td style="padding:16px 28px 4px">
-               <div style="padding:12px 16px;border-radius:10px;background:#e6f4ee;font:600 14px ${FONT};color:${POS}">
+               <div style="padding:12px 16px;border-radius:10px;background:#F2F8F0;font:600 14px ${FONT};color:${POS}">
                  This settles your account in full. Nothing further is outstanding.
                </div>
              </td></tr>`
@@ -162,7 +132,7 @@ function buildPaymentReceiptEmail({
                <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
                       style="background:${WELL};border:1px solid ${LINE};border-radius:12px">
                  <tr><td style="padding:16px 18px">
-                   <div style="font:600 11px ${FONT};letter-spacing:.08em;text-transform:uppercase;color:${MUTED}">To settle the rest in ${esc(
+                   <div style="font:600 11px ${FONT};color:${MUTED}">To settle the rest in ${esc(
                      stillOwedSymbol || ""
                    )}</div>
                    <div style="font:700 20px ${FONT};color:${INK};padding-top:5px">${Number(
@@ -171,7 +141,7 @@ function buildPaymentReceiptEmail({
                    <div style="font:400 13px ${FONT};color:${MUTED};padding-top:4px">on ${esc(
                      payToChainName
                    )}. This network only</div>
-                   <div style="font:600 11px ${FONT};letter-spacing:.08em;text-transform:uppercase;color:${MUTED};padding-top:12px">Send to</div>
+                   <div style="font:600 11px ${FONT};color:${MUTED};padding-top:12px">Send to</div>
                    <div style="font:400 13px/1.5 ${FONT};color:${INK};word-break:break-all;padding-top:4px">${esc(
                      payToAddress
                    )}</div>
@@ -193,9 +163,9 @@ function buildPaymentReceiptEmail({
       ${
         explorer
           ? `<tr><td style="padding:16px 28px 4px">
-               <div style="font:600 11px ${FONT};letter-spacing:.08em;text-transform:uppercase;color:${MUTED};padding-bottom:6px">Transaction</div>
-               <div style="font:600 12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;word-break:break-all;color:${INK}">${esc(chainTxHash)}</div>
-               <a href="${esc(explorer)}" style="display:inline-block;margin-top:8px;font:600 13px ${FONT};color:#22406f;text-decoration:underline">View it on the blockchain explorer</a>
+               <div style="font:600 11px ${FONT};color:${MUTED};padding-bottom:6px">Transaction</div>
+               <div style="font:600 12px/1.5 ${MONO};word-break:break-all;color:${INK}">${esc(chainTxHash)}</div>
+               <a href="${esc(explorer)}" style="display:inline-block;margin-top:8px;font:600 13px ${FONT};color:${ACCENT_INK};text-decoration:underline">View it on the blockchain explorer</a>
              </td></tr>`
           : ""
       }

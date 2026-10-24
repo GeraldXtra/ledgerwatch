@@ -36,13 +36,14 @@ export default function TokenLogo({
   title,
 }) {
   const url = useTokenLogo(symbol);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    setLoaded(false);
-  }, [url]);
+  const [loadedUrl, setLoadedUrl] = useState(null);
+  const loaded = Boolean(url) && loadedUrl === url;
 
   const wantsImage = Boolean(url) && !unknown;
+
+  const imgRef = (img) => {
+    if (img && img.complete && img.naturalWidth > 0 && loadedUrl !== url) setLoadedUrl(url);
+  };
 
   const cls = [
     "mm-mark",
@@ -62,12 +63,14 @@ export default function TokenLogo({
       </span>
       {wantsImage ? (
         <img
+          key={url}
+          ref={imgRef}
           className="tk-logo-img"
           src={url}
           alt=""
           loading="lazy"
           decoding="async"
-          onLoad={() => setLoaded(true)}
+          onLoad={() => setLoadedUrl(url)}
           onError={() => markLogoBroken(symbol)}
         />
       ) : null}

@@ -17,54 +17,114 @@ async function key(req, res) {
   return res.json({ publicKey: publicKey(), configured: pushConfigured() });
 }
 
+function subscriptionProblem(sub) {
+  if (!sub || !sub.endpoint || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) {
+    return "Invalid subscription";
+  }
+  if (
+    typeof sub.endpoint !== "string" ||
+    sub.endpoint.length > 2048 ||
+    typeof sub.keys.p256dh !== "string" ||
+    sub.keys.p256dh.length > 256 ||
+    typeof sub.keys.auth !== "string" ||
+    sub.keys.auth.length > 128
+  ) {
+    return "Invalid subscription";
+  }
+
+  let host;
+  try {
+    const u = new URL(String(sub.endpoint));
+    if (u.protocol !== "https:") throw new Error("not https");
+    host = u.hostname.toLowerCase();
+  } catch {
+    return "Invalid subscription endpoint";
+  }
+  const allowedHost =
+    host === "fcm.googleapis.com" ||
+    host === "updates.push.services.mozilla.com" ||
+    host.endsWith(".notify.windows.com") ||
+    host.endsWith(".push.apple.com");
+  return allowedHost ? null : "That push service is not supported";
+}
+
+async function bindDevice(userId, sub, userAgent) {
+  await PushSubscription.deleteMany({ endpoint: sub.endpoint, userId: { $ne: userId } });
+  const row = { userId, endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } };
+  if (userAgent) row.userAgent = String(userAgent).slice(0, 400);
+  try {
+    return await PushSubscription.findOneAndUpdate({ endpoint: sub.endpoint, userId }, row, {
+      upsert: true,
+      new: true,
+      setDefaultsOnInsert: true,
+    });
+  } catch (err) {
+    if (err.code !== 11000) throw err;
+    await PushSubscription.deleteMany({ endpoint: sub.endpoint, userId: { $ne: userId } });
+    return PushSubscription.findOneAndUpdate({ endpoint: sub.endpoint, userId }, row, {
+      upsert: true,
+      new: true,
+      setDefaultsOnInsert: true,
+    });
+  }
+}
+
 async function subscribe(req, res) {
   try {
     const sub = req.body && req.body.subscription;
-    if (!sub || !sub.endpoint || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) {
-      return res.status(400).json({ error: "Invalid subscription" });
+    const problem = subscriptionProblem(sub);
+    if (problem) return res.status(400).json({ error: problem });
+    const replaces = req.body && typeof req.body.replaces === "string" ? req.body.replaces : null;
+    if (replaces && replaces !== sub.endpoint) {
+      await PushSubscription.deleteOne({ endpoint: replaces, userId: req.user._id });
     }
-    if (
-      typeof sub.endpoint !== "string" ||
-      sub.endpoint.length > 2048 ||
-      typeof sub.keys.p256dh !== "string" ||
-      sub.keys.p256dh.length > 256 ||
-      typeof sub.keys.auth !== "string" ||
-      sub.keys.auth.length > 128
-    ) {
-      return res.status(400).json({ error: "Invalid subscription" });
-    }
-
-    let host;
-    try {
-      const u = new URL(String(sub.endpoint));
-      if (u.protocol !== "https:") throw new Error("not https");
-      host = u.hostname.toLowerCase();
-    } catch {
-      return res.status(400).json({ error: "Invalid subscription endpoint" });
-    }
-    const allowedHost =
-      host === "fcm.googleapis.com" ||
-      host === "updates.push.services.mozilla.com" ||
-      host.endsWith(".notify.windows.com") ||
-      host.endsWith(".push.apple.com");
-    if (!allowedHost) {
-      return res.status(400).json({ error: "That push service is not supported" });
-    }
-
-    await PushSubscription.findOneAndUpdate(
-      { endpoint: sub.endpoint, userId: req.user._id },
-      {
-        userId: req.user._id,
-        endpoint: sub.endpoint,
-        keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth },
-        userAgent: req.headers["user-agent"],
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-    return res.status(201).json({ ok: true });
+    await bindDevice(req.user._id, sub, req.headers["user-agent"]);
+    const devices = await PushSubscription.countDocuments({ userId: req.user._id });
+    return res.status(201).json({ ok: true, devices });
   } catch (err) {
     console.error("push subscribe error:", err.message);
     return res.status(500).json({ error: "Failed to subscribe" });
+  }
+}
+
+async function resubscribe(req, res) {
+  try {
+    const oldEndpoint = req.body && req.body.oldEndpoint;
+    const sub = req.body && req.body.subscription;
+    if (typeof oldEndpoint !== "string" || !oldEndpoint || oldEndpoint.length > 2048) {
+      return res.status(400).json({ error: "oldEndpoint required" });
+    }
+    const problem = subscriptionProblem(sub);
+    if (problem) return res.status(400).json({ error: problem });
+
+    const previous = await PushSubscription.find({ endpoint: oldEndpoint }).select("userId").lean();
+    if (!previous.length) return res.status(404).json({ error: "That subscription is not known" });
+    const owner = previous[0].userId;
+    await PushSubscription.deleteMany({ endpoint: oldEndpoint });
+    await bindDevice(owner, sub, req.headers["user-agent"]);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("push resubscribe error:", err.message);
+    return res.status(500).json({ error: "Failed to resubscribe" });
+  }
+}
+
+async function devices(req, res) {
+  try {
+    const rows = await PushSubscription.find({ userId: req.user._id })
+      .select("endpoint userAgent createdAt")
+      .sort({ createdAt: -1 })
+      .lean();
+    return res.json({
+      devices: rows.map((r) => ({
+        endpoint: r.endpoint,
+        userAgent: r.userAgent || null,
+        createdAt: r.createdAt,
+      })),
+    });
+  } catch (err) {
+    console.error("push devices error:", err.message);
+    return res.status(500).json({ error: "Failed to list devices" });
   }
 }
 
@@ -172,4 +232,4 @@ async function action(req, res) {
   }
 }
 
-module.exports = { key, subscribe, unsubscribe, test, action };
+module.exports = { key, subscribe, resubscribe, devices, unsubscribe, test, action, bindDevice };

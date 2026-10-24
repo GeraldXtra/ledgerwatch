@@ -28,6 +28,28 @@ const SYMBOL_TO_COIN_ID = {
   UNI: "uniswap",
   AAVE: "aave",
   CAKE: "pancakeswap-token",
+
+  SOL: "solana",
+  WSOL: "solana",
+  TRX: "tron",
+  WTRX: "tron",
+  TON: "the-open-network",
+  LTC: "litecoin",
+  DOGE: "dogecoin",
+  XRP: "ripple",
+  ADA: "cardano",
+  DOT: "polkadot",
+  SHIB: "shiba-inu",
+  PEPE: "pepe",
+  BCH: "bitcoin-cash",
+  JUP: "jupiter-exchange-solana",
+  BONK: "bonk",
+  RAY: "raydium",
+  JTO: "jito-governance-token",
+  PYTH: "pyth-network",
+  NOT: "notcoin",
+  USDE: "ethena-usde",
+  DAI: "dai",
 };
 
 const STABLE_USD = new Set([

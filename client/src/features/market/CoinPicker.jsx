@@ -1,16 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import http from "../../api/http";
+import CoinImage from "../../components/CoinImage";
 
-const QUICK = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE"];
-const QUICK_IDS = {
-  BTC: "bitcoin",
-  ETH: "ethereum",
-  SOL: "solana",
-  BNB: "binancecoin",
-  XRP: "ripple",
-  DOGE: "dogecoin",
-};
+const QUICK_LIMIT = 30;
 
 let quickCache = null;
 let quickInFlight = null;
@@ -20,15 +13,15 @@ async function loadQuickMeta(http) {
   if (quickInFlight) return quickInFlight;
 
   quickInFlight = http
-    .get("/api/markets", { params: { ids: Object.values(QUICK_IDS).join(",") } })
+    .get("/api/coins/top", { params: { limit: QUICK_LIMIT } })
     .then(({ data }) => {
-      if (!data || !Array.isArray(data.markets)) {
-        throw new Error("markets response was not in the expected shape");
+      if (!data || !Array.isArray(data.coins)) {
+        throw new Error("the popular coins answer was not in the expected shape");
       }
-      const map = {};
-      for (const m of data.markets) map[m.id] = m;
-      quickCache = map;
-      return map;
+      const coins = data.coins.filter((c) => c && c.id && c.symbol);
+      const result = { coins, stale: Boolean(data.stale), fallback: Boolean(data.fallback) };
+      if (!result.fallback) quickCache = result;
+      return result;
     })
     .finally(() => {
       quickInFlight = null;
@@ -74,8 +67,13 @@ export default function CoinPicker({ value, onChange }) {
     debounceRef.current = setTimeout(async () => {
       try {
         const { data } = await http.get("/api/coins/search", { params: { q: query } });
-        setResults(data.coins || []);
-        setSearchError("");
+        const coins = data.coins || [];
+        setResults(coins);
+        setSearchError(
+          coins.length === 0 && data.stale
+            ? "The coin search could not reach the price feed just now, so this is not a list of what exists. Try again in a moment."
+            : ""
+        );
         setOpen(true);
       } catch (err) {
         setResults([]);
@@ -109,11 +107,7 @@ export default function CoinPicker({ value, onChange }) {
   if (value) {
     return (
       <div className="coin-picked">
-        {value.thumb ? (
-          <img className="coin-logo" src={value.thumb} alt="" width={20} height={20} />
-        ) : (
-          <span className="coin-chip">{value.symbol}</span>
-        )}
+        <CoinImage src={value.thumb} symbol={value.symbol} size={20} />
         <span className="picked-name">
           {value.name} <span className="muted">{value.symbol}</span>
         </span>
@@ -155,11 +149,7 @@ export default function CoinPicker({ value, onChange }) {
                 className="coin-result"
                 onClick={() => pick(c)}
               >
-                {c.thumb ? (
-                  <img className="coin-logo" src={c.thumb} alt="" width={20} height={20} />
-                ) : (
-                  <span className="coin-chip">{c.symbol}</span>
-                )}
+                <CoinImage src={c.thumb} symbol={c.symbol} size={20} />
                 <span className="coin-result-name">{c.name}</span>
                 <span className="muted small">{c.symbol}</span>
               </button>
@@ -169,32 +159,37 @@ export default function CoinPicker({ value, onChange }) {
       )}
 
       <div className="row wrap quick-chips">
-        {QUICK.map((sym) => {
-          const meta = quick && quick[QUICK_IDS[sym]];
-          return (
-            <button
-              key={sym}
-              type="button"
-              className="chip"
-              onClick={() =>
-                pick({
-                  id: QUICK_IDS[sym],
-                  symbol: sym,
-                  name: (meta && meta.name) || sym,
-                  thumb: meta && meta.image,
-                })
-              }
-              title={meta ? `${meta.name} at $${meta.current_price}` : sym}
-            >
-              {sym}
-            </button>
-          );
-        })}
+        {(quick ? quick.coins : []).map((coin) => (
+          <button
+            key={coin.id}
+            type="button"
+            className="chip coin-quick"
+            onClick={() =>
+              pick({
+                id: coin.id,
+                symbol: coin.symbol,
+                name: coin.name || coin.symbol,
+                thumb: coin.image,
+              })
+            }
+            title={
+              coin.current_price != null ? `${coin.name} at $${coin.current_price}` : coin.name || coin.symbol
+            }
+          >
+            <CoinImage src={coin.image} symbol={coin.symbol} size={16} quiet />
+            {coin.symbol}
+          </button>
+        ))}
       </div>
 
       {quickError && (
         <p className="muted caption" style={{ margin: "6px 0 0" }}>
-          Live prices unavailable ({quickError}). You can still pick any coin.
+          The popular coins could not be loaded ({quickError}). Search for any coin above.
+        </p>
+      )}
+      {quick && quick.fallback && (
+        <p className="muted caption" style={{ margin: "6px 0 0" }}>
+          Live prices are unavailable, so this is a fixed list of popular coins. Search finds any other.
         </p>
       )}
     </div>

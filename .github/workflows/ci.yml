@@ -147,3 +147,16 @@ jobs:
             exit 1
           fi
           echo "CSP connect-src carries the build-time API origin."
+
+      - name: Assert the first download carries no wallet code
+        run: |
+          entry=$(grep -oE 'src="/assets/index-[^"]+\.js"' dist/index.html | head -1 | sed -E 's#^src="/(.*)"$#\1#')
+          if [ -z "$entry" ] || [ ! -f "dist/$entry" ]; then
+            echo "::error::could not find the entry script in dist/index.html."
+            exit 1
+          fi
+          if grep -q "HDNodeWallet" "dist/$entry"; then
+            echo "::error::ethers' wallet code is back in $entry (LW-046): something the first page imports pulls in ethers."
+            exit 1
+          fi
+          echo "$entry carries no wallet code."

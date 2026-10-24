@@ -10,7 +10,7 @@ async function get(req, res) {
       .split(",")
       .map((s) => s.trim().toLowerCase())
       .filter((s) => /^[a-z0-9-]{1,64}$/.test(s))
-      .slice(0, 50);
+      .slice(0, 250);
 
     const prices = await getPrices(ids);
     return res.json({ prices });

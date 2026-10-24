@@ -7,21 +7,33 @@ const LAST_CHAIN_KEY = "ledgerwatch.wallet.lastChainId";
 
 export function rememberChain(chainId) {
   try {
-    sessionStorage.setItem(LAST_CHAIN_KEY, String(chainId));
+    localStorage.setItem(LAST_CHAIN_KEY, String(chainId));
   } catch {
   }
 }
 
-export function recallChain(chains) {
+function savedChain() {
   try {
-    const saved = sessionStorage.getItem(LAST_CHAIN_KEY);
-    if (saved) {
-      const hit = (chains || []).find((c) => String(c.chainId) === saved);
-      if (hit) return hit.chainId;
-    }
+    return localStorage.getItem(LAST_CHAIN_KEY) || sessionStorage.getItem(LAST_CHAIN_KEY);
   } catch {
+    return null;
   }
-  return chains.length ? chains[0].chainId : null;
+}
+
+export function recallChain(chains, preferredChainId) {
+  const list = chains || [];
+  const saved = savedChain();
+  if (saved) {
+    const hit = list.find((c) => String(c.chainId) === saved);
+    if (hit) return hit.chainId;
+  }
+  if (preferredChainId != null) {
+    const preferred = list.find((c) => String(c.chainId) === String(preferredChainId));
+    if (preferred) return preferred.chainId;
+  }
+  const mainnet = list.find((c) => !c.testnet);
+  if (mainnet) return mainnet.chainId;
+  return list.length ? list[0].chainId : null;
 }
 
 export default function NetworkSwitcher({ chains, chainId, address, onChange }) {
@@ -53,7 +65,7 @@ export default function NetworkSwitcher({ chains, chainId, address, onChange }) 
     if (!open || !address) return;
     let live = true;
     chains.forEach(async (c) => {
-      if (c.kind === "bitcoin") return;
+      if (c.kind && c.kind !== "evm") return;
       if (requested.current.has(c.chainId)) return;
       requested.current.add(c.chainId);
       try {

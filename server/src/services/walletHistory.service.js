@@ -2,6 +2,9 @@ const WalletTx = require("../models/WalletTx");
 const User = require("../models/User");
 const { getChain, tokensFor } = require("../config/chains");
 const rpcService = require("./rpc.service");
+const { blockTimeFor } = require("../config/derivation");
+
+const ANNOUNCE_WITHIN_SEC = 6 * 60 * 60;
 
 const TRANSFER_TOPIC =
   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
@@ -150,7 +153,7 @@ async function syncInboundTransfers(args) {
   return p;
 }
 
-const EMPTY = { scanned: 0, added: 0, queries: 0, fromBlock: 0, discovered: 0, failed: false, limited: false };
+const EMPTY = { scanned: 0, added: 0, queries: 0, fromBlock: 0, discovered: 0, failed: false, limited: false, announced: 0 };
 
 async function doSync({ userId, chainId, address }) {
   const chain = getChain(chainId);
@@ -198,6 +201,12 @@ async function doSync({ userId, chainId, address }) {
 
   let added = 0;
   let scanned = 0;
+  const fresh = [];
+  const keep = (row) => {
+    if (!row) return 0;
+    fresh.push(row);
+    return 1;
+  };
   let queries = 0;
   let lowest = head;
   let failed = false;
@@ -246,14 +255,15 @@ async function doSync({ userId, chainId, address }) {
 
       const token = known.get(contract);
       if (token) {
-        added += await recordTransfer({ userId, chain, address, log, symbol: token.symbol, decimals: token.decimals, contract });
+        added += keep(await recordTransfer({ userId, chain, address, log, symbol: token.symbol, decimals: token.decimals, contract }));
         continue;
       }
 
       const seen = discovered.get(contract);
       if (seen) {
         if (seen.status !== "ignored" && seen.readable && seen.decimals != null) {
-          added += await recordTransfer({ userId, chain, address, log, symbol: seen.symbol, decimals: seen.decimals, contract });
+          const row = await recordTransfer({ userId, chain, address, log, symbol: seen.symbol, decimals: seen.decimals, contract });
+          added += seen.status === "added" ? keep(row) : row ? 1 : 0;
         }
         continue;
       }
@@ -352,7 +362,7 @@ async function doSync({ userId, chainId, address }) {
           `[walletHistory] ${chain.name}: new token ${meta.symbol || "(unreadable)"} at ${contract} arrived at ${address}`
         );
         if (meta.readable) {
-          added += await recordTransfer({ userId, chain, address, log, symbol: meta.symbol, decimals: meta.decimals, contract });
+          added += (await recordTransfer({ userId, chain, address, log, symbol: meta.symbol, decimals: meta.decimals, contract })) ? 1 : 0;
         }
       }
     } catch (err) {
@@ -384,7 +394,18 @@ async function doSync({ userId, chainId, address }) {
     }
   }
 
-  return { scanned, added, queries, fromBlock: lowest, discovered: discoveredCount, failed, limited };
+  let announced = 0;
+  if (saved && fresh.length) {
+    const recentFrom = head - Math.ceil(ANNOUNCE_WITHIN_SEC / blockTimeFor(chain.chainId));
+    const { announceWalletTx } = require("./walletActivity.service");
+    for (const row of fresh) {
+      if (!Number.isFinite(row.blockNumber) || row.blockNumber < recentFrom) continue;
+      announced += 1;
+      announceWalletTx(row._id).catch((err) => console.error("[walletHistory] announce failed:", err.message));
+    }
+  }
+
+  return { scanned, added, queries, fromBlock: lowest, discovered: discoveredCount, failed, limited, announced };
 }
 
 function safeUnits(dataHex, decimals) {
@@ -400,12 +421,12 @@ async function recordTransfer({ userId, chain, address, log, symbol, decimals, c
     const existing = await WalletTx.findOne({ hash: log.transactionHash, userId })
       .select("_id")
       .lean();
-    if (existing) return 0;
+    if (existing) return null;
 
     const value = safeUnits(log.data, decimals);
-    if (value == null) return 0;
+    if (value == null) return null;
 
-    await WalletTx.create({
+    return await WalletTx.create({
       userId,
       chainId: chain.chainId,
       hash: log.transactionHash,
@@ -418,11 +439,11 @@ async function recordTransfer({ userId, chain, address, log, symbol, decimals, c
       status: "confirmed",
       kind: "transfer",
       blockNumber: parseInt(log.blockNumber, 16),
+      notifiedAt: null,
     });
-    return 1;
   } catch (err) {
     if (err.code !== 11000) console.error("[walletHistory] insert failed:", err.message);
-    return 0;
+    return null;
   }
 }
 

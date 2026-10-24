@@ -5,6 +5,7 @@ import { pct } from "./format";
 import AnimatedPrice from "./AnimatedPrice";
 import Sparkline from "./Sparkline";
 import LiveIndicator from "./LiveIndicator";
+import CoinImage from "../../components/CoinImage";
 
 const SORTS = {
   name: (a, b) => (a.name || a.symbol).localeCompare(b.name || b.symbol),
@@ -104,11 +105,7 @@ export default function MarketTable({ rows, onSelect, live, action }) {
                   >
                     <td data-label="Coin" className="cell-title">
                       <div className="cell-lead">
-                        {m.image ? (
-                          <img className="coin-logo" src={m.image} alt="" width={24} height={24} />
-                        ) : (
-                          <span className="coin-chip">{m.symbol}</span>
-                        )}
+                        <CoinImage src={m.image} symbol={m.symbol} size={24} />
                         <div>
                           <div className="lead-link">{m.symbol}</div>
                           <div className="lead-sub">

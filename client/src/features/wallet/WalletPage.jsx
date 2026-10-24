@@ -48,6 +48,12 @@ import TokenLogo from "../../components/TokenLogo";
 import { prefetchLogos } from "./tokenLogos";
 import BitcoinPanel from "./BitcoinPanel";
 import { clearBitcoinAddressCache } from "./bitcoin/addressCache";
+import UtxoPanel from "./UtxoPanel";
+import TronPanel from "./TronPanel";
+import SolanaPanel from "./SolanaPanel";
+import TonPanel from "./TonPanel";
+import RampCard from "./RampCard";
+import { clearChainAddresses } from "./chainAddresses";
 import { clearPendingSends } from "./bitcoin/pendingSend";
 import HoldingDetail from "./HoldingDetail";
 import CreateWalletModal from "./CreateWalletModal";
@@ -96,6 +102,80 @@ const BITCOIN_CHAINS = [
   },
 ];
 
+const UTXO_CHAINS = [
+  {
+    chainId: "litecoin",
+    kind: "utxo",
+    coin: "litecoin",
+    network: "mainnet",
+    key: "litecoin",
+    name: "Litecoin",
+    nativeSymbol: "LTC",
+    testnet: false,
+    tokens: [],
+  },
+  {
+    chainId: "litecoin-testnet",
+    kind: "utxo",
+    coin: "litecoin",
+    network: "testnet",
+    key: "litecoin-testnet",
+    name: "Litecoin Testnet",
+    nativeSymbol: "tLTC",
+    testnet: true,
+    tokens: [],
+  },
+  {
+    chainId: "dogecoin",
+    kind: "utxo",
+    coin: "dogecoin",
+    network: "mainnet",
+    key: "dogecoin",
+    name: "Dogecoin",
+    nativeSymbol: "DOGE",
+    testnet: false,
+    tokens: [],
+  },
+];
+
+const TRON_CHAINS = [
+  { chainId: "tron", kind: "tron", network: "mainnet", key: "tron", name: "TRON", nativeSymbol: "TRX", testnet: false, tokens: [] },
+  {
+    chainId: "tron-testnet",
+    kind: "tron",
+    network: "testnet",
+    key: "tron-testnet",
+    name: "TRON Nile Testnet",
+    nativeSymbol: "TRX",
+    testnet: true,
+    tokens: [],
+    faucet: "https://nileex.io/join/getJoinPage",
+  },
+];
+
+const SOLANA_CHAINS = [
+  { chainId: "solana", kind: "solana", network: "mainnet", key: "solana", name: "Solana", nativeSymbol: "SOL", testnet: false, tokens: [] },
+  {
+    chainId: "solana-devnet",
+    kind: "solana",
+    network: "devnet",
+    key: "solana-devnet",
+    name: "Solana Devnet",
+    nativeSymbol: "SOL",
+    testnet: true,
+    tokens: [],
+    faucet: "https://faucet.solana.com",
+  },
+];
+
+const TON_CHAINS = [
+  { chainId: "ton", kind: "ton", network: "mainnet", key: "ton", name: "TON", nativeSymbol: "TON", testnet: false, tokens: [] },
+  { chainId: "ton-testnet", kind: "ton", network: "testnet", key: "ton-testnet", name: "TON Testnet", nativeSymbol: "TON", testnet: true, tokens: [] },
+];
+
+const NON_EVM_CHAINS = [...BITCOIN_CHAINS, ...UTXO_CHAINS, ...TRON_CHAINS, ...SOLANA_CHAINS, ...TON_CHAINS];
+const NON_EVM_KINDS = new Set(["bitcoin", "utxo", "tron", "solana", "ton"]);
+
 function WalletInner() {
   const { user, applyUser } = useAuth();
   const [chains, setChains] = useState([]);
@@ -128,12 +208,13 @@ function WalletInner() {
   const [discoveredError, setDiscoveredError] = useState("");
 
   const selectableChains = useMemo(
-    () => [...chains, ...BITCOIN_CHAINS.filter((c) => c.testnet || enableMainnet)],
+    () => [...chains, ...NON_EVM_CHAINS.filter((c) => c.testnet || enableMainnet)],
     [chains, enableMainnet]
   );
   const selected = selectableChains.find((c) => c.chainId === chainId) || null;
   const isBitcoin = Boolean(selected && selected.kind === "bitcoin");
-  const chain = isBitcoin ? null : selected;
+  const isNonEvm = Boolean(selected && NON_EVM_KINDS.has(selected.kind));
+  const chain = isNonEvm ? null : selected;
 
   const worth = useMemo(() => totalUsd(balances || [], usdPrices), [balances, usdPrices]);
 
@@ -160,9 +241,9 @@ function WalletInner() {
         setEnableMainnet(Boolean(d.enableMainnet));
         const selectable = [
           ...usable,
-          ...BITCOIN_CHAINS.filter((c) => c.testnet || d.enableMainnet),
+          ...NON_EVM_CHAINS.filter((c) => c.testnet || d.enableMainnet),
         ];
-        if (selectable.length) setChainId((prev) => prev || recallChain(selectable));
+        if (selectable.length) setChainId((prev) => prev || recallChain(selectable, d.defaultChainId));
       })
       .catch(() => setChains([]));
   }, []);
@@ -355,6 +436,7 @@ function WalletInner() {
 
   function onWalletReady(addr) {
     clearBitcoinAddressCache(user?._id);
+    clearChainAddresses(user?._id);
     clearPendingSends(user?._id);
     setAddress(addr);
     setLegacy(null);
@@ -470,6 +552,7 @@ function WalletInner() {
     }
     clearWallet();
     clearBitcoinAddressCache(user?._id);
+    clearChainAddresses(user?._id);
     clearPendingSends(user?._id);
     await clearAddress().catch((err) => {
       toast(
@@ -598,7 +681,7 @@ function WalletInner() {
       <PageHeader
         title="Wallet"
         action={
-          !isBitcoin ? (
+          !isNonEvm ? (
             <>
               <button
                 type="button"
@@ -632,7 +715,7 @@ function WalletInner() {
         }
       />
 
-      {!isBitcoin && !backedUp && !backupDismissed && (
+      {!isNonEvm && !backedUp && !backupDismissed && (
         <div className="mm-notice">
           <TriangleAlert size={16} />
           <span className="grow">
@@ -673,7 +756,7 @@ function WalletInner() {
               />
             </span>
           </div>
-          {!isBitcoin && (
+          {!isNonEvm && (
             <div className="detail-stat">
               <span className="overline">Address</span>
               <span>
@@ -686,7 +769,7 @@ function WalletInner() {
             </div>
           )}
         </div>
-        {!isBitcoin && (
+        {!isNonEvm && (
           <div className="mm-hero">
               {balances ? (
                 <>
@@ -734,6 +817,22 @@ function WalletInner() {
         )}
       </section>
 
+      {selected && selected.kind === "ton" && (
+        <TonPanel userId={user?._id} network={selected.network} evmAddress={address} />
+      )}
+
+      {selected && selected.kind === "solana" && (
+        <SolanaPanel userId={user?._id} network={selected.network} evmAddress={address} />
+      )}
+
+      {selected && selected.kind === "tron" && (
+        <TronPanel userId={user?._id} network={selected.network} evmAddress={address} />
+      )}
+
+      {selected && selected.kind === "utxo" && (
+        <UtxoPanel userId={user?._id} coin={selected.coin} network={selected.network} evmAddress={address} />
+      )}
+
       {isBitcoin && (
         <BitcoinPanel
           userId={user?._id}
@@ -742,7 +841,7 @@ function WalletInner() {
         />
       )}
 
-      {!isBitcoin && (
+      {!isNonEvm && (
         <>
           {chain && discovered && (
             <NewTokensCard
@@ -908,7 +1007,9 @@ function WalletInner() {
         </>
       )}
 
-      {!isBitcoin && panel && (
+      {address && <RampCard address={address} />}
+
+      {!isNonEvm && panel && (
         <DetailPane
           key={panel}
           view={panel}

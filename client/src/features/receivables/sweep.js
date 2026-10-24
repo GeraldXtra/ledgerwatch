@@ -1,7 +1,8 @@
 import { ethers } from "ethers";
 import { getProvider, ERC20_ABI } from "../wallet/provider";
 import { deriveSignerFromWallet } from "../wallet/derivation";
-import { recordTx, updateTxStatus } from "../wallet/walletApi";
+import { updateTxStatus } from "../wallet/walletApi";
+import { sendRecorded, trackConfirmation, waitForReceipt } from "../wallet/broadcast";
 import {
   ERC20_TRANSFER_GAS_FALLBACK,
   currentGasPrice,
@@ -84,43 +85,44 @@ export async function planSweep({ paymentAddress: pa, chain, destination, mainAd
   };
 }
 
-export async function executeSweep({ master, plan, onStep = () => {} }) {
+const FUNDING_WAIT_MS = 10 * 60 * 1000;
+const SWEEP_TRACKING_MS = 30 * 60 * 1000;
+
+export async function executeSweep({ master, plan, onStep = () => {}, fundingWaitMs = FUNDING_WAIT_MS }) {
   const provider = getProvider(plan.chainId);
   const mainSigner = master.connect(provider);
   let gasFundedTxHash = null;
 
   if (plan.needsGasFunding) {
     onStep("Sending gas");
-    const fundTx = await mainSigner.sendTransaction({
-      to: plan.address,
-      value: plan.fundingWei,
+    const funding = await sendRecorded({
+      signer: mainSigner,
+      provider,
+      request: { to: plan.address, value: plan.fundingWei },
+      record: {
+        chainId: plan.chainId,
+        from: master.address,
+        to: plan.address,
+        value: ethers.formatEther(plan.fundingWei),
+        symbol: plan.nativeSymbol,
+        tokenAddress: null,
+        direction: "out",
+      },
+      label: "gas transfer",
     });
-    gasFundedTxHash = fundTx.hash;
-
-    const fundRecord = await recordTx({
-      chainId: plan.chainId,
-      hash: fundTx.hash,
-      from: master.address,
-      to: plan.address,
-      value: ethers.formatEther(plan.fundingWei),
-      symbol: plan.nativeSymbol,
-      tokenAddress: null,
-      direction: "out",
-    }).catch((err) => {
-      console.error("[sweep] gas funding is on chain but was not recorded:", err && err.message);
-      return null;
-    });
+    gasFundedTxHash = funding.hash;
 
     onStep("Waiting for gas to confirm");
-    const receipt = await fundTx.wait();
-    if (fundRecord && fundRecord._id) {
-      await updateTxStatus(
-        fundRecord._id,
-        receipt && receipt.status === 1 ? "confirmed" : "failed"
-      ).catch(() => {});
-    }
-    if (!receipt || receipt.status !== 1) {
+    const status = await waitForReceipt({ provider, hash: funding.hash, sent: funding.sent, waitMs: fundingWaitMs });
+    if (status) await updateTxStatus(funding.row._id, status).catch(() => {});
+    if (status === "failed") {
       throw new Error("The gas funding transaction failed, so nothing was swept.");
+    }
+    if (status !== "confirmed") {
+      throw new Error(
+        `The gas for this sweep was sent (${funding.hash.slice(0, 10)}…) but has not confirmed yet, so ` +
+          "nothing was swept. Wait for it to confirm, then sweep again; the gas will not be sent twice."
+      );
     }
   }
 
@@ -130,40 +132,54 @@ export async function executeSweep({ master, plan, onStep = () => {} }) {
   const token = tokenContract(plan, derived);
   const raw = await token.balanceOf(plan.address);
   if (raw === 0n) throw new Error("This address is already empty.");
-
-  const txResp = await token.transfer(plan.destination, raw);
   const amount = Number(ethers.formatUnits(raw, plan.decimals));
 
-  const record = await recordTx({
-    chainId: plan.chainId,
-    hash: txResp.hash,
-    from: plan.address,
-    to: plan.destination,
-    value: String(amount),
-    symbol: plan.tokenSymbol,
-    tokenAddress: plan.tokenContract,
-    direction: "in",
-  }).catch(() => null);
+  const sweep = await sendRecorded({
+    signer: derived,
+    provider,
+    request: {
+      to: plan.tokenContract,
+      data: new ethers.Interface(ERC20_ABI).encodeFunctionData("transfer", [plan.destination, raw]),
+    },
+    record: {
+      chainId: plan.chainId,
+      from: plan.address,
+      to: plan.destination,
+      value: String(amount),
+      symbol: plan.tokenSymbol,
+      tokenAddress: plan.tokenContract,
+      direction: "in",
+    },
+    label: "sweep",
+  });
 
   let sweepRecorded = true;
   await recordSweep(plan.paymentAddressId, {
-    txHash: txResp.hash,
+    txHash: sweep.hash,
     destination: plan.destination,
     amountUsdc: amount,
     gasFundedTxHash,
   }).catch((err) => {
     sweepRecorded = false;
-    console.error("[sweep] the transfer is on chain but the sweep was not recorded:", err && err.message);
+    console.error("[sweep] the transfer was sent but the sweep was not recorded:", err && err.message);
   });
 
-  if (record && record._id) {
-    txResp
-      .wait()
-      .then((r) => updateTxStatus(record._id, r && r.status === 1 ? "confirmed" : "failed"))
-      .catch(() => {});
-  }
+  trackConfirmation({
+    provider,
+    hash: sweep.hash,
+    response: sweep.sent.response,
+    timeoutMs: SWEEP_TRACKING_MS,
+    onSettled: (status) => updateTxStatus(sweep.row._id, status),
+  });
 
-  return { txHash: txResp.hash, amount, gasFundedTxHash, recorded: sweepRecorded };
+  return {
+    txHash: sweep.hash,
+    amount,
+    gasFundedTxHash,
+    recorded: sweepRecorded,
+    broadcast: sweep.sent.outcome === "accepted" ? "sent" : "unknown",
+    broadcastReason: sweep.sent.outcome === "accepted" ? null : sweep.sent.reason,
+  };
 }
 
 export async function executeSweepBatch({ master, plans, onRow = () => {} }) {
@@ -181,6 +197,7 @@ export async function executeSweepBatch({ master, plans, onRow = () => {} }) {
         txHash: res.txHash,
         amount: res.amount,
         unrecorded: res.recorded === false,
+        unconfirmed: res.broadcast === "unknown",
       });
       results.push({ plan, ok: true, ...res });
     } catch (err) {

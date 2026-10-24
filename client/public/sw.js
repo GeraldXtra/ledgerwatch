@@ -22,6 +22,17 @@ function fitActions(actions) {
   return actions.slice(0, Math.max(0, max));
 }
 
+const ICON_HOSTS = ["coin-images.coingecko.com", "assets.coingecko.com"];
+
+function iconFor(raw) {
+  try {
+    const u = new URL(String(raw));
+    return u.protocol === "https:" && ICON_HOSTS.includes(u.hostname) ? u.href : "/icon-192.png";
+  } catch {
+    return "/icon-192.png";
+  }
+}
+
 self.addEventListener("push", (event) => {
   let payload = {};
   try {
@@ -35,8 +46,10 @@ self.addEventListener("push", (event) => {
   const options = {
     body: payload.body || "",
     tag: payload.tag || type,
-    icon: "/icon-192.png",
+    renotify: true,
+    icon: iconFor(payload.icon),
     badge: "/icon-192.png",
+    timestamp: Date.now(),
     actions: fitActions(payload.actions),
     requireInteraction: type === "alert",
     data: {
@@ -53,17 +66,60 @@ self.addEventListener("push", (event) => {
         type: "window",
         includeUncontrolled: true,
       });
-
-      const focused = clientList.some((c) => c.focused);
-
-      if (focused && type !== "test") {
-        console.info("[sw] window focused — in-app toast instead of OS notification");
-        clientList.forEach((c) => c.postMessage({ type: "push", payload }));
-        return;
-      }
+      clientList.forEach((c) => c.postMessage({ type: "push", payload, shown: true }));
 
       console.info("[sw] showing OS notification:", payload.title);
-      await self.registration.showNotification(payload.title || "LedgerWatch", options);
+      try {
+        await self.registration.showNotification(payload.title || "LedgerWatch", options);
+      } catch (err) {
+        console.warn("[sw] notification with icon failed, retrying plain:", err && err.message);
+        await self.registration.showNotification(payload.title || "LedgerWatch", {
+          ...options,
+          icon: "/icon-192.png",
+          actions: [],
+        });
+      }
+    })()
+  );
+});
+
+function keyBytes(base64) {
+  const padding = "=".repeat((4 - (base64.length % 4)) % 4);
+  const raw = atob((base64 + padding).replace(/-/g, "+").replace(/_/g, "/"));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+self.addEventListener("pushsubscriptionchange", (event) => {
+  event.waitUntil(
+    (async () => {
+      const old = event.oldSubscription || null;
+      let next = event.newSubscription || null;
+      try {
+        if (!next) {
+          let key = old && old.options ? old.options.applicationServerKey : null;
+          if (!key) {
+            const res = await fetch(`${API_BASE}/api/push/vapid`);
+            const body = await res.json().catch(() => ({}));
+            key = body.publicKey ? keyBytes(body.publicKey) : null;
+          }
+          if (!key) return;
+          next = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+        }
+        if (!old || !old.endpoint) {
+          await postToClients({ type: "push-resubscribed", endpoint: next.endpoint });
+          return;
+        }
+        const res = await fetch(`${API_BASE}/api/push/resubscribe`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ oldEndpoint: old.endpoint, subscription: next.toJSON() }),
+        });
+        console.info("[sw] subscription renewed:", res.status);
+      } catch (err) {
+        console.warn("[sw] could not renew the subscription:", err && err.message);
+      }
     })()
   );
 });
@@ -121,8 +177,19 @@ async function postToClients(message) {
   return all.length;
 }
 
+function samePath(url) {
+  const raw = typeof url === "string" ? url : "";
+  if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return "/app";
+  try {
+    const u = new URL(raw, self.location.origin);
+    return u.origin === self.location.origin ? u.pathname + u.search : "/app";
+  } catch {
+    return "/app";
+  }
+}
+
 async function openApp(url) {
-  const target = url || "/app";
+  const target = samePath(url);
   const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
 
   for (const client of all) {

@@ -2,12 +2,8 @@ import { useState } from "react";
 import { ShieldCheck, X } from "lucide-react";
 import { Button, Field, Input, Segmented, PageHeader } from "../../components/ui";
 import { Modal } from "../../components/ui";
-import {
-  importFromMnemonic,
-  importFromPrivateKey,
-  importFromKeystore,
-  encryptAndStore,
-} from "./keystore";
+import { importFromKeystore, encryptAndStore } from "./keystore";
+import { importFromMnemonic, importFromPrivateKey } from "./walletKeys";
 import { saveAddress } from "./walletApi";
 import { assessWalletPassword } from "./passwordStrength";
 import { useAuth } from "../../context/AuthContext";

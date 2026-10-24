@@ -16,6 +16,8 @@ router.get("/spend", wallet.spend24h);
 router.post("/txs", wallet.recordTx);
 router.patch("/txs/:id", wallet.updateTxStatus);
 router.get("/discovered", wallet.discovered);
+router.get("/chain-addresses", wallet.listChainAddresses);
+router.post("/chain-addresses", wallet.setChainAddress);
 router.post("/discovered/:chainId/:address", wallet.discoveredAct);
 
 router.get("/security", walletSecurity.get);

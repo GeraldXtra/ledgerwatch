@@ -7,7 +7,7 @@ import Breadcrumbs from "../components/ui/Breadcrumbs";
 import { TrailProvider, WorkspaceProvider, useWorkspace } from "../components/ui/Modal";
 import LogoMark from "../components/LogoMark";
 import ThemeToggle from "../components/ThemeToggle";
-import { ensureServiceWorker, onForegroundPush } from "../api/push";
+import { ensureServiceWorker, onForegroundPush, releaseDeviceOnSignOut, syncPush } from "../api/push";
 
 const NAV_ITEMS = [
   { id: "receivables", label: "Receivables", to: "/app/receivables" },
@@ -96,15 +96,26 @@ function PushBridge() {
   const toast = useToast();
 
   useEffect(() => {
-    ensureServiceWorker();
+    ensureServiceWorker().then(() => syncPush({ force: true }));
+    const onVisible = () => {
+      if (document.visibilityState === "visible") syncPush();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
-    return onForegroundPush((message) => {
+    const stop = onForegroundPush((message) => {
+      if (message.kind === "resubscribed") {
+        syncPush({ force: true });
+        return;
+      }
+
       if (message.kind === "push") {
         const payload = message.payload || {};
-        toast(
-          payload.title ? `${payload.title}. ${payload.body || ""}`.trim() : payload.body || "",
-          { type: payload.type === "alert" ? "info" : "success" }
-        );
+        if (!message.shown) {
+          toast(
+            payload.title ? `${payload.title}. ${payload.body || ""}`.trim() : payload.body || "",
+            { type: payload.type === "alert" ? "info" : "success" }
+          );
+        }
         window.dispatchEvent(new CustomEvent("ledgerwatch:push", { detail: payload }));
         return;
       }
@@ -119,6 +130,10 @@ function PushBridge() {
         window.dispatchEvent(new CustomEvent("ledgerwatch:push-action", { detail: message }));
       }
     });
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      stop();
+    };
   }, [toast]);
 
   return null;
@@ -261,6 +276,8 @@ function useScrollMemory(entries) {
 
 function Workspace() {
   const { user, logout } = useAuth();
+  const signOut = () =>
+    Promise.race([releaseDeviceOnSignOut(), new Promise((resolve) => setTimeout(resolve, 3000))]).finally(logout);
   const location = useLocation();
   const navigate = useNavigate();
   const ws = useWorkspace();
@@ -330,7 +347,7 @@ function Workspace() {
             <Avatar name={user.name} src={user.avatarUrl} />
             <span>{user.name}</span>
           </NavLink>
-          <button type="button" className="aw-icon" onClick={logout} title="Sign out" aria-label="Sign out">
+          <button type="button" className="aw-icon" onClick={signOut} title="Sign out" aria-label="Sign out">
             <LogOut size={18} />
           </button>
         </div>

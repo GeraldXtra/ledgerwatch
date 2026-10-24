@@ -1,7 +1,7 @@
 const { getLogosMap } = require("../services/coingecko.service");
 const { resolveSymbol } = require("../services/coinMap");
 
-const MAX_IDS = 50;
+const MAX_IDS = 250;
 
 async function get(req, res) {
   try {

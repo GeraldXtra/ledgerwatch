@@ -4,6 +4,7 @@ import { Button, Card, Modal, PageHeader } from "../../components/ui";
 import { price as fmtPrice, compact, pct, conditionText } from "./format";
 import CoinChart from "./CoinChart";
 import WatchEditRow from "./WatchEditRow";
+import CoinImage from "../../components/CoinImage";
 
 export default function CoinDetailModal({
   market,
@@ -35,11 +36,7 @@ export default function CoinDetailModal({
       <PageHeader
         title={
           <span className="coin-title">
-            {market.image ? (
-              <img className="coin-logo lg" src={market.image} alt="" width={34} height={34} />
-            ) : (
-              <span className="coin-chip">{market.symbol}</span>
-            )}
+            <CoinImage src={market.image} symbol={market.symbol} size={34} className="coin-logo lg" />
             <span>
               {market.name} <span className="page-count">{market.symbol}</span>
             </span>

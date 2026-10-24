@@ -1,7 +1,7 @@
 const Watch = require("../models/Watch");
-const { getMarketsMap } = require("../services/coingecko.service");
+const { getMarketsMap, logosFor } = require("../services/coingecko.service");
 
-const MAX_IDS = 50;
+const MAX_IDS = 250;
 
 async function get(req, res) {
   try {
@@ -13,16 +13,17 @@ async function get(req, res) {
 
     if (ids.length === 0) {
       const watches = await Watch.find({ userId: req.user._id, active: true, mode: req.user.tradingMode === "live" ? "live" : "paper" });
-      ids = [...new Set(watches.map((w) => w.coinId))];
+      ids = [...new Set(watches.map((w) => w.coinId))].slice(0, MAX_IDS);
     }
 
     const { markets, stale, updatedAt } = await getMarketsMap(ids);
     const list = ids.map((id) => markets[id]).filter(Boolean);
-    return res.json({ markets: list, stale, updatedAt });
+    const logos = await logosFor(ids, markets);
+    return res.json({ markets: list, logos, stale, updatedAt });
   } catch (err) {
     console.error("markets error:", err.message);
     return res.status(500).json({ error: "Failed to fetch markets" });
   }
 }
 
-module.exports = { get };
+module.exports = { get, MAX_IDS };

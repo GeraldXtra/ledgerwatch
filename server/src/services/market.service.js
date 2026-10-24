@@ -4,7 +4,7 @@ const Portfolio = require("../models/Portfolio");
 const SimTrade = require("../models/SimTrade");
 const User = require("../models/User");
 const { resolveSymbol } = require("./coinMap");
-const { getPrices, getPrice } = require("./coingecko.service");
+const { getPrices, getPrice, getLogosMap } = require("./coingecko.service");
 const { explainAlert } = require("./anthropic.service");
 const { notifyUser, signActionToken } = require("./push.service");
 
@@ -67,6 +67,9 @@ async function createWatch(userId, { symbol, type, value, coinId }, mode = "pape
     symbol: resolvedSymbol,
     condition: { type, value: numValue },
     baselinePrice,
+    image: await getLogosMap([resolvedCoinId])
+      .then(({ logos }) => logos[resolvedCoinId] || null)
+      .catch(() => null),
     active: true,
   });
 
@@ -242,6 +245,7 @@ async function runPricePass({ userId } = {}) {
             body: message.slice(0, 140),
             tag: `alert-${alert._id}`,
             type: "alert",
+            icon: watch.image || (await require("./activity.service").iconFor({ coinId: watch.coinId })) || undefined,
             url: `/app/market?alert=${alert._id}`,
             actions: [
               { action: "buy", title: "Buy" },
@@ -315,7 +319,8 @@ async function getPortfolio(userId, mode = "paper") {
   });
 
   const cashBalance = portfolio.cashBalance;
-  const totalValue = cashBalance + holdingsValue;
+  const profitBalance = portfolio.profitBalance || 0;
+  const totalValue = cashBalance + holdingsValue + profitBalance;
 
   const startingCash = portfolio.mode === "live" ? 0 : STARTING_CASH;
   const totalPnl = totalValue - startingCash;
@@ -323,6 +328,7 @@ async function getPortfolio(userId, mode = "paper") {
   return {
     mode: portfolio.mode === "live" ? "live" : "paper",
     cashBalance,
+    profitBalance,
     holdings: enriched,
     holdingsValue,
     totalValue,
@@ -361,6 +367,7 @@ async function actOnAlert(userId, alert, intent) {
   const value = denom === "quote" ? rawAmount : rawAmount * price;
 
   let trade = null;
+  let sale = null;
 
   if (side === "buy") {
     if (value > portfolio.cashBalance + 1e-9) {
@@ -397,6 +404,7 @@ async function actOnAlert(userId, alert, intent) {
     }
 
     portfolio.cashBalance += qty * price;
+    sale = takeProfit(portfolio, { holding, qty, price });
     holding.qty -= qty;
     if (holding.qty <= 1e-12) portfolio.holdings.splice(idx, 1);
   }
@@ -422,8 +430,11 @@ async function actOnAlert(userId, alert, intent) {
   alert.actedAt = new Date();
   await alert.save();
 
+  const profit = sale ? await logSale(userId, alert, trade, sale) : null;
+  announceTrade(userId, alert, trade).catch(() => {});
+
   const enrichedPortfolio = await getPortfolio(userId, alert.mode || "paper");
-  return { alert, trade, portfolio: enrichedPortfolio };
+  return { alert, trade, portfolio: enrichedPortfolio, profit };
 }
 
 async function approveAlert(userId, alert) {
@@ -435,6 +446,7 @@ async function approveAlert(userId, alert) {
   const side = alert.suggestion;
   const portfolio = await loadOrCreatePortfolio(userId, alert.mode || "paper");
   let trade = null;
+  let sale = null;
 
   if (side === "buy") {
     if (portfolio.cashBalance <= 0) {
@@ -491,6 +503,7 @@ async function approveAlert(userId, alert) {
     const qty = holding.qty;
     const proceeds = qty * currentPrice;
     portfolio.cashBalance += proceeds;
+    sale = takeProfit(portfolio, { holding, qty, price: currentPrice });
     portfolio.holdings.splice(idx, 1);
 
     trade = await SimTrade.create({
@@ -510,8 +523,77 @@ async function approveAlert(userId, alert) {
   alert.status = "approved";
   await alert.save();
 
+  const profit = sale ? await logSale(userId, alert, trade, sale) : null;
+  if (trade) announceTrade(userId, alert, trade).catch(() => {});
+
   const enrichedPortfolio = await getPortfolio(userId, alert.mode || "paper");
-  return { alert, trade, portfolio: enrichedPortfolio };
+  return { alert, trade, portfolio: enrichedPortfolio, profit };
+}
+
+function takeProfit(portfolio, { holding, qty, price }) {
+  const { paperSale, MIN_PROFIT_USD } = require("./profit.service");
+  const sale = paperSale({ holding, qty, price });
+  sale.qty = qty;
+  sale.price = price;
+  sale.movedUsd = 0;
+  if (sale.profitUsd >= MIN_PROFIT_USD) {
+    const moved = Math.min(sale.profitUsd, portfolio.cashBalance);
+    portfolio.cashBalance -= moved;
+    portfolio.profitBalance = (portfolio.profitBalance || 0) + moved;
+    sale.movedUsd = moved;
+  }
+  return sale;
+}
+
+async function logSale(userId, alert, trade, sale) {
+  try {
+    return await require("./profit.service").recordPaperSale({
+      userId,
+      mode: alert.mode || "paper",
+      coinId: alert.coinId,
+      symbol: alert.symbol,
+      qty: sale.qty,
+      avgCost: sale.avgCost,
+      price: sale.price,
+      tradeId: trade && trade._id,
+      movedUsd: sale.movedUsd,
+    });
+  } catch (err) {
+    console.error(
+      `[profit] the sale of ${alert.symbol} was made and ${sale.movedUsd.toFixed(2)} moved to the profit balance, ` +
+        `but the record was not written: ${err.message}`
+    );
+    return null;
+  }
+}
+
+async function announceTrade(userId, alert, trade) {
+  if (!trade) return null;
+  const { notifyActivity } = require("./activity.service");
+  const symbol = String(trade.symbol || "").toUpperCase();
+  const value = trade.qty * trade.priceAtTrade;
+  const money = `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const qty = trade.qty.toLocaleString("en-US", { maximumFractionDigits: 8 });
+  const bought = trade.side === "buy";
+  return notifyActivity(userId, {
+    category: "trades",
+    tag: `paper-${trade._id}`,
+    url: "/app/market?view=portfolio",
+    coinId: trade.coinId,
+    title: bought ? `Paper buy filled: ${qty} ${symbol}` : `Paper sale filled: ${qty} ${symbol}`,
+    body: `${bought ? "Bought" : "Sold"} at $${trade.priceAtTrade.toLocaleString("en-US", { maximumFractionDigits: 8 })} for ${money} of simulated cash.`,
+    email: {
+      subject: bought ? `Paper trade: you bought ${qty} ${symbol}` : `Paper trade: you sold ${qty} ${symbol}`,
+      intro: "This was a paper trade with simulated money. No real funds moved.",
+      tone: "info",
+      hero: { label: bought ? "Paper buy" : "Paper sale", value: `${qty} ${symbol}`, sub: `for ${money}` },
+      rows: [
+        { label: "Price", value: `$${trade.priceAtTrade.toLocaleString("en-US", { maximumFractionDigits: 8 })}` },
+        { label: "Value", value: money },
+        { label: "Approved by", value: "You" },
+      ],
+    },
+  });
 }
 
 function parseWatchCommand(message) {

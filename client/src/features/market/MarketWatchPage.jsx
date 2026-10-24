@@ -38,6 +38,7 @@ import PortfolioPanel from "./PortfolioPanel";
 import TradingModeToggle from "./TradingModeToggle";
 import LiveSwapModal from "./LiveSwapModal";
 import LivePortfolioPanel from "./LivePortfolioPanel";
+import ProfitPanel from "./ProfitPanel";
 import { resolveTradeable } from "./resolveTradeable";
 import { toSpendAmount } from "./amount";
 import { fetchChains, fetchSpend24h } from "../wallet/walletApi";
@@ -121,7 +122,7 @@ function MarketWatch() {
     return [...ids];
   }, [watches, portfolio]);
 
-  const { markets, stale, lastFetchedAt } = useMarkets(coinIds);
+  const { markets, logos, stale, lastFetchedAt } = useMarkets(coinIds);
 
   const coinIdBySymbol = useMemo(() => {
     const map = {};
@@ -194,7 +195,7 @@ function MarketWatch() {
         if (mainnets.length) {
           setLiveChainId((p) => {
             if (p && mainnets.some((c) => c.chainId === p)) return p;
-            const recalled = recallChain(mainnets);
+            const recalled = recallChain(mainnets, d.defaultChainId);
             return mainnets.some((c) => c.chainId === recalled) ? recalled : mainnets[0].chainId;
           });
         }
@@ -286,9 +287,11 @@ function MarketWatch() {
       return { ...h, price, value };
     });
     const cashBalance = portfolio.cashBalance;
-    const totalValue = cashBalance + holdingsValue;
+    const profitBalance = portfolio.profitBalance || 0;
+    const totalValue = cashBalance + holdingsValue + profitBalance;
     return {
       cashBalance,
+      profitBalance,
       holdings,
       holdingsValue,
       totalValue,
@@ -299,12 +302,12 @@ function MarketWatch() {
   const marketRows = useMemo(() => {
     const byCoin = {};
     for (const w of watches) {
-      if (!byCoin[w.coinId]) byCoin[w.coinId] = { count: 0, symbol: w.symbol };
+      if (!byCoin[w.coinId]) byCoin[w.coinId] = { count: 0, symbol: w.symbol, image: w.image || null };
       byCoin[w.coinId].count += 1;
     }
-    return Object.entries(byCoin).map(([id, { count, symbol }]) => {
+    return Object.entries(byCoin).map(([id, { count, symbol, image }]) => {
       const m = markets[id];
-      if (m) return { ...m, watchCount: count };
+      if (m) return { ...m, image: m.image || logos[id] || image, watchCount: count };
       return {
         id,
         symbol: String(symbol || id).toUpperCase(),
@@ -312,7 +315,7 @@ function MarketWatch() {
           .split("-")
           .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
           .join(" "),
-        image: null,
+        image: logos[id] || image || null,
         current_price: null,
         price_change_percentage_24h: null,
         sparkline: [],
@@ -320,7 +323,7 @@ function MarketWatch() {
         priceUnavailable: true,
       };
     });
-  }, [watches, markets]);
+  }, [watches, markets, logos]);
 
   async function removeWatch(watch) {
     try {
@@ -509,11 +512,13 @@ function MarketWatch() {
   }, [pf]);
 
   const cashShare = pf && pf.totalValue > 0 ? (pf.cashBalance / pf.totalValue) * 100 : 0;
+  const profitShare = pf && pf.totalValue > 0 && pf.profitBalance > 0 ? (pf.profitBalance / pf.totalValue) * 100 : 0;
 
   const allocLabels = useMemo(() => {
     const parts = [
       ...allocation.map((h) => ({ key: h.symbol, share: h.share })),
       { key: "__cash", share: cashShare },
+      ...(profitShare > 0 ? [{ key: "__profit", share: profitShare }] : []),
     ];
     const floors = parts.map((p) => Math.floor(p.share));
     let leftover = 100 - floors.reduce((a, b) => a + b, 0);
@@ -532,7 +537,7 @@ function MarketWatch() {
       map[p.key] = out[i];
     });
     return map;
-  }, [allocation, cashShare]);
+  }, [allocation, cashShare, profitShare]);
 
   const selectedMarket = detail
     ? markets[detail] || marketRows.find((r) => r.id === detail) || null
@@ -649,7 +654,7 @@ function MarketWatch() {
                       ({pct((pf.totalPnl / STARTING_CASH) * 100)})
                     </span>
                   </span>
-                  <span className="stat-hint">Cash plus live holdings, vs the 1,000,000 start</span>
+                  <span className="stat-hint">Cash, live holdings and profit balance, vs the 1,000,000 start</span>
                 </div>
 
                 <div className="alloc-block">
@@ -674,6 +679,13 @@ function MarketWatch() {
                           style={{ width: `${cashShare}%` }}
                           title={`Cash ${cashShare.toFixed(1)}%`}
                         />
+                        {profitShare > 0 && (
+                          <span
+                            className="alloc-seg profit"
+                            style={{ width: `${profitShare}%` }}
+                            title={`Profit ${profitShare.toFixed(1)}%`}
+                          />
+                        )}
                       </div>
                       <div className="alloc-legend">
                         {allocation.map((seg) => (
@@ -686,6 +698,12 @@ function MarketWatch() {
                           <span className="alloc-dot cash" />
                           Cash <span className="muted num">{allocLabels.__cash}%</span>
                         </span>
+                        {profitShare > 0 && (
+                          <span className="alloc-legend-item">
+                            <span className="alloc-dot profit" />
+                            Profit <span className="muted num">{allocLabels.__profit}%</span>
+                          </span>
+                        )}
                       </div>
                     </>
                   )}
@@ -737,6 +755,14 @@ function MarketWatch() {
             {mode === "paper" && (
               <PortfolioPanel portfolio={pf} onSelect={(coinId) => setDetail(coinId)} />
             )}
+
+            <ProfitPanel
+              mode={mode}
+              chains={liveChains}
+              mainAddress={walletAddress}
+              paperProfitBalance={(portfolio && portfolio.profitBalance) || 0}
+              reloadKey={mode === "live" ? liveReloadKey : portfolio}
+            />
 
             <ChatBox onAction={loadData} />
           </>

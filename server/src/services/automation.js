@@ -24,6 +24,8 @@ const state = {
   lastAddressesChecked: null,
   lastPaymentsDetected: null,
   lastPaymentsSettled: null,
+  lastWalletTxsSettled: null,
+  lastInboundAnnounced: null,
   lastPassMs: null,
 };
 
@@ -189,6 +191,18 @@ async function runAllPasses({ userId } = {}) {
       console.error("Automation: payment watch pass error:", err.message);
     }
 
+    let walletTxs = { checked: 0, settled: 0 };
+    let inbound = { checked: 0, announced: 0, deferred: 0 };
+    try {
+      const walletActivity = require("./walletActivity.service");
+      walletTxs = await walletActivity.runWalletTxPass({ userId });
+      inbound = await walletActivity.runInboundPass({ userId });
+      const chains = await walletActivity.runChainWatchPass({ userId });
+      inbound.announced += chains.announced;
+    } catch (err) {
+      console.error("Automation: wallet activity pass error:", err.message);
+    }
+
     state.lastRunAt = new Date();
     state.lastGenerated = reminders.generated;
     state.lastDebtsChecked = reminders.debtsChecked;
@@ -197,6 +211,8 @@ async function runAllPasses({ userId } = {}) {
     state.lastPaymentsSettled = payments.settled;
     state.lastPaymentsDetected = payments.detected;
     state.lastAddressesChecked = payments.addressesChecked;
+    state.lastWalletTxsSettled = walletTxs.settled;
+    state.lastInboundAnnounced = inbound.announced;
     state.lastPassMs = Date.now() - startedAt;
 
     if (state.intervalMs && state.lastPassMs > state.intervalMs) {
@@ -265,6 +281,8 @@ function getStatus() {
     lastAddressesChecked: state.lastAddressesChecked,
     lastPaymentsDetected: state.lastPaymentsDetected,
     lastPaymentsSettled: state.lastPaymentsSettled,
+    lastWalletTxsSettled: state.lastWalletTxsSettled,
+    lastInboundAnnounced: state.lastInboundAnnounced,
     lastPassMs: state.lastPassMs,
   };
 }
