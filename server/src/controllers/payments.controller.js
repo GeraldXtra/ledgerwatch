@@ -1,6 +1,6 @@
 const Debt = require("../models/Debt");
 const Payment = require("../models/Payment");
-const { recomputeDebtStatus, withDerived } = require("../services/receivables.service");
+const { recomputeDebtStatus, withDerived, paidForDebt } = require("../services/receivables.service");
 const { resyncActivePaymentAddress } = require("../services/paymentAddress.service");
 const { onInvoiceSettled } = require("../services/settlement.service");
 
@@ -9,14 +9,9 @@ async function findMyDebt(req) {
 }
 
 async function amountPaidFor(debtId) {
-  const rows = await Payment.aggregate([
-    { $match: { debtId } },
-    { $group: { _id: null, paid: { $sum: "$amount" } } },
-  ]);
-  return rows.length ? rows[0].paid : 0;
+  return paidForDebt(debtId);
 }
 
-// POST /api/debts/:id/payments  { amount, method?, note?, paidAt? }
 async function record(req, res) {
   try {
     const debt = await findMyDebt(req);
@@ -34,23 +29,17 @@ async function record(req, res) {
     if (Number.isNaN(when.getTime())) {
       return res.status(400).json({ error: "paidAt is not a valid date" });
     }
-    // A payment note is a line, not a document; it is shown on receipts and
-    // statements. An object where a string was expected used to answer 500.
     const cleanNote = note == null ? undefined : String(note).trim().slice(0, 500);
 
-    /**
-     * IDEMPOTENCY FOR A MANUAL PAYMENT.
-     *
-     * The client mints one key per form and sends it with the submit. A
-     * double submit, a retry after a lost response, or a second tab replaying
-     * the request all carry the same key and hit the unique index on txHash,
-     * so the payment is recorded once. Scoped to the user so two accounts
-     * cannot collide, and prefixed so it can never look like a chain hash.
-     */
-    const key =
-      typeof idempotencyKey === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(idempotencyKey)
-        ? `manual:${req.user._id}:${idempotencyKey}`
-        : undefined;
+    if (typeof idempotencyKey !== "string" || !/^[A-Za-z0-9_-]{8,80}$/.test(idempotencyKey)) {
+      return res.status(400).json({
+        error:
+          "This payment was sent without an idempotency key, so it was refused rather than " +
+          "risk recording it twice. Reload the page and try again.",
+        code: "idempotency_key_required",
+      });
+    }
+    const key = `manual:${req.user._id}:${idempotencyKey}`;
 
     let payment;
     try {
@@ -61,10 +50,10 @@ async function record(req, res) {
         method: method || "transfer",
         note: cleanNote,
         paidAt: when,
-        ...(key ? { txHash: key } : {}),
+        txHash: key,
       });
     } catch (err) {
-      if (key && err && err.code === 11000) {
+      if (err && err.code === 11000) {
         const existing = await Payment.findOne({ txHash: key, userId: req.user._id });
         const totalPaidNow = await recomputeDebtStatus(debt);
         return res.status(200).json({
@@ -77,39 +66,32 @@ async function record(req, res) {
     }
 
     debt.history.push({ event: "payment_received" });
-    const totalPaid = await recomputeDebtStatus(debt); // saves debt + cancels reminders at zero
+    const totalPaid = await recomputeDebtStatus(debt);
 
-    /**
-     * A bank payment changes what the CRYPTO address must still ask for.
-     *
-     * Without this the address kept quoting the amount it was issued with, so a
-     * debtor who paid half by transfer was still told to send the full token
-     * amount — and the reminder, which reads this field, showed the stale figure.
-     * Recomputed at the address's own snapshot rate, so the quote never moves
-     * with the market.
-     */
     const resync = await resyncActivePaymentAddress(debt._id);
 
-    /**
-     * ONE settlement event, both routes. Bank payments previously recorded
-     * silently: no receipt to the payer, no push to the owner, while the crypto
-     * route sent both. Same event, same three consequences, so they can never
-     * disagree about what happened.
-     */
-    await onInvoiceSettled({
+    const forReceipt = { ...payment.toObject(), txHash: null };
+
+    const settled = await onInvoiceSettled({
       debt,
-      payment,
+      payment: forReceipt,
       method: "bank",
       creditNgn: amt,
       totalPaid,
       fullyPaid: debt.status === "paid",
-    }).catch(() => {});
+    }).catch((err) => ({ emailed: false, reason: err && err.message }));
+
+    if (settled && !settled.emailed) {
+      console.warn(
+        `[payments] no receipt sent for debt ${debt._id} after a manual payment: ${
+          settled.reason || "unknown reason"
+        }`
+      );
+    }
 
     return res.status(201).json({
       payment,
       debt: withDerived(debt, totalPaid),
-      // Returned so the UI can restate the crypto amount immediately rather than
-      // waiting for a refetch that might show the old figure.
       cryptoQuote: resync.updated ? resync : undefined,
     });
   } catch (err) {
@@ -118,7 +100,6 @@ async function record(req, res) {
   }
 }
 
-// GET /api/debts/:id/payments
 async function list(req, res) {
   try {
     const debt = await findMyDebt(req);
@@ -133,10 +114,6 @@ async function list(req, res) {
   }
 }
 
-// DELETE /api/debts/:id/payments/:paymentId
-// Deleting a payment RAISES the balance again, so the crypto address must ask
-// for more. Without the resync below it would keep quoting the lower figure and
-// the invoice could never be settled in full.
 async function remove(req, res) {
   try {
     const debt = await findMyDebt(req);
@@ -149,10 +126,44 @@ async function remove(req, res) {
     });
     if (!payment) return res.status(404).json({ error: "Payment not found" });
 
+    const covered = [
+      ...(Array.isArray(payment.txHashes) ? payment.txHashes : []),
+      ...(payment.txHash ? [payment.txHash] : []),
+    ].filter(Boolean);
+
+    if (covered.length) {
+      const PaymentAddress = require("../models/PaymentAddress");
+      const addresses = await PaymentAddress.find({
+        debtId: debt._id,
+        userId: req.user._id,
+        "observed.txHash": { $in: covered },
+      });
+      for (const pa of addresses) {
+        let released = 0;
+        for (const o of pa.observed) {
+          if (o.settledPaymentId && String(o.settledPaymentId) === String(payment._id)) {
+            o.settledPaymentId = null;
+            released++;
+          }
+        }
+        if (released) {
+          pa.settledNgn = Math.max(0, (pa.settledNgn || 0) - (payment.amount || 0));
+          if (pa.status === "paid") {
+            const stillOpen = pa.expiresAt && new Date(pa.expiresAt).getTime() > Date.now();
+            pa.status = stillOpen ? "active" : "expired";
+            if (!stillOpen && !pa.expiredAt) pa.expiredAt = new Date();
+          }
+          await pa.save();
+          console.warn(
+            `[payments] released ${released} confirmed transfer(s) on ${pa.address} ` +
+              `after payment ${payment._id} was deleted. They will be re-credited on the next watch pass.`
+          );
+        }
+      }
+    }
+
     await payment.deleteOne();
-    const totalPaid = await recomputeDebtStatus(debt); // may revert status
-    // Re-quote upward at the same snapshot rate. No notification here: nothing
-    // was paid, so telling the debtor a payment "arrived" would be false.
+    const totalPaid = await recomputeDebtStatus(debt);
     const resync = await resyncActivePaymentAddress(debt._id);
     return res.json({
       ok: true,
@@ -165,7 +176,6 @@ async function remove(req, res) {
   }
 }
 
-// GET /api/debts/:id/receipt?paymentId=  (latest payment if not specified)
 async function receipt(req, res) {
   try {
     const debt = await findMyDebt(req);

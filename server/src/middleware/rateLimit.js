@@ -1,76 +1,60 @@
-/**
- * A rate limiter with no dependency and no store.
- *
- * WHY IT EXISTS. There was no throttle anywhere in the API. Login ran bcrypt
- * for every attempt, so a few hundred concurrent requests pinned the CPU;
- * verify-email and the reset endpoints could be guessed at without limit; the
- * resend endpoints could mail any address at our domain's reputation; the AI
- * routes were uncapped third party spend; and the RPC proxy let one account
- * exhaust the operator's upstream quota.
- *
- * WHY IN MEMORY. This server runs as a single process and has no Redis. A
- * process local sliding window is exactly right for that shape: it costs
- * nothing, it is correct for one instance, and it resets on restart, which for
- * an abuse limiter is acceptable. If this ever runs as several instances the
- * limit is per instance, which is weaker but still a limit; move the store
- * then, not before.
- *
- * WHY PER IP AND PER ROUTE. A limit shared across routes would let a burst of
- * price polls lock somebody out of signing in. Each route gets its own bucket.
- * For the unauthenticated routes the key is the client IP. For authenticated
- * routes it is the user id when present, so a shared office IP does not
- * penalise everyone at once.
- *
- * Bounded memory: buckets are pruned on every hit once the map grows past a
- * ceiling, so an attacker rotating addresses cannot grow the heap without
- * bound.
- */
-
-const buckets = new Map(); // key -> number[] of hit timestamps
+const buckets = new Map();
 const MAX_KEYS = 50000;
 
 function clientIp(req) {
-  /**
-   * `req.ip` ONLY. This used to read the first entry of X-Forwarded-For
-   * itself, which is the entry the CLIENT writes: a proxy appends its own
-   * observation to whatever header the request already carried, so
-   * `X-Forwarded-For: 1.2.3.4` from a script arrived as `1.2.3.4, <real>` and
-   * the bucket keyed on the made up address. Every per address limit on sign
-   * in, code guessing and mail sending could be reset by changing one header.
-   *
-   * Express, with `trust proxy` set to the number of proxies in front of it
-   * (index.js sets 1), takes the address from the END of the list, the one
-   * the trusted proxy wrote, which is the only entry a client cannot choose.
-   */
   return req.ip || (req.socket && req.socket.remoteAddress) || "unknown";
 }
 
-function prune(now, windowMs) {
+function prune(now) {
   if (buckets.size < MAX_KEYS) return;
-  for (const [k, hits] of buckets) {
-    const live = hits.filter((t) => now - t < windowMs);
-    if (live.length === 0) buckets.delete(k);
-    else buckets.set(k, live);
+
+  let dropped = 0;
+  for (const [k, bucket] of buckets) {
+    const live = bucket.hits.filter((t) => now - t < bucket.windowMs);
+    if (live.length === 0) {
+      buckets.delete(k);
+      dropped++;
+    } else {
+      bucket.hits = live;
+    }
+  }
+
+  if (dropped === 0) {
+    const now2 = Date.now();
+    if (now2 - lastFullWarnAt > 60 * 60 * 1000) {
+      lastFullWarnAt = now2;
+      console.warn(
+        `[rateLimit] ${buckets.size} live buckets and a sweep freed none. MAX_KEYS (${MAX_KEYS}) ` +
+          "is too low for this traffic, or a limiter's window is too long. Nothing was discarded, " +
+          "so limits are still correct — but memory will keep growing until this is raised."
+      );
+    }
   }
 }
 
-/**
- * @param {object} opts
- * @param {number} opts.windowMs   the sliding window
- * @param {number} opts.max        hits allowed per key per window
- * @param {string} opts.name       route label, part of the bucket key
- * @param {boolean} [opts.byUser]  key on req.user._id when present
- * @param {string} [opts.message]  the 429 body
- */
-function rateLimit({ windowMs, max, name, byUser = false, message }) {
+let lastFullWarnAt = 0;
+
+function bodyEmail(req) {
+  const raw = req && req.body && req.body.email;
+  if (typeof raw !== "string") return "";
+  return raw.toLowerCase().trim().slice(0, 254);
+}
+
+function rateLimit({ windowMs, max, name, byUser = false, byEmail = false, message }) {
   return function limiter(req, res, next) {
     const now = Date.now();
-    const who = byUser && req.user && req.user._id ? `u:${req.user._id}` : `ip:${clientIp(req)}`;
+    let who = byUser && req.user && req.user._id ? `u:${req.user._id}` : `ip:${clientIp(req)}`;
+    if (byEmail) {
+      const email = bodyEmail(req);
+      if (email) who += `|e:${email}`;
+    }
     const key = `${name}|${who}`;
 
-    prune(now, windowMs);
+    prune(now);
 
-    const hits = (buckets.get(key) || []).filter((t) => now - t < windowMs);
+    const bucket = buckets.get(key) || { hits: [], windowMs };
+    bucket.windowMs = windowMs;
+    const hits = bucket.hits.filter((t) => now - t < windowMs);
     if (hits.length >= max) {
       const retryAfter = Math.ceil((windowMs - (now - hits[0])) / 1000);
       res.setHeader("Retry-After", String(Math.max(1, retryAfter)));
@@ -80,33 +64,99 @@ function rateLimit({ windowMs, max, name, byUser = false, message }) {
       });
     }
     hits.push(now);
-    buckets.set(key, hits);
+    bucket.hits = hits;
+    buckets.set(key, bucket);
     return next();
   };
 }
 
-// ---- the limits, named so the routes read as policy ------------------------
-
 const MIN = 60 * 1000;
 
-/** Password and code guessing: slow enough that a six digit code is not guessable in its window. */
-const authAttempt = (name) =>
-  rateLimit({ windowMs: 15 * MIN, max: 20, name, message: "Too many attempts. Please wait fifteen minutes." });
+const authAttempt = (name) => [
+  rateLimit({
+    windowMs: 15 * MIN,
+    max: 20,
+    name,
+    byEmail: true,
+    message: "Too many attempts. Please wait fifteen minutes.",
+  }),
+  rateLimit({
+    windowMs: 15 * MIN,
+    max: 200,
+    name: `${name}:ip`,
+    message: "This network has made a lot of attempts. Please wait fifteen minutes.",
+  }),
+];
 
-/** Anything that sends an email to an address the caller chose. */
-const mailSend = (name) =>
-  rateLimit({ windowMs: 60 * MIN, max: 6, name, message: "Too many emails requested. Please wait an hour." });
+const mailSend = (name) => [
+  rateLimit({
+    windowMs: 60 * MIN,
+    max: 6,
+    name,
+    byEmail: true,
+    message: "Too many emails requested. Please wait an hour.",
+  }),
+  rateLimit({
+    windowMs: 60 * MIN,
+    max: 40,
+    name: `${name}:ip`,
+    message: "This network has requested a lot of emails. Please wait an hour.",
+  }),
+];
 
-/** Third party spend: the AI endpoints. */
 const aiCall = rateLimit({ windowMs: 5 * MIN, max: 30, name: "ai", byUser: true });
 
-/** The browser facing RPC proxy: generous for a wallet, hostile to a script. */
 const rpcProxy = rateLimit({ windowMs: MIN, max: 240, name: "rpc", byUser: true });
 
-/** Each allocation burns a derivation index forever. */
 const allocate = rateLimit({ windowMs: 60 * MIN, max: 20, name: "allocate", byUser: true });
 
-/** Bitcoin broadcast: a relay for real money should never see a burst. */
 const broadcast = rateLimit({ windowMs: MIN, max: 6, name: "btc-broadcast", byUser: true });
 
-module.exports = { rateLimit, authAttempt, mailSend, aiCall, rpcProxy, allocate, broadcast };
+const resolveToken = rateLimit({ windowMs: 5 * MIN, max: 20, name: "resolve-token", byUser: true });
+
+const priceData = (name, max) =>
+  rateLimit({
+    windowMs: MIN,
+    max,
+    name: `cg-${name}`,
+    byUser: true,
+    message: "You are asking for market data faster than it changes. Please wait a moment.",
+  });
+
+const pushAction = rateLimit({
+  windowMs: MIN,
+  max: 20,
+  name: "push-action",
+  message: "Too many notification actions. Please open the app instead.",
+});
+
+const walletSecuritySet = rateLimit({
+  windowMs: 15 * MIN,
+  max: 10,
+  name: "wallet-security-set",
+  byUser: true,
+  message: "Too many changes to your verification settings. Please wait a few minutes.",
+});
+
+const addToken = rateLimit({
+  windowMs: 5 * MIN,
+  max: 20,
+  name: "add-token",
+  byUser: true,
+  message: "Too many tokens added at once. Please wait a few minutes.",
+});
+
+module.exports = {
+  rateLimit,
+  authAttempt,
+  mailSend,
+  aiCall,
+  rpcProxy,
+  allocate,
+  broadcast,
+  resolveToken,
+  priceData,
+  pushAction,
+  walletSecuritySet,
+  addToken,
+};

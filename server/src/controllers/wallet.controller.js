@@ -1,11 +1,9 @@
 const User = require("../models/User");
 const WalletTx = require("../models/WalletTx");
 const { listChains, getChain } = require("../config/chains");
-const { sendToChain } = require("../services/rpc.service");
+const { sendToChain, rpcCallTyped } = require("../services/rpc.service");
+const { sanitizeText } = require("../services/walletHistory.service");
 
-// Strict allowlist: read methods + raw-tx broadcast + receipt polling. Notably it
-// does NOT (and cannot) include any signing method — the server never holds a key.
-// Anything not on this list is rejected before it ever reaches the upstream RPC.
 const ALLOWED_METHODS = new Set([
   "eth_chainId",
   "net_version",
@@ -27,7 +25,6 @@ const ALLOWED_METHODS = new Set([
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
-// GET /api/wallet/chains  -> enabled chains (rpc stripped) + mainnet flag.
 async function chains(req, res) {
   return res.json({
     chains: listChains(),
@@ -35,10 +32,6 @@ async function chains(req, res) {
   });
 }
 
-// POST /api/wallet/rpc/:chainId  -> JSON-RPC proxy with a strict method allowlist.
-// Body is a standard JSON-RPC request (single object or a batch array), so the
-// client can point ethers.JsonRpcProvider straight at this URL. The upstream RPC
-// URL (which may carry the Alchemy key) never reaches the browser.
 const MAX_BATCH = 24;
 
 async function rpc(req, res) {
@@ -50,13 +43,6 @@ async function rpc(req, res) {
     const items = Array.isArray(body) ? body : [body];
     if (items.length === 0) return res.status(400).json({ error: "Empty request" });
 
-    /**
-     * BOUNDED. The only ceiling on a batch used to be the global 3 MB body
-     * limit, which is roughly fifty thousand calls in one request against the
-     * operator's upstream key, from any registered account, occupying a single
-     * concurrency slot. ethers is configured with batchMaxCount 1 on this
-     * client, so anything past a couple of dozen is not a wallet talking.
-     */
     if (items.length > MAX_BATCH) {
       return res.status(413).json({ error: `At most ${MAX_BATCH} calls per request` });
     }
@@ -69,23 +55,9 @@ async function rpc(req, res) {
       }
     }
 
-    // Walks the chain's verified endpoint list, with a timeout, and forwards the
-    // first real answer. See rpc.service.js for what does and does not warrant
-    // trying the next endpoint — notably, a JSON-RPC error inside a 200 is the
-    // chain's genuine answer and is forwarded untouched.
     const upstream = await sendToChain(chain, body);
 
     if (!upstream.ok) {
-      /**
-       * Report WHY. The previous version logged `err.message`, which for any
-       * undici transport failure is the fixed string "fetch failed" — the same
-       * five characters whether DNS failed, the host refused the connection, TLS
-       * broke or the request timed out. That message could not distinguish the
-       * two real causes here (Alchemy returning 403 for networks not enabled on
-       * the app, and a dead public endpoint), so it named neither.
-       *
-       * Hosts only, never URLs: the Alchemy key lives in the path.
-       */
       const detail = upstream.attempts.map((a) => `${a.host} -> ${a.reason}`).join(" | ");
       console.error(
         `wallet rpc proxy: ${chain.name} failed on all ${upstream.total} endpoint(s): ${detail}`
@@ -94,8 +66,6 @@ async function rpc(req, res) {
       const first = upstream.attempts[0] || {};
       return res.status(502).json({
         error: "RPC upstream failed",
-        // Surfaced so the wallet can say "Base Sepolia RPC unreachable (403)"
-        // rather than showing an empty balance with no explanation.
         chain: chain.name,
         reason: first.reason || "unknown",
         code: first.code || null,
@@ -107,13 +77,11 @@ async function rpc(req, res) {
     res.set("Content-Type", "application/json");
     return res.send(upstream.text);
   } catch (err) {
-    // Anything not already handled above — a bug here, not an upstream fault.
     console.error("wallet rpc proxy error:", err.message, err.cause ? `cause=${err.cause.code || err.cause.message}` : "");
     return res.status(502).json({ error: "RPC upstream failed", reason: err.message });
   }
 }
 
-// POST /api/wallet/address  { address }  -> persist the PUBLIC address only.
 async function setAddress(req, res) {
   try {
     const address = (req.body && req.body.address) || "";
@@ -132,8 +100,6 @@ async function setAddress(req, res) {
   }
 }
 
-// DELETE /api/wallet/address -> forget the public address (client also clears the
-// encrypted keystore from its own localStorage).
 async function clearAddress(req, res) {
   try {
     await User.findByIdAndUpdate(req.user._id, { walletAddress: null });
@@ -144,18 +110,11 @@ async function clearAddress(req, res) {
   }
 }
 
-// GET /api/wallet/txs?chainId=  -> locally recorded history, newest first.
 async function listTxs(req, res) {
   try {
     const query = { userId: req.user._id };
     if (req.query.chainId) query.chainId = Number(req.query.chainId);
 
-    /**
-     * Pick up anything that ARRIVED without the app sending it, before listing.
-     * Without this, History only ever showed outgoing transactions the app
-     * itself initiated, so a wallet that had genuinely received funds looked
-     * empty. Never throws: a failed sync should still return the known rows.
-     */
     if (req.query.chainId && req.user.walletAddress) {
       const { syncInboundTransfers } = require("../services/walletHistory.service");
       await syncInboundTransfers({
@@ -173,13 +132,12 @@ async function listTxs(req, res) {
   }
 }
 
-// POST /api/wallet/txs  -> record a broadcast tx (public data only).
 async function recordTx(req, res) {
   try {
     const {
       chainId, hash, from, to, value, symbol, tokenAddress, direction,
       kind, tokenOut, tokenOutSymbol, amountOut, minAmountOut, feeTier,
-      priceImpactPct, side, alertId,
+      priceImpactPct, side, alertId, route,
     } = req.body || {};
     if (!getChain(chainId)) return res.status(400).json({ error: "Unknown or disabled chain" });
     if (!HASH_RE.test(hash || "")) return res.status(400).json({ error: "Invalid tx hash" });
@@ -192,10 +150,6 @@ async function recordTx(req, res) {
     if (tokenAddress && !ADDRESS_RE.test(tokenAddress)) {
       return res.status(400).json({ error: "Invalid token address" });
     }
-    // Amounts are decimal strings and symbols are tickers. These are stored
-    // and rendered in History and summed by the daily cap, so they are shaped
-    // here rather than trusted: a symbol is at most 24 characters and an
-    // amount is digits with one optional point.
     const AMOUNT_RE = /^\d{1,60}(\.\d{1,36})?$/;
     for (const [label, v] of [["value", value], ["amountOut", amountOut], ["minAmountOut", minAmountOut]]) {
       if (v != null && !AMOUNT_RE.test(String(v))) {
@@ -217,22 +171,19 @@ async function recordTx(req, res) {
       tokenAddress: tokenAddress || null,
       direction: direction === "in" ? "in" : "out",
       status: "pending",
-      // Swap metadata. Absent for ordinary transfers, which keep behaving exactly
-      // as before.
       kind: ["swap", "approval"].includes(kind) ? kind : "transfer",
       tokenOut: tokenOut || null,
       tokenOutSymbol: tokenOutSymbol || null,
       amountOut: amountOut != null ? String(amountOut) : null,
       minAmountOut: minAmountOut != null ? String(minAmountOut) : null,
       feeTier: feeTier != null ? Number(feeTier) : null,
+      route: sanitizeText(route, 120),
       priceImpactPct: priceImpactPct != null ? Number(priceImpactPct) : null,
       side: ["buy", "sell"].includes(side) ? side : null,
       alertId: alertId || null,
     });
     return res.status(201).json({ tx });
   } catch (err) {
-    // The unique index on `hash` makes a repeat harmless rather than a duplicate
-    // row: return the existing record so the caller carries on normally.
     if (err.code === 11000) {
       const existing = await WalletTx.findOne({ hash: req.body.hash, userId: req.user._id });
       if (existing) return res.status(200).json({ tx: existing });
@@ -243,19 +194,52 @@ async function recordTx(req, res) {
   }
 }
 
-// PATCH /api/wallet/txs/:id  { status } -> update a recorded tx's status.
 async function updateTxStatus(req, res) {
   try {
     const status = req.body && req.body.status;
     if (!["pending", "confirmed", "failed"].includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
     }
-    const tx = await WalletTx.findOneAndUpdate(
-      { _id: req.params.id, userId: req.user._id },
-      { status },
-      { new: true }
-    );
+
+    const tx = await WalletTx.findOne({ _id: req.params.id, userId: req.user._id });
     if (!tx) return res.status(404).json({ error: "Transaction not found" });
+
+    if (tx.kind === "swap" && status === "failed" && tx.status !== "failed") {
+      const chain = getChain(tx.chainId);
+      if (!chain) return res.status(400).json({ error: "Unknown or disabled chain" });
+
+      const read = await rpcCallTyped(chain, "eth_getTransactionReceipt", [tx.hash]);
+      if (!read.ok) {
+        console.warn(`[wallet] could not verify swap ${tx.hash} on ${chain.name}: ${read.reason}`);
+        return res.status(503).json({
+          error:
+            `${chain.name} could not be reached to confirm that this swap failed, so nothing was ` +
+            `changed. It still counts towards your daily limit until the chain says otherwise.`,
+          code: "unverified",
+        });
+      }
+      const receipt = read.result;
+      if (receipt && receipt.status === "0x1") {
+        tx.status = "confirmed";
+        await tx.save();
+        return res.status(409).json({
+          tx,
+          error: "That swap succeeded on chain, so it has been recorded as confirmed.",
+        });
+      }
+      if (!receipt) {
+        return res.status(409).json({
+          tx,
+          error:
+            "That swap has not been mined yet, so it cannot be recorded as failed. It still " +
+            "counts towards your daily limit until the chain reports it.",
+          code: "not_mined",
+        });
+      }
+    }
+
+    tx.status = status;
+    await tx.save();
     return res.json({ tx });
   } catch (err) {
     console.error("wallet updateTxStatus error:", err.message);
@@ -263,20 +247,6 @@ async function updateTxStatus(req, res) {
   }
 }
 
-/**
- * GET /api/wallet/spend  -> { spent24h, currency: "USD", swaps }
- *
- * The dollar value of every live swap this account signed in the last twenty
- * four hours, across every chain. This is the figure the daily trading cap is
- * measured against. It used to be hardcoded to zero on the client, which made
- * the daily cap arithmetic reduce to the per trade cap and the daily limit
- * did not exist. A per session counter in browser memory reset on reload, so
- * it did not exist either.
- *
- * Counted from WalletTx, which every swap writes on broadcast, so a reload, a
- * second tab or a second device all see the same number. The cash leg is the
- * input on a buy and the output on a sell; whichever side the dollar is on.
- */
 const CASH_RE = /^(USDC|USDT|USD₮0|USDT0|USDt)$/i;
 
 async function spend24h(req, res) {
@@ -292,22 +262,25 @@ async function spend24h(req, res) {
       .lean();
 
     let spent = 0;
+    let unpriced = 0;
     for (const t of rows) {
       if (t.side === "buy" && CASH_RE.test(t.symbol || "")) spent += Number(t.value) || 0;
       else if (t.side === "sell" && CASH_RE.test(t.tokenOutSymbol || "")) spent += Number(t.amountOut) || 0;
+      else unpriced += 1;
     }
-    return res.json({ spent24h: Number(spent.toFixed(2)), currency: "USD", swaps: rows.length });
+    return res.json({
+      spent24h: Number(spent.toFixed(2)),
+      currency: "USD",
+      swaps: rows.length,
+      unpricedSwaps: unpriced,
+      complete: unpriced === 0,
+    });
   } catch (err) {
     console.error("wallet spend24h error:", err.message);
     return res.status(500).json({ error: "Could not compute recent spend" });
   }
 }
 
-/**
- * Discovered tokens for one chain, shaped for the wallet. The address is
- * stored lowercase for matching; the explorer link is built here so the
- * client never has to know an explorer URL.
- */
 function shapeDiscovered(list, chain) {
   return (list || [])
     .filter((d) => d.chainId === chain.chainId)
@@ -332,15 +305,6 @@ function shapeDiscovered(list, chain) {
     .sort((a, b) => new Date(b.firstSeenAt) - new Date(a.firstSeenAt));
 }
 
-/**
- * GET /api/wallet/discovered?chainId=  -> { tokens, sync }
- *
- * Runs the inbound scan first, so opening the wallet is what notices a token
- * that arrived while it was closed. The scan never throws; when it fails the
- * known list is still returned and `sync.failed` says so, because "nothing
- * new" and "could not look" are different facts and the wallet shows them
- * differently.
- */
 async function discovered(req, res) {
   try {
     const chain = getChain(req.query.chainId);
@@ -367,15 +331,6 @@ async function discovered(req, res) {
   }
 }
 
-/**
- * POST /api/wallet/discovered/:chainId/:address  { action: add | ignore | restore }
- *
- * The owner's decision about a token that arrived uninvited. `add` puts it in
- * the custom token list with the decimals READ FROM ITS CONTRACT, which is the
- * only reason a token that could not be read is refused here: a balance shown
- * with guessed decimals is a wrong number, and this wallet does not show
- * those. `ignore` keeps it off every list until `restore`.
- */
 async function discoveredAct(req, res) {
   try {
     const chain = getChain(req.params.chainId);
@@ -420,8 +375,6 @@ async function discoveredAct(req, res) {
     } else if (action === "ignore") {
       entry.status = "ignored";
     } else {
-      // restore: back to undecided. If it had been added, the custom token
-      // stays; removing it is the existing remove-token action's job.
       entry.status = entry.status === "added" ? "added" : "new";
     }
     entry.decidedAt = new Date();
@@ -438,6 +391,7 @@ async function discoveredAct(req, res) {
 }
 
 module.exports = {
+  ALLOWED_METHODS,
   spend24h,
   chains,
   rpc,

@@ -1,10 +1,3 @@
-/**
- * The privacy policy and the terms, as the owner wrote them.
- *
- * Kept as data so they read as documents and render through the same blocks
- * as the guide. House style: plain words, first person, no dashes anywhere.
- */
-
 const h2 = (text) => ({ type: "h2", text });
 const p = (text) => ({ type: "p", text });
 const ul = (items) => ({ type: "ul", items });
@@ -36,7 +29,7 @@ export const PRIVACY = {
       "**Your wallet's public side.** Your wallet's public address, the transactions you send from it, the tokens you add, the tokens that arrive at it, and the payment addresses issued for your invoices. All of this is public on the blockchain anyway. I keep it so the wallet can show you your own history.",
       "**Market Watch.** The coins you watch, the conditions you set, the alerts raised, your paper trades, and a record of each live swap you sign.",
       "**Notifications.** If you enable them, the subscription your browser gives me so I can reach that device. It includes the kind of browser it is.",
-      "**Messages you send me.** Anything you write through the Contact page, with your name and email so I can reply.",
+      "**Messages you send me.** Anything you write through the Contact page, with your name and email so I can reply. Each message is stored with two further facts about how it was sent: which page of the site you were on when you wrote it, and the identification string your browser sends, which names the browser, its version and the kind of device. They are there so a report about something not working can be reproduced. They are kept with the message for as long as the message is kept, and they are not used for anything else.",
       "**Technical facts.** Your internet address is used, in memory and only for a short while, to limit how many times a form can be submitted. I do not keep it in the database. I do not use analytics scripts, advertising trackers or fingerprinting of any kind.",
     ]),
 

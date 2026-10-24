@@ -5,12 +5,6 @@ const VARIANT = {
   danger: "btn btn-danger",
 };
 
-/**
- * Button with strict hierarchy. `variant`: default | primary | ghost | danger.
- * `icon` renders a square icon-only button; `size="sm"` for row actions;
- * `block` makes it full-width; `loading` shows a spinner and disables it.
- * Renders an <a> when `href` is given (e.g. the WhatsApp action).
- */
 export default function Button({
   variant = "default",
   size,
@@ -42,7 +36,7 @@ export default function Button({
     children
   );
 
-  if (href) {
+  if (href && !(disabled || loading)) {
     return (
       <a className={cls} href={href} {...rest}>
         {content}

@@ -2,10 +2,6 @@ import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { currentTheme, onThemeChange, toggleTheme } from "../theme";
 
-/**
- * One button in the masthead. Shows the theme you would switch TO, which is the
- * convention people expect from a toggle: a moon means "make it dark".
- */
 export default function ThemeToggle({ className = "topbar-icon" }) {
   const [theme, setTheme] = useState(() => currentTheme());
 

@@ -13,7 +13,8 @@ import {
   Zap,
 } from "lucide-react";
 import http from "../../api/http";
-import { Button, Card, Field, Input, SkeletonLines } from "../../components/ui";
+import { Button, Card, Field, Input, PageHeader, SkeletonLines } from "../../components/ui";
+import { DetailPane } from "../../components/ui/Modal";
 import TokenLogo from "../../components/TokenLogo";
 import { unlockWallet } from "./keystore";
 import {
@@ -32,51 +33,17 @@ import {
   readCachedBitcoinAddress,
   cacheBitcoinAddress,
 } from "./bitcoin/addressCache";
-
-/**
- * THE BITCOIN WALLET.
- *
- * Real Bitcoin, on mainnet or testnet, from the SAME twelve word phrase that
- * backs the EVM wallet. BIP-84 native segwit, so the address begins bc1 and the
- * phrase restores in any standard wallet.
- *
- * WHY THE ADDRESS IS CACHED AND THE KEY IS NOT
- *
- * Deriving a Bitcoin address needs the mnemonic, and the mnemonic needs the
- * keystore password. Asking for a password before showing a balance would be
- * absurd, so the ADDRESS, which is public by construction, is derived once and
- * remembered per account, per keystore and per network (see addressCache.js for
- * why the keystore is part of that). The private key is never stored, never
- * cached and never leaves this component: every spend re-derives it from a
- * password typed for that transaction and discards it in the same tick.
- *
- * SENDING IS THREE STEPS, NOT ONE
- *
- *   1. The form: destination, amount, fee speed. Checked as typed.
- *   2. The review: the exact inputs, the exact fee, the exact change and the
- *      balance afterwards, computed with no key. Nothing has been signed.
- *   3. The password: the key exists for one call, signs the plan that was
- *      reviewed, and the result is broadcast.
- *
- * The plan's inputs are handed back to the builder, so what was reviewed is
- * what is signed, to the satoshi. There is no path from the form to the network
- * that skips the review.
- *
- * A BROADCAST THAT MAY OR MAY NOT HAVE LANDED IS NOT A FAILURE. The server
- * reports it as `kind: "ambiguous"` and this panel shows it as exactly that,
- * keeps the transaction id on screen, checks the address on request, and will
- * not let a second copy be signed until the person has confirmed the first is
- * not there. Reporting it as an error was how a payment got sent twice.
- *
- * EVERY SPEND IS REPLACEABLE. A transaction stuck at too low a fee can be sped
- * up, or cancelled back to this wallet, from the activity view.
- */
+import {
+  readAmbiguous,
+  readLastSend,
+  writeAmbiguous,
+  writeLastSend,
+} from "./bitcoin/pendingSend";
 
 const SATS = 100_000_000;
 const btc = (sats) => (Number(sats || 0) / SATS).toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
 const sats = (n) => Number(n || 0).toLocaleString();
 
-/** Fee estimates older than this are refetched before they are used. */
 const FEES_STALE_MS = 2 * 60 * 1000;
 
 function explorerTx(network, txid) {
@@ -92,48 +59,52 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
 
-  const [balance, setBalance] = useState(null); // { confirmed, pending, total } in sats | null
+  const [balance, setBalance] = useState(null);
   const [balError, setBalError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [txs, setTxs] = useState(null); // null = not loaded, [] = loaded and empty
+  const [txs, setTxs] = useState(null);
   const [txsError, setTxsError] = useState(null);
   const [tab, setTab] = useState("balance");
 
-  const [panel, setPanel] = useState(null); // "send" | "receive" | null
+  const [panel, setPanel] = useState(null);
 
-  // ---- fees: fetched per network, with an age, and never assumed ----
-  const [fees, setFees] = useState(null); // { network, fast, medium, slow, ... } | null
+  const [fees, setFees] = useState(null);
   const [feesAt, setFeesAt] = useState(0);
   const [feesError, setFeesError] = useState(null);
-  const [feeChoice, setFeeChoice] = useState("medium"); // "fast" | "medium" | "slow"
+  const [feeChoice, setFeeChoice] = useState("medium");
 
-  // ---- the send flow ----
-  const [step, setStep] = useState("form"); // "form" | "review"
+  const [step, setStep] = useState("form");
   const [sendTo, setSendTo] = useState("");
   const [sendAmount, setSendAmount] = useState("");
   const [sendPassword, setSendPassword] = useState("");
-  const [plan, setPlan] = useState(null); // planP2wpkhSpend result, no key involved
+  const [plan, setPlan] = useState(null);
   const [planning, setPlanning] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
 
-  // The last transaction this panel broadcast, while it is still worth acting on.
-  const [lastSend, setLastSend] = useState(null);
-  // A broadcast whose outcome the network did not confirm. Blocks sending.
-  const [ambiguous, setAmbiguous] = useState(null);
+  const [lastSend, setLastSend] = useState(() => readLastSend(userId, evmAddress, network));
+  const [ambiguous, setAmbiguous] = useState(() => readAmbiguous(userId, evmAddress, network));
   const [checking, setChecking] = useState(false);
 
-  // ---- replace by fee ----
-  const [bump, setBump] = useState(null); // { mode: "speed"|"cancel", rate, password, busy, error }
+  const rememberLastSend = useCallback(
+    (next) => {
+      setLastSend(next);
+      writeLastSend(userId, evmAddress, network, next);
+    },
+    [userId, evmAddress, network]
+  );
+  const rememberAmbiguous = useCallback(
+    (next) => {
+      setAmbiguous(next);
+      writeAmbiguous(userId, evmAddress, network, next);
+    },
+    [userId, evmAddress, network]
+  );
+
+  const [bump, setBump] = useState(null);
 
   const isMainnet = network === "mainnet";
 
-  /**
-   * A network change resets EVERYTHING that belongs to the other network. The
-   * fee rates most of all: a testnet estimate of 2 sat/vB applied to a mainnet
-   * send broadcasts successfully at a rate nobody mines, and the coins sit
-   * locked in the mempool for two weeks. `fees` used to survive this switch.
-   */
   useEffect(() => {
     setAddress(readCachedBitcoinAddress(userId, network, evmAddress));
     setBalance(null);
@@ -150,8 +121,8 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
     setSendAmount("");
     setSendPassword("");
     setSendError("");
-    setLastSend(null);
-    setAmbiguous(null);
+    setLastSend(readLastSend(userId, evmAddress, network));
+    setAmbiguous(readAmbiguous(userId, evmAddress, network));
     setBump(null);
   }, [userId, network, evmAddress]);
 
@@ -164,8 +135,6 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
         setBalance(data);
         setBalError(null);
       } else {
-        // A read that failed is UNREADABLE, never zero. A Bitcoin balance shown
-        // as 0.00 because an API was down looks exactly like an emptied wallet.
         setBalance(null);
         setBalError(data?.reason || "The Bitcoin API did not answer");
       }
@@ -190,7 +159,6 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       setTxsError(null);
       return list;
     } catch (err) {
-      // A failed history is NOT an empty one, and the activity view says which.
       setTxs([]);
       setTxsError(err?.response?.data?.error || err.message || "Could not load the history");
       return null;
@@ -202,11 +170,6 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
     loadTxs();
   }, [tab, address, txs, loadTxs]);
 
-  /**
-   * Fetch fee rates for THIS network, and refuse to keep stale ones. The
-   * response carries `network`, which is checked on use as well as here, so a
-   * rate from the other network can never be applied even by a race.
-   */
   const refreshFees = useCallback(
     async (force = false) => {
       if (!force && fees && fees.network === network && Date.now() - feesAt < FEES_STALE_MS) {
@@ -236,10 +199,6 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
     if (panel === "send") refreshFees();
   }, [panel, refreshFees]);
 
-  /**
-   * While the last send is unconfirmed, watch for it so the speed up and cancel
-   * controls disappear on their own the moment it is mined.
-   */
   useEffect(() => {
     if (!lastSend || lastSend.confirmed) return undefined;
     let alive = true;
@@ -248,7 +207,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       if (!alive || !list) return;
       const hit = list.find((t) => t.txid === lastSend.txid);
       if (hit && hit.confirmed) {
-        setLastSend((s) => (s && s.txid === lastSend.txid ? { ...s, confirmed: true } : s));
+        rememberLastSend({ ...lastSend, confirmed: true });
         setBump(null);
         load();
       }
@@ -258,9 +217,8 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       alive = false;
       clearInterval(timer);
     };
-  }, [lastSend, loadTxs, load]);
+  }, [lastSend, loadTxs, load, rememberLastSend]);
 
-  /** Derive the address once, from a password typed now. */
   async function deriveAddress(e) {
     e.preventDefault();
     setError("");
@@ -293,11 +251,8 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* it is on screen to copy by hand */
     }
   }
-
-  // ---------------------------------------------------------------- send ----
 
   const feeRate = useMemo(() => {
     if (!fees || fees.network !== network) return null;
@@ -328,7 +283,6 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
     refreshFees();
   }
 
-  /** Step 1 to 2. Everything checked and summed. No key. */
   async function review(e) {
     e.preventDefault();
     setSendError("");
@@ -354,8 +308,6 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       return;
     }
 
-    // Fresh fees, always. A rate from two minutes ago on a busy day is a rate
-    // the network has already moved past.
     const current = await refreshFees();
     const rate = current && current.network === network ? Number(current[feeChoice]) : null;
     if (!Number.isFinite(rate) || rate < 1) {
@@ -397,7 +349,6 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
     }
   }
 
-  /** Step 2 to 3. The reviewed plan is signed, exactly, and broadcast. */
   async function confirmSend(e) {
     e.preventDefault();
     if (!plan) return;
@@ -405,11 +356,9 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
     setSending(true);
     if (onBusyChange) onBusyChange(true);
 
-    // Hoisted so the catch can keep the txid of whatever was signed.
     let built = null;
+    let broadcastAttempted = false;
     try {
-      // The key exists only inside this block, derived from a password typed for
-      // THIS transaction, and is never returned, stored or logged.
       const wallet = await unlockWallet(sendPassword);
       const phrase = wallet?.mnemonic?.phrase;
       if (!phrase) throw new Error("This wallet has no recovery phrase, so it cannot sign Bitcoin.");
@@ -417,21 +366,22 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
 
       built = buildP2wpkhSpend({
         utxos: plan.inputs,
-        forceInputs: plan.inputs, // sign what was reviewed, not a fresh selection
+        forceInputs: plan.inputs,
         fromAddress: address,
         toAddress: plan.toAddress,
         amountSats: plan.amountSats,
         feeRateSatPerVb: plan.feeRateSatPerVb,
         privateKey,
         network,
-        allowUnconfirmed: true, // the plan already applied the confirmation rule
+        allowUnconfirmed: true,
       });
       if (!built.ok) throw new Error(built.reason);
 
+      broadcastAttempted = true;
       const { data } = await http.post("/api/bitcoin/broadcast", { rawTx: built.hex, network });
       if (data?.ok === false) throw new Error(data.reason || "The network refused the transaction");
 
-      setLastSend({
+      rememberLastSend({
         txid: data.txid || built.txid,
         to: plan.toAddress,
         amountSats: plan.amountSats,
@@ -453,17 +403,9 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       load();
     } catch (err) {
       const data = err?.response?.data;
-      /**
-       * THE ONE OUTCOME THAT MUST NOT LOOK LIKE A FAILURE.
-       *
-       * The server could not tell whether the network accepted the broadcast.
-       * The transaction may be live. Showing that as an error, with the form
-       * still filled in, is how a second copy from different coins gets signed
-       * and the payee is paid twice. So it becomes its own state that blocks
-       * sending, keeps the transaction id, and offers to check.
-       */
-      if (data && (data.kind === "ambiguous" || data.resendUnsafe)) {
-        setAmbiguous({
+      const lostReply = broadcastAttempted && !err?.response;
+      if ((data && (data.kind === "ambiguous" || data.resendUnsafe)) || lostReply) {
+        rememberAmbiguous({
           txid: built?.txid || null,
           to: plan.toAddress,
           amountSats: plan.amountSats,
@@ -471,7 +413,11 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
           feeRateSatPerVb: built?.feeRateSatPerVb || plan.feeRateSatPerVb,
           vsize: built?.vsize || plan.vsize,
           inputs: built?.inputs || plan.inputs,
-          message: data.error,
+          message: lostReply
+            ? `The transaction was signed and sent, and the connection dropped before the answer came back (${
+                err?.message || "no reply"
+              }). It may well be on the network.`
+            : data.error,
         });
         setSendPassword("");
         setStep("form");
@@ -486,11 +432,6 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
     }
   }
 
-  /**
-   * Look for the ambiguous transaction at the address. Found means it was sent
-   * after all and becomes the last send. Not found means the person may send
-   * again, but only after they have seen that answer.
-   */
   async function checkAmbiguous() {
     if (!ambiguous) return;
     setChecking(true);
@@ -499,7 +440,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       await load();
       if (list && ambiguous.txid && list.some((t) => t.txid === ambiguous.txid)) {
         const hit = list.find((t) => t.txid === ambiguous.txid);
-        setLastSend({
+        rememberLastSend({
           txid: ambiguous.txid,
           to: ambiguous.to,
           amountSats: ambiguous.amountSats,
@@ -511,25 +452,21 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
           at: Date.now(),
           confirmed: Boolean(hit && hit.confirmed),
         });
-        setAmbiguous(null);
+        rememberAmbiguous(null);
         setSendTo("");
         setSendAmount("");
         setTab("activity");
       } else {
-        setAmbiguous((a) => (a ? { ...a, checkedAt: Date.now(), found: false } : a));
+        rememberAmbiguous({ ...ambiguous, checkedAt: Date.now(), found: false });
       }
     } finally {
       setChecking(false);
     }
   }
 
-  // ---------------------------------------------------------- replace ----
-
   function startBump(mode) {
     if (!lastSend || lastSend.confirmed) return;
     const fast = fees && fees.network === network ? Number(fees.fast) : null;
-    // Suggest the faster of "what the network wants now" and "a third more than
-    // before", and never less than the original plus one.
     const suggested = Math.max(
       Math.ceil(lastSend.feeRateSatPerVb * 1.3),
       Number.isFinite(fast) ? fast : 0,
@@ -549,6 +486,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
     }
     setBump((b) => ({ ...b, busy: true, error: "" }));
     if (onBusyChange) onBusyChange(true);
+    let bumpBroadcastAttempted = false;
     try {
       const replacing = { fee: lastSend.fee, feeRateSatPerVb: lastSend.feeRateSatPerVb };
       let toAddress = lastSend.to;
@@ -574,7 +512,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
 
       const built = buildP2wpkhSpend({
         utxos: lastSend.inputs,
-        forceInputs: lastSend.inputs, // BIP 125: a replacement spends the same inputs
+        forceInputs: lastSend.inputs,
         fromAddress: address,
         toAddress,
         amountSats,
@@ -583,16 +521,15 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
         network,
         allowUnconfirmed: true,
         replacing,
-        // Paying the whole balance back to yourself minus the fee is the point
-        // of a cancellation, so the fee can legitimately dominate a small one.
         allowFeeAboveAmount: bump.mode === "cancel",
       });
       if (!built.ok) throw new Error(built.reason);
 
+      bumpBroadcastAttempted = true;
       const { data } = await http.post("/api/bitcoin/broadcast", { rawTx: built.hex, network });
       if (data?.ok === false) throw new Error(data.reason || "The network refused the replacement");
 
-      setLastSend({
+      rememberLastSend({
         txid: data.txid || built.txid,
         to: toAddress,
         amountSats,
@@ -611,10 +548,8 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       load();
     } catch (err) {
       const data = err?.response?.data;
-      if (data && (data.kind === "ambiguous" || data.resendUnsafe)) {
-        // A replacement can be ambiguous too. Either the old or the new one
-        // is live; the activity view will show which. Do not let it be
-        // attempted again blind.
+      const lostReply = bumpBroadcastAttempted && !err?.response;
+      if ((data && (data.kind === "ambiguous" || data.resendUnsafe)) || lostReply) {
         setBump((b) => ({
           ...b,
           busy: false,
@@ -636,7 +571,6 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
     return Number(balance.total ?? Number(balance.confirmed || 0) + Number(balance.pending || 0));
   }, [balance]);
 
-  // ---------------------------------------------------------------- setup ----
   if (!address) {
     return (
       <div className="mm-hero" style={{ textAlign: "left", padding: "22px 20px" }}>
@@ -674,13 +608,13 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
     );
   }
 
-  // --------------------------------------------------------------- active ----
   const feeOptions = ["fast", "medium", "slow"];
   const feeLabel = { fast: "Fast", medium: "Normal", slow: "Slow" };
 
   return (
     <>
-      <div className="mm-top" style={{ borderTop: "1px solid var(--border)" }}>
+      <section className="card mm">
+      <div className="mm-top">
         <button type="button" className="mm-acct" onClick={copyAddr} title="Copy your Bitcoin address">
           <span className="addr num" style={{ fontSize: 12 }}>
             {address.slice(0, 10)}...{address.slice(-6)}
@@ -728,25 +662,21 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       </div>
 
       <div className="mm-actions">
-        <button
-          type="button"
-          className="mm-action brass"
-          onClick={() => setPanel(panel === "receive" ? null : "receive")}
-        >
-          <span className="ring">
-            <ArrowDownToLine size={19} />
-          </span>
-          Receive
-        </button>
-        <button type="button" className="mm-action" onClick={openSend}>
-          <span className="ring">
-            <ArrowUpRight size={19} />
-          </span>
+        <button type="button" className="btn" onClick={openSend}>
+          <ArrowUpRight size={16} />
           Send
         </button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => setPanel(panel === "receive" ? null : "receive")}
+        >
+          <ArrowDownToLine size={16} />
+          Receive
+        </button>
       </div>
+      </section>
 
-      {/* An unresolved broadcast sits above everything until it is dealt with. */}
       {ambiguous && (
         <div className="mm-drawer" style={{ padding: "0 16px 16px" }}>
           <Card title="A send is unconfirmed either way">
@@ -794,7 +724,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
                 Check the address now
               </Button>
               {ambiguous.found === false && (
-                <Button variant="ghost" onClick={() => setAmbiguous(null)}>
+                <Button variant="ghost" onClick={() => rememberAmbiguous(null)}>
                   It is not there. Let me send again
                 </Button>
               )}
@@ -803,17 +733,22 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
         </div>
       )}
 
-      <div className="mm-tabs">
+      <section className="card card-flush mm-panel">
+      <div className="tabs mm-tabs" role="tablist">
         <button
           type="button"
-          className={tab === "balance" ? "mm-tab active" : "mm-tab"}
+          role="tab"
+          aria-selected={tab === "balance"}
+          className="tab"
           onClick={() => setTab("balance")}
         >
           Holdings
         </button>
         <button
           type="button"
-          className={tab === "activity" ? "mm-tab active" : "mm-tab"}
+          role="tab"
+          aria-selected={tab === "activity"}
+          className="tab"
           onClick={() => setTab("activity")}
         >
           Activity
@@ -823,9 +758,6 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
       {tab === "balance" ? (
         <div className="mm-list">
           <div className="mm-row">
-            {/* The same disc the EVM wallet draws, from the same logo cache. This
-                was a lettered "BTC" placeholder, the one kind of mark the owner
-                asked never to see. */}
             <TokenLogo symbol="BTC" native />
             <span className="mm-row-main">
               <span className="mm-row-name">Bitcoin</span>
@@ -955,10 +887,17 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
           )}
         </div>
       )}
+      </section>
 
       {panel === "receive" && (
-        <div className="mm-drawer" style={{ padding: "0 16px 16px" }}>
-          <Card title="Receive Bitcoin">
+        <DetailPane
+          view="receive"
+          crumb="Receive Bitcoin"
+          label="Receive Bitcoin"
+          onBack={() => setPanel(null)}
+        >
+          <PageHeader title="Receive Bitcoin" />
+          <section className="card">
             <p className="muted small" style={{ marginTop: 0 }}>
               Send only Bitcoin to this address, on {isMainnet ? "the Bitcoin network" : "Bitcoin testnet"}.
               It is not an Ethereum address and coins sent from another network will not arrive.
@@ -966,13 +905,23 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
             <code className="reveal-key" style={{ wordBreak: "break-all" }}>
               {address}
             </code>
-          </Card>
-        </div>
+          </section>
+        </DetailPane>
       )}
 
       {panel === "send" && (
-        <div className="mm-drawer" style={{ padding: "0 16px 16px" }}>
-          <Card
+        <DetailPane
+          view="send"
+          crumb={step === "review" ? "Review before signing" : "Send Bitcoin"}
+          label={step === "review" ? "Review before signing" : "Send Bitcoin"}
+          onBack={() => {
+            setPanel(null);
+            setStep("form");
+            setPlan(null);
+            setSendPassword("");
+          }}
+        >
+          <PageHeader
             title={step === "review" ? "Review before signing" : "Send Bitcoin"}
             action={
               <Button
@@ -989,7 +938,8 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
                 <X size={15} />
               </Button>
             }
-          >
+          />
+          <section className="card">
             {sendError && (
               <div className="alert alert-error" role="alert" style={{ marginBottom: 12 }}>
                 <TriangleAlert size={15} />
@@ -1156,8 +1106,8 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
                 </div>
               </form>
             )}
-          </Card>
-        </div>
+          </section>
+        </DetailPane>
       )}
     </>
   );

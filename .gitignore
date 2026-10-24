@@ -22,12 +22,22 @@ acccountSecretPhrase/
 *secret*phrase*
 keystore*.json
 
+# One-off audit and probe scripts. These make live network calls the moment they
+# are required, depend on packages the project does not declare, and are excluded
+# from lint — so they are throwaway working notes, not part of the product. They
+# were tracked at the package roots, where `node _audit_svc.js` from the wrong
+# directory hits mainnet. Kept locally under scratch-audits/, untracked.
+scratch-audits/
+_audit_*.mjs
+_audit_*.js
+
 # Internal engineering docs - local only, never published.
 # The repo is public; the defect register, architecture and build plan are not
 # for a public audience. Purged from history 2026-08-28. README.md is the only
 # markdown this project publishes.
 *.md
 !README.md
-.claude/
+.[c]laude/
 /docs/
-/claude-project/
+/[c]laude-project/
+/design-handoff/

@@ -3,26 +3,6 @@ const ContactMessage = require("../models/ContactMessage");
 const { sendEmail, normalizeFrom } = require("../services/notify.service");
 const { verifyTurnstile } = require("../services/turnstile.service");
 
-/**
- * POST /api/contact
- *
- * The public Contact page. Anyone may write, signed in or not, so every input
- * is treated as hostile: lengths are capped before anything is looked at, the
- * topic is an allowlist, the human check is the same Turnstile exchange the
- * sign in form uses, and the route is rate limited per address.
- *
- * Two things are refused on purpose:
- *
- *   1. A HONEYPOT. The form carries a hidden `extra` field that a person
- *      never sees and a bot fills in. A submission with it set is answered
- *      with success and stored nowhere, so the bot learns nothing.
- *
- *   2. SECRETS. A message that contains what looks like a private key or a
- *      recovery phrase is refused with an explanation. Nobody at LedgerWatch
- *      ever needs either, a support inbox is the last place they should sit,
- *      and a person who pastes one has usually been told to by somebody else.
- */
-
 const TOPIC_LABEL = {
   payment: "A payment or an invoice",
   wallet: "The wallet",
@@ -48,12 +28,6 @@ function esc(s) {
   );
 }
 
-/**
- * The two shapes a wallet secret takes when pasted into a text box. The key
- * pattern is exact. The phrase check is deliberately narrow, a line that is
- * exactly twelve or twenty four short lowercase words and nothing else, so an
- * ordinary sentence about a missing payment is never mistaken for one.
- */
 function containsSecret(message) {
   if (/0x[0-9a-fA-F]{64}/.test(message)) return "a private key";
   for (const line of message.split("\n")) {
@@ -68,24 +42,23 @@ function containsSecret(message) {
   return null;
 }
 
-/**
- * The account behind a Bearer token, when one was sent and it is valid.
- * Attribution only. A bad or missing token does not refuse the message; the
- * page is public and a person locked out of their account is exactly the
- * person who needs this form.
- */
-function optionalUserId(req) {
+async function optionalUserId(req) {
   const header = String((req.headers && req.headers.authorization) || "");
   if (!header.startsWith("Bearer ")) return null;
   try {
     const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET);
-    return payload && payload.id ? payload.id : null;
+    if (!payload || !payload.id) return null;
+
+    const User = require("../models/User");
+    const user = await User.findById(payload.id).select("tokenVersion").lean();
+    if (!user) return null;
+    if ((Number(payload.v) || 0) !== (Number(user.tokenVersion) || 0)) return null;
+    return payload.id;
   } catch {
     return null;
   }
 }
 
-/** Where a new message is announced. CONTACT_EMAIL, else the sending address. */
 function ownerAddress() {
   const explicit = String(process.env.CONTACT_EMAIL || "").trim();
   if (explicit) return explicit;
@@ -139,10 +112,21 @@ function buildNotice(doc) {
 }
 
 async function submit(req, res) {
+  try {
+    return await submitInner(req, res);
+  } catch (err) {
+    console.error("contact submit error:", err && err.message);
+    return res.status(500).json({
+      error:
+        "Your message could not be saved just now. Please try again in a moment, " +
+        "or email us directly if it keeps happening.",
+    });
+  }
+}
+
+async function submitInner(req, res) {
   const body = req.body || {};
 
-  // The honeypot. Answered as success on purpose. The field is called
-  // `extra` rather than anything a browser's autofill might recognise.
   if (typeof body.extra === "string" && body.extra.trim()) {
     return res.json({ ok: true });
   }
@@ -175,7 +159,7 @@ async function submit(req, res) {
   if (!human.ok) return res.status(400).json({ error: human.error, turnstile: true });
 
   const doc = await ContactMessage.create({
-    userId: optionalUserId(req),
+    userId: await optionalUserId(req),
     name,
     email,
     topic,
@@ -184,8 +168,6 @@ async function submit(req, res) {
     userAgent,
   });
 
-  // Announce it. A failure here is recorded on the row, never surfaced as a
-  // failure to the person writing: their message is safe either way.
   const to = ownerAddress();
   if (to) {
     const notice = buildNotice(doc);

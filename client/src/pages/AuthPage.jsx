@@ -7,12 +7,6 @@ import { Button, Field, Input } from "../components/ui";
 import LogoMark from "../components/LogoMark";
 import Turnstile, { turnstileEnabled, unloadTurnstile } from "../components/Turnstile";
 
-/**
- * The nonce that ties a Google sign in to the browser that started it. Session
- * storage, so it dies with the tab and never follows a link anywhere. Random
- * bytes from the platform generator, never Math.random; a nonce that can be
- * guessed is not a nonce.
- */
 const OAUTH_NONCE_KEY = "ledgerwatch.oauth.nonce";
 
 function mintOauthNonce() {
@@ -22,8 +16,6 @@ function mintOauthNonce() {
   try {
     sessionStorage.setItem(OAUTH_NONCE_KEY, n);
   } catch {
-    /* private mode with storage disabled: the callback is then refused, which is
-       the safe direction, and the password form still works */
   }
   return n;
 }
@@ -40,11 +32,9 @@ function clearOauthNonce() {
   try {
     sessionStorage.removeItem(OAUTH_NONCE_KEY);
   } catch {
-    /* nothing to clear */
   }
 }
 
-/** Google's four colour mark, inline so nothing is fetched from anywhere. */
 function GoogleMark() {
   return (
     <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
@@ -55,23 +45,6 @@ function GoogleMark() {
     </svg>
   );
 }
-
-/**
- * THE GATE
- *
- * A ledger spread. The record on the left on ink, the form on the right on
- * paper. The old page put a tinted panel with three ticked benefits and a fake
- * dashboard screenshot beside the form, which is the standard split and says
- * nothing that the landing page has not already said better.
- *
- * The left panel now states the three facts somebody hesitating at a sign in
- * form actually wants: what this is, that the keys are theirs, and that no real
- * money is involved yet.
- *
- * None of the logic below changed. The registration flow, the six digit code,
- * the expiry distinction and the Turnstile token handling are exactly as they
- * were, because they were correct.
- */
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -86,7 +59,7 @@ export default function AuthPage() {
     resetPassword,
     loginWithToken,
   } = useAuth();
-  const [mode, setMode] = useState("login"); // "login" | "register" | "forgot" | "reset"
+  const [mode, setMode] = useState("login");
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -100,16 +73,11 @@ export default function AuthPage() {
   const [busy, setBusy] = useState(false);
   const [bankOpen, setBankOpen] = useState(false);
   const [tsToken, setTsToken] = useState("");
-  // Remounts the widget for a fresh token. Cloudflare tokens are single use, so
-  // after any failed submit the old one is already spent.
   const [tsKey, setTsKey] = useState(0);
-  // When set, registration succeeded and the account is waiting on its code.
   const [pending, setPending] = useState(null);
   const [code, setCode] = useState("");
   const [codeExpired, setCodeExpired] = useState(false);
   const [notice, setNotice] = useState("");
-  // Password reset: the address the code went to, the code, and the new
-  // password typed twice.
   const [resetEmail, setResetEmail] = useState("");
   const [resetCode, setResetCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -119,17 +87,8 @@ export default function AuthPage() {
   const isForgot = mode === "forgot";
   const isReset = mode === "reset";
 
-  // Leaving this page removes the Cloudflare widget script from the document,
-  // so it is not resident when the wallet asks for a keystore password.
   useEffect(() => () => unloadTurnstile(), []);
 
-  /**
-   * Sign in with Google lands back here with the outcome in the URL FRAGMENT:
-   * `#token=...` on success, `#error=...` otherwise. A fragment never reaches
-   * a server or a log, which is the point when it carries a session token. It
-   * is cleared from the address bar immediately so a reload or a back press
-   * cannot replay it.
-   */
   useEffect(() => {
     const hash = window.location.hash.replace(/^#/, "");
     if (!hash) return;
@@ -142,17 +101,6 @@ export default function AuthPage() {
       setError(oauthError);
       return;
     }
-    /**
-     * ONLY A FLOW THIS BROWSER STARTED MAY SIGN IT IN.
-     *
-     * A token in a fragment can be put there by anyone: a link reading
-     * `/login#token=...` sent to somebody would have stored the sender's
-     * session in the recipient's browser, and everything they then entered
-     * would have landed in the sender's account. So the click that starts
-     * Google sign in mints a nonce and keeps it here; the server folds it into
-     * its signed state and hands it back beside the token; and a token that
-     * arrives without the nonce this browser is holding is thrown away.
-     */
     const expected = readOauthNonce();
     const given = params.get("n") || "";
     clearOauthNonce();
@@ -192,7 +140,11 @@ export default function AuthPage() {
     const errs = {};
     if (isRegister && !form.name.trim()) errs.name = "Enter your name";
     if (!EMAIL_RE.test(form.email.trim())) errs.email = "Enter a valid email address";
-    if (form.password.length < 6) errs.password = "Must be at least 6 characters";
+    if (isRegister && form.password.length < 8) {
+      errs.password = "Must be at least 8 characters";
+    } else if (!isRegister && !form.password) {
+      errs.password = "Enter your password";
+    }
     return errs;
   }
 
@@ -235,16 +187,13 @@ export default function AuthPage() {
       }
     } catch (err) {
       const data = err?.response?.data;
-      // An account that never confirmed its email: the server has already sent a
-      // fresh code, so go straight to the code screen rather than showing an
-      // error the person cannot act on from here.
       if (data && data.verificationRequired) {
         setPending({ email: data.email || form.email });
         setNotice(data.error || "");
         return;
       }
       setError(data?.error || "Something went wrong. Please try again.");
-      resetTurnstile(); // the token is spent either way
+      resetTurnstile();
     } finally {
       setBusy(false);
     }
@@ -264,9 +213,6 @@ export default function AuthPage() {
     } catch (err) {
       const data = err?.response?.data;
       setError(data?.error || "Could not confirm that code.");
-      // An expired code is a different problem from a wrong one: the digits may
-      // be perfectly correct. Surfacing that distinction is the difference
-      // between "ask for a new one" and "check what you typed".
       setCodeExpired(Boolean(data?.expired));
     } finally {
       setBusy(false);
@@ -288,8 +234,6 @@ export default function AuthPage() {
       setBusy(false);
     }
   }
-
-  // ---- password reset ----
 
   async function onForgot(e) {
     e.preventDefault();
@@ -358,8 +302,6 @@ export default function AuthPage() {
     setBusy(true);
     try {
       await resetPassword(resetEmail, resetCode.trim(), newPassword);
-      // No session was issued. The proof that the reset worked is signing in
-      // with the new password, so that is where the person is sent.
       setMode("login");
       setForm((f) => ({ ...f, email: resetEmail, password: "" }));
       setResetCode("");
@@ -380,10 +322,10 @@ export default function AuthPage() {
   return (
     <div className="gate">
       <aside className="gate-aside">
-        <Link to="/" className="lw-brand" style={{ color: "#fff" }}>
+        <Link to="/" className="lw-brand">
           <LogoMark size={32} />
-          <span className="lw-brand-name" style={{ color: "#fff" }}>
-            Ledger<em style={{ color: "var(--gold-400)" }}>Watch</em>
+          <span className="lw-brand-name">
+            Ledger<em>Watch</em>
           </span>
         </Link>
 
@@ -462,9 +404,6 @@ export default function AuthPage() {
                 <Input
                   value={code}
                   onChange={(e) => {
-                    // Digits only. Pasting from a mail client often brings spaces
-                    // along, and a code that looks right but fails is the most
-                    // frustrating possible outcome here.
                     setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
                     setCodeExpired(false);
                   }}
@@ -604,12 +543,6 @@ export default function AuthPage() {
 
           {!pending && !isForgot && !isReset && (
             <>
-              {/* The shared demo account is no longer offered here. It printed a
-                  working email and password on the public sign-in page with a
-                  button that filled them in, which invited anyone who found the
-                  site to sign in as that account. It is the owner's own account
-                  for testing, not a product feature. The credentials still work
-                  for whoever knows them; they are simply not advertised. */}
 
               <form onSubmit={onSubmit} className="stack-sm" noValidate>
                 {isRegister && (
@@ -693,8 +626,6 @@ export default function AuthPage() {
                   </div>
                 )}
 
-                {/* Under the last input, above the action. The person must tick
-                    it before the button will do anything. */}
                 <Turnstile
                   key={tsKey}
                   action={isRegister ? "signup" : "login"}
@@ -723,10 +654,6 @@ export default function AuthPage() {
                 <span>or</span>
               </div>
 
-              {/* A plain navigation to the server, which redirects to Google
-                  and back. No Google script runs in this page, on purpose:
-                  this page's origin is the one that decrypts private keys. The
-                  click mints the browser nonce the callback must return. */}
               <button
                 type="button"
                 className="btn"

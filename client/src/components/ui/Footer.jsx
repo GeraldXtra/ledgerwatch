@@ -1,11 +1,5 @@
 import { Link } from "react-router-dom";
 
-/**
- * One line at the foot of every page. It states a PROPERTY of the software
- * rather than a state of the configuration, because the two earlier versions
- * of this line ("all trades are paper", "test networks only") each outlived
- * the fact they asserted.
- */
 export default function Footer() {
   return (
     <footer className="site-footer">

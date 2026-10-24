@@ -5,8 +5,6 @@ import { Button, Card, Input } from "../../components/ui";
 
 const SUGGESTIONS = ["watch BTC drop 5%", "watch ETH, SOL", "how is my portfolio?"];
 
-// onAction is called after a message that may have changed watches/portfolio,
-// so the parent can refresh its data.
 export default function ChatBox({ onAction }) {
   const [messages, setMessages] = useState([
     {
@@ -26,8 +24,7 @@ export default function ChatBox({ onAction }) {
     try {
       const { data } = await http.post("/api/ai/chat", { message });
       setMessages((m) => [...m, { role: "agent", text: data.reply }]);
-      if (data.createdWatches && data.createdWatches.length && onAction) onAction();
-      else if (onAction) onAction();
+      if (onAction) onAction();
     } catch (err) {
       setMessages((m) => [
         ...m,
@@ -80,7 +77,7 @@ export default function ChatBox({ onAction }) {
             onChange={(e) => setInput(e.target.value)}
             aria-label="Message the agent"
           />
-          <Button variant="primary" type="submit" disabled={busy}>
+          <Button type="submit" disabled={busy}>
             <SendHorizontal size={14} />
             {busy ? "Sending" : "Send"}
           </Button>

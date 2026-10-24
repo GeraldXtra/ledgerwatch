@@ -1,22 +1,6 @@
 import { ethers } from "ethers";
 import { unlockWallet } from "./keystore";
 
-/**
- * HD derivation of invoice payment addresses — the security core of crypto
- * receivables.
- *
- * Path: m/44'/60'/0'/2/<index>
- *
- * BIP-44 uses change-level 0 for receive and 1 for change, so level 2 is a
- * branch no standard wallet touches. Importing this seed into MetaMask will
- * never surface or spend a receivables address, and our indices can never
- * shadow the user's own accounts.
- *
- * MUST match server/src/config/derivation.js exactly. If the two disagree, the
- * server watches an address the user cannot sign for, and funds sent to it are
- * unreachable.
- */
-
 export const RECEIVABLES_BRANCH = "m/44'/60'/0'/2";
 
 export function pathForIndex(index) {
@@ -26,14 +10,6 @@ export function pathForIndex(index) {
   return `${RECEIVABLES_BRANCH}/${index}`;
 }
 
-/**
- * Can this wallet derive child addresses at all?
- *
- * A wallet imported from a bare private key has no mnemonic and no chain code,
- * so BIP-32 derivation is mathematically impossible for it — you cannot produce
- * children from a lone secp256k1 scalar. Callers must check this and show the
- * explanatory state rather than failing at signing time.
- */
 export function canDerive(wallet) {
   return Boolean(wallet && wallet.mnemonic && wallet.mnemonic.phrase);
 }
@@ -41,62 +17,23 @@ export function canDerive(wallet) {
 const CANNOT_DERIVE =
   "This wallet was imported from a private key, so it cannot derive payment addresses. Re-import it using your recovery phrase to enable crypto payments.";
 
-/**
- * Derive the invoice address for `index` from an ALREADY UNLOCKED wallet.
- *
- * Unlocking runs scrypt, which is deliberately slow (seconds, on purpose). A
- * caller that has to check `canDerive` before doing other work would otherwise
- * unlock once for the check and again to derive, doubling the wait for no
- * benefit. Takes the wallet so that cost is paid once.
- *
- * Returns only the public address; the derived node goes out of scope on return.
- */
 export function deriveAddressFromWallet(master, index) {
   if (!canDerive(master)) throw new Error(CANNOT_DERIVE);
   const node = ethers.HDNodeWallet.fromPhrase(master.mnemonic.phrase, "", pathForIndex(index));
   return node.address;
 }
 
-/**
- * Derive the invoice address for `index`, WITHOUT exposing the key.
- * Returns only the public address; the derived node is discarded on return.
- */
 export async function deriveAddress(password, index) {
   const master = await unlockWallet(password);
   return deriveAddressFromWallet(master, index);
 }
 
-/**
- * Derive a SIGNER for `index` from an ALREADY UNLOCKED wallet.
- *
- * Same reason as deriveAddressFromWallet: unlocking runs scrypt, which takes
- * seconds by design. A batch sweep over N addresses that unlocked per address
- * would be unusable, so the caller unlocks once and derives N signers from that
- * one master.
- *
- * The returned wallet holds a live private key: use it for one operation and let
- * it go out of scope. Never store it, never log it, never put it in a request.
- */
 export function deriveSignerFromWallet(master, index, provider) {
   if (!canDerive(master)) throw new Error(CANNOT_DERIVE);
   const node = ethers.HDNodeWallet.fromPhrase(master.mnemonic.phrase, "", pathForIndex(index));
   return provider ? node.connect(provider) : node;
 }
 
-/**
- * Derive a SIGNER for `index`, connected to a provider. Used only for sweeping,
- * which is an outbound transaction and therefore always user-approved.
- */
-export async function deriveSigner(password, index, provider) {
-  const master = await unlockWallet(password);
-  return deriveSignerFromWallet(master, index, provider);
-}
-
-/**
- * Verify that a server-issued address really belongs to this seed at this index
- * before it is shown to a payer. Catches any drift between the client and server
- * derivation policies — money sent to a mismatched address would be unreachable.
- */
 export async function verifyAddress(password, index, expectedAddress) {
   const derived = await deriveAddress(password, index);
   return derived.toLowerCase() === String(expectedAddress).toLowerCase();

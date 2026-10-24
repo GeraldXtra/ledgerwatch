@@ -1,13 +1,3 @@
-/**
- * LedgerWatch demo seed — idempotent, date-relative, math-consistent.
- *
- *   cd server && npm run seed
- *
- * Creates/refreshes ONE demo user and seeds a lived-in ledger + market state.
- * Running it twice never duplicates: it deletes only the demo user's own data
- * first, then reseeds. No other user is touched. All dates are computed from
- * "now" so the demo stays fresh however many days pass before the presentation.
- */
 require("dotenv").config();
 
 const mongoose = require("mongoose");
@@ -24,6 +14,7 @@ const SimTrade = require("../models/SimTrade");
 const Portfolio = require("../models/Portfolio");
 const WalletTx = require("../models/WalletTx");
 const PaymentAddress = require("../models/PaymentAddress");
+const PushSubscription = require("../models/PushSubscription");
 
 const { getPrices } = require("../services/coingecko.service");
 const { createWatch, approveAlert, getPortfolio } = require("../services/market.service");
@@ -46,23 +37,8 @@ const DEMO = {
   },
 };
 
-// Fallback prices so the seed never fails if CoinGecko is unreachable.
 const FALLBACK = { bitcoin: 95000, ethereum: 3200, solana: 180 };
 
-// ---------------------------------------------------------------------------
-// SAFETY GATE
-//
-// This script DELETES the target account's ledger before reseeding. That is by
-// design (it must be idempotent), but it means an accidental run destroys real
-// user-created records — which is exactly what happened: records created through
-// the UI vanished because the seed was re-run against the live demo account.
-//
-// Three independent protections:
-//   1. --force is required before anything is deleted.
-//   2. The target email must be EXACTLY the demo account, checked against a
-//      frozen constant rather than the mutable DEMO object.
-//   3. A loud warning prints the real record counts about to be destroyed.
-// ---------------------------------------------------------------------------
 const ONLY_SEEDABLE_EMAIL = "demo@ledgerwatch.app";
 const FORCED = process.argv.includes("--force");
 
@@ -74,8 +50,6 @@ function abort(message) {
 async function main() {
   await connectDB();
 
-  // GUARD 2 — never touch any account but the demo one, even if DEMO.email is
-  // edited. Compared against a separate frozen constant on purpose.
   if (DEMO.email !== ONLY_SEEDABLE_EMAIL) {
     abort(
       `Refusing to seed "${DEMO.email}". This script may only ever target ` +
@@ -84,7 +58,6 @@ async function main() {
     return null;
   }
 
-  // GUARD 3 — count what would be destroyed and say so plainly.
   const existing = await User.findOne({ email: DEMO.email });
   if (existing) {
     const uid = existing._id;
@@ -110,7 +83,6 @@ async function main() {
     console.log("  Anything created through the UI on this account is included.");
     console.log("========================================\n");
 
-    // GUARD 1 — nothing is deleted without an explicit --force.
     if (!FORCED) {
       abort(
         "Nothing was deleted. Re-run with --force if you really want to wipe and\n" +
@@ -121,17 +93,12 @@ async function main() {
     console.log("  --force given, proceeding with the wipe...\n");
   }
 
-  // 1) Upsert the demo user (stable _id across runs).
   const passwordHash = await bcrypt.hash(DEMO.password, 10);
   let user = await User.findOne({ email: DEMO.email });
   if (user) {
     user.name = DEMO.name;
     user.passwordHash = passwordHash;
     user.bankDetails = DEMO.bankDetails;
-    // Reset the opt-in surfaces too, so a re-seed always lands on the shipped
-    // defaults: automatic sending OFF, and no wallet address advertised (the
-    // encrypted keystore lives in the browser, so a stale address here would
-    // claim a wallet the client has no key for).
     user.autoSend = { enabled: false, whatsapp: false, email: false };
     user.walletAddress = null;
     await user.save();
@@ -145,7 +112,6 @@ async function main() {
   }
   const userId = user._id;
 
-  // 2) Wipe ONLY this user's data (scoped — never touches other users).
   await Promise.all([
     Debt.deleteMany({ userId }),
     Payment.deleteMany({ userId }),
@@ -154,15 +120,15 @@ async function main() {
     Alert.deleteMany({ userId }),
     SimTrade.deleteMany({ userId }),
     Portfolio.deleteMany({ userId }),
-    WalletTx.deleteMany({ userId }), // locally-recorded tx history
-    // LW-031. This was the one wipe that skipped PaymentAddress, so re-seeding
-    // an account that had issued an address left an `active` row whose debt no
-    // longer existed, and every automation pass selected it, made RPC calls for
-    // it, and could never settle it. The account wipe got this fix first.
+    WalletTx.deleteMany({ userId }),
     PaymentAddress.deleteMany({ userId }),
+    PushSubscription.deleteMany({ userId }),
+    User.updateOne(
+      { _id: userId },
+      { $set: { walletHistoryCursors: [], discoveredTokens: [] } }
+    ),
   ]);
 
-  // 3) Live prices once (fallback if CoinGecko is down).
   const priceRows = await getPrices(["bitcoin", "ethereum", "solana"]);
   const pricesLive = Boolean(priceRows.bitcoin && priceRows.bitcoin.usd);
   const priceOf = (id) => (priceRows[id] && priceRows[id].usd) || FALLBACK[id];
@@ -170,47 +136,27 @@ async function main() {
   const eth = priceOf("ethereum");
   const sol = priceOf("solana");
 
-  // 4) Debts spread over ~6 months with real payments, so debtor profiles,
-  //    reliability scores, aging, and the 6-month charts all populate. Multiple
-  //    debts per debtor give history. Status is derived from payments.
-  //    payments[].days is relative to now; method cash/transfer/other.
-  //    Enterprise scale: corporate clients carrying real receivables, from a few
-  //    million naira up past ₦100M, so the KPI cards, aging buckets and 6-month
-  //    charts all exercise compact formatting (₦125.4M, ₦1.2B) and large-number
-  //    layout rather than looking like a market stall.
   const debtSpecs = [
-    // Dangote Cement Plc — large, reliable: settles close to terms (Good).
     { debtorName: "Dangote Cement Plc", debtorPhone: "08031234567", amount: 42500000, createdDays: -152, dueDays: -122, note: "Q1 haulage and logistics contract", payments: [{ amount: 42500000, days: -119, method: "transfer" }] },
     { debtorName: "Dangote Cement Plc", debtorPhone: "08031234567", amount: 118750000, createdDays: -84, dueDays: -54, note: "Bulk cement distribution, 12 depots", payments: [{ amount: 118750000, days: -50, method: "transfer" }] },
-    { debtorName: "Dangote Cement Plc", debtorPhone: "08031234567", amount: 96400000, createdDays: -27, dueDays: -9, note: "Fleet servicing retainer, Q3", payments: [{ amount: 45000000, days: -6, method: "transfer" }] }, // partial + overdue
+    { debtorName: "Dangote Cement Plc", debtorPhone: "08031234567", amount: 96400000, createdDays: -27, dueDays: -9, note: "Fleet servicing retainer, Q3", payments: [{ amount: 45000000, days: -6, method: "transfer" }] },
 
-    // Zenith Bank Plc — slow payer, one badly late and one unpaid (Risky).
-    { debtorName: "Zenith Bank Plc", debtorPhone: "08062345678", amount: 27300000, createdDays: -128, dueDays: -98, note: "Branch fit-out, phase one", payments: [{ amount: 27300000, days: -46, method: "transfer" }] }, // ~52 days late
-    { debtorName: "Zenith Bank Plc", debtorPhone: "08062345678", amount: 64800000, createdDays: -68, dueDays: -44, note: "ATM network maintenance, H2", payments: [] }, // overdue ~44d -> 31-60 bucket
+    { debtorName: "Zenith Bank Plc", debtorPhone: "08062345678", amount: 27300000, createdDays: -128, dueDays: -98, note: "Branch fit-out, phase one", payments: [{ amount: 27300000, days: -46, method: "transfer" }] },
+    { debtorName: "Zenith Bank Plc", debtorPhone: "08062345678", amount: 64800000, createdDays: -68, dueDays: -44, note: "ATM network maintenance, H2", payments: [] },
 
-    // Julius Berger — part-paid and ~76 days late, so the 61-90 aging bucket has
-    // data too and all five bars render.
     { debtorName: "Julius Berger", debtorPhone: "08088123456", amount: 38600000, createdDays: -104, dueDays: -76, note: "Site equipment leasing, Q2", payments: [{ amount: 9600000, days: -60, method: "transfer" }] },
 
-    // Flour Mills of Nigeria — new client, part-paid, not yet due (New).
     { debtorName: "Flour Mills of Nigeria", debtorPhone: "08023456789", amount: 152000000, createdDays: -8, dueDays: 22, note: "Grain silo construction, milestone 2", payments: [{ amount: 60000000, days: -3, method: "transfer" }] },
 
-    // MTN Nigeria — excellent, always early (Excellent).
     { debtorName: "MTN Nigeria", debtorPhone: "08094567890", amount: 18500000, createdDays: -97, dueDays: -67, note: "Managed IT services, monthly", payments: [{ amount: 18500000, days: -71, method: "transfer" }] },
     { debtorName: "MTN Nigeria", debtorPhone: "08094567890", amount: 18500000, createdDays: -66, dueDays: -36, note: "Managed IT services, monthly", payments: [{ amount: 18500000, days: -40, method: "transfer" }] },
-    { debtorName: "MTN Nigeria", debtorPhone: "08094567890", amount: 21750000, createdDays: -4, dueDays: 26, note: "Managed IT services, monthly", payments: [] }, // upcoming
+    { debtorName: "MTN Nigeria", debtorPhone: "08094567890", amount: 21750000, createdDays: -4, dueDays: 26, note: "Managed IT services, monthly", payments: [] },
 
-    // Lafarge Africa — settled late (Fair). Keeps the cancel-on-paid story.
     { debtorName: "Lafarge Africa", debtorPhone: "08051239876", amount: 8900000, createdDays: -23, dueDays: -8, note: "Plant safety audit and certification", payments: [{ amount: 8900000, days: -1, method: "transfer" }], reminded: true },
 
-    // GTCO Plc — very large, long overdue: drives the 90d+ aging bucket.
     { debtorName: "GTCO Plc", debtorPhone: "08077654321", amount: 74200000, createdDays: -142, dueDays: -112, note: "Core banking migration, phase three", payments: [{ amount: 12000000, days: -95, method: "transfer" }] },
   ];
 
-  // One email per debtor (repeated across their debts, so debtor grouping is
-  // unaffected). @example.com is reserved by RFC 2606 and is not routable, so a
-  // demo send can never reach a real stranger — swap in your own address to watch
-  // a branded reminder actually land in an inbox.
   const debtorEmails = {
     "Dangote Cement Plc": "accounts.payable@dangote.example.com",
     "Zenith Bank Plc": "vendor.payments@zenith.example.com",
@@ -251,7 +197,7 @@ async function main() {
       dueDate: rel(d.dueDays),
       note: d.note,
       status,
-      lastRemindedAt: d.reminded ? settledRemindedAt : null, // overdue ones stay null so the first pass reminds them
+      lastRemindedAt: d.reminded ? settledRemindedAt : null,
       history,
       createdAt,
     });
@@ -270,7 +216,6 @@ async function main() {
     if (d.debtorName === "Lafarge Africa") settledDebt = debt;
   }
 
-  // The settled account cancelled reminder (the cancel-on-paid story).
   if (settledDebt) {
     await Reminder.create({
       debtId: settledDebt._id,
@@ -291,16 +236,11 @@ async function main() {
     });
   }
 
-  // 5) Watches — one guaranteed to trigger, two loose. createWatch captures the
-  //    baseline. price_below with a threshold well above the live price fires on
-  //    the first pass no matter what the market does.
   const guaranteedValue = pricesLive ? Math.ceil(btc * 1.5) : 100000000;
   const btcWatch = await createWatch(userId, { symbol: "BTC", type: "price_below", value: guaranteedValue });
   const ethWatch = await createWatch(userId, { symbol: "ETH", type: "drop_pct", value: 0.5 });
   const solWatch = await createWatch(userId, { symbol: "SOL", type: "rise_pct", value: 0.5 });
 
-  // 6) Two approved trades — applied through the SAME service the app uses, so
-  //    the portfolio math (cash, holdings, avgBuyPrice, P/L) is provably coherent.
   async function seedApprovedBuy(watch, coinId, symbol, price) {
     const alert = await Alert.create({
       userId,
@@ -312,13 +252,11 @@ async function main() {
       priceAtAlert: price,
       status: "pending",
     });
-    await approveAlert(userId, alert); // -> SimTrade + Portfolio update per §2a
+    await approveAlert(userId, alert);
   }
   await seedApprovedBuy(btcWatch, "bitcoin", "BTC", btc);
   await seedApprovedBuy(ethWatch, "ethereum", "ETH", eth);
 
-  // 7) One PENDING alert (SOL buy) so the approve flow is demoable instantly —
-  //    approving it opens a fresh SOL position (a visible portfolio move).
   await Alert.create({
     userId,
     watchId: solWatch._id,
@@ -330,7 +268,6 @@ async function main() {
     status: "pending",
   });
 
-  // 8) Summary.
   const portfolio = await getPortfolio(userId);
   const debts = await Debt.find({ userId });
   const paymentCount = await Payment.countDocuments({ userId });
@@ -379,25 +316,23 @@ async function main() {
   process.exit(0);
 }
 
-main()
-  .then(async (result) => {
-    // main() returns null when a safety guard aborted before deleting anything.
-    // Disconnect quietly and exit with the code the guard already set.
-    if (result === null) {
+if (require.main === module) {
+  main()
+    .then(async (result) => {
+      if (result === null) {
+        try {
+          await mongoose.disconnect();
+        } catch {
+        }
+        process.exit(process.exitCode || 1);
+      }
+    })
+    .catch(async (err) => {
+      console.error("\n❌ Seed failed:", err.message);
       try {
         await mongoose.disconnect();
       } catch {
-        /* ignore */
       }
-      process.exit(process.exitCode || 1);
-    }
-  })
-  .catch(async (err) => {
-    console.error("\n❌ Seed failed:", err.message);
-    try {
-      await mongoose.disconnect();
-    } catch {
-      /* ignore */
-    }
-    process.exit(1);
-  });
+      process.exit(1);
+    });
+}

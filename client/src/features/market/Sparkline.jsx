@@ -1,12 +1,5 @@
-/**
- * Tiny inline-SVG sparkline (hand-rolled polyline — light enough for many rows).
- * Colored by direction: emerald if the series ends up, muted red if down.
- * `data` is an array of numbers (e.g. the 7d price series).
- */
 export default function Sparkline({ data, width = 96, height = 28 }) {
   if (!data || data.length < 2) {
-    // Sized by the stylesheet, not inline, so the phone layout can shrink it
-    // the way it shrinks the drawn line.
     return <span className="sparkline-empty" aria-hidden="true" />;
   }
 

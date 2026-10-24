@@ -13,20 +13,10 @@ import { fetchPaymentAddresses } from "../receivables/cryptoApi";
 import SweepModal from "../receivables/SweepModal";
 import { ngn, shortHash, usdcAmount } from "../receivables/format";
 
-/**
- * Money collected at per-invoice payment addresses, and the way to move it into
- * the main wallet.
- *
- * Balances are read LIVE from the chain rather than taken from `receivedUsdc`.
- * The stored figure is what the watcher confirmed and settled; the balance is
- * what is actually sitting at the address. They diverge after a previous sweep,
- * or when funds arrived in a way the watcher did not attribute, and a sweep must
- * always act on the truth.
- */
 export default function CollectedPanel({ chain, mainAddress, sweepDestination, onSwept }) {
   const [rows, setRows] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
-  const [sweeping, setSweeping] = useState(null); // array of PaymentAddress docs
+  const [sweeping, setSweeping] = useState(null);
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
@@ -38,31 +28,45 @@ export default function CollectedPanel({ chain, mainAddress, sweepDestination, o
       const mine = (data.addresses || []).filter((a) => a.chainId === chain.chainId);
 
       const provider = getProvider(chain.chainId);
-      // Read every balance concurrently, but let individual failures through as
-      // null rather than blanking the whole list — one flaky RPC call must not
-      // hide addresses that do hold money.
       const withBalances = await Promise.all(
         mine.map(async (pa) => {
           try {
             const token = new ethers.Contract(pa.tokenContract, ERC20_ABI, provider);
+            const stored = Number(pa.tokenDecimals);
+            const decimals =
+              Number.isInteger(stored) && stored >= 0 && stored <= 36
+                ? stored
+                : Number(await token.decimals());
+            if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
+              throw new Error("This token's contract did not report its decimals");
+            }
             const raw = await token.balanceOf(pa.address);
-            const decimals = Number(pa.tokenDecimals) || 6;
-            return { ...pa, live: Number(ethers.formatUnits(raw, decimals)), failed: false };
+            let nativeAmount = null;
+            try {
+              nativeAmount = Number(ethers.formatEther(await provider.getBalance(pa.address)));
+            } catch {
+              nativeAmount = null;
+            }
+            return {
+              ...pa,
+              live: Number(ethers.formatUnits(raw, decimals)),
+              nativeAmount,
+              failed: false,
+            };
           } catch {
-            return { ...pa, live: null, failed: true };
+            return { ...pa, live: null, nativeAmount: null, failed: true };
           }
         })
       );
 
-      // Anything holding a balance, plus anything we could not read (so a failure
-      // is visible rather than silently dropped).
-      setRows(withBalances.filter((r) => r.failed || (r.live && r.live > 0)));
+      setRows(
+        withBalances.filter(
+          (r) => r.failed || (r.live && r.live > 0) || (r.nativeAmount && r.nativeAmount > 0)
+        )
+      );
       setError("");
     } catch (err) {
       setRows([]);
-      // Names the cause. "Could not load" on its own gives the user nothing to
-      // act on and reads the same whether the network is down or the account is
-      // empty — the two things they most need to tell apart.
       const reason = rpcErrorReason(err);
       setError(
         reason ? `Could not load collected balances: ${reason}` : "Could not load collected balances."
@@ -205,6 +209,15 @@ export default function CollectedPanel({ chain, mainAddress, sweepDestination, o
                       ? ` · about ${ngn(r.live * r.ngnPerUsd)}`
                       : ""}
                   </div>
+                  {r.nativeAmount > 0 && (
+                    <div className="inline-warn">
+                      This address also holds{" "}
+                      {r.nativeAmount.toLocaleString(undefined, { maximumFractionDigits: 8 })}{" "}
+                      {chain.nativeSymbol}, which a payer sent instead of {r.tokenSymbol}. It is
+                      not part of the invoice and cannot be swept from here, but your recovery
+                      phrase controls this address, so the funds are reachable.
+                    </div>
+                  )}
                 </div>
               </label>
               <div className="row">

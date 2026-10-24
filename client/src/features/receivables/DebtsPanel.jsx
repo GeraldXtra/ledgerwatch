@@ -3,10 +3,10 @@ import { BellRing, Download, Plus, Search } from "lucide-react";
 import http from "../../api/http";
 import {
   Button,
-  Card,
   Field,
   Input,
   Modal,
+  PageHeader,
   Select,
   SkeletonLines,
   StatCard,
@@ -24,11 +24,6 @@ import { fetchPaymentAddresses } from "./cryptoApi";
 import { hasWallet } from "../wallet/keystore";
 import { useAuth } from "../../context/AuthContext";
 
-// Lazy, on purpose. This modal reaches ethers (for HD derivation) and qrcode,
-// which together are the largest dependency in the app. Importing it eagerly
-// pulls both into the main bundle, so every user would download the crypto
-// stack just to open the dashboard — the wallet is code-split for exactly this
-// reason. cryptoApi itself is a plain http wrapper and stays eager.
 const CryptoPaymentModal = lazy(() => import("./CryptoPaymentModal"));
 
 function kpis(debts) {
@@ -39,7 +34,6 @@ function kpis(debts) {
   return { totalOutstanding, overdue, collected, activeDebtors };
 }
 
-// Client-side sort so both asc (key_asc) and desc (key) work over the loaded list.
 const SORT_CMP = {
   amount: (a, b) => a.amount - b.amount,
   balance: (a, b) => (a.balance ?? a.amount) - (b.balance ?? b.amount),
@@ -56,7 +50,7 @@ function sortDebts(debts, sort) {
   return asc ? out : out.reverse();
 }
 
-export default function DebtsPanel() {
+export default function DebtsPanel({ onLedgerChanged }) {
   const toast = useToast();
   const { user } = useAuth();
   const [debts, setDebts] = useState([]);
@@ -76,15 +70,9 @@ export default function DebtsPanel() {
   const [reminder, setReminder] = useState(null);
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  // Crypto payment addresses. `cryptoIds` drives the ledger indicator, so the
-  // table can show which invoices are awaiting a stablecoin payment without
-  // anyone having to open each one. `cryptoKey` bumps to re-read after an
-  // address is issued or revoked.
   const [cryptoDebt, setCryptoDebt] = useState(null);
-  const [cryptoIds, setCryptoIds] = useState(() => new Set());
+  const [cryptoIds, setCryptoIds] = useState(() => new Map());
   const [cryptoKey, setCryptoKey] = useState(0);
-  // Set when Generate Reminder had to issue an address first, so the reminder can
-  // be generated as soon as that address exists.
   const [remindAfterAddress, setRemindAfterAddress] = useState(null);
 
   const debounceRef = useRef(null);
@@ -107,16 +95,17 @@ export default function DebtsPanel() {
     }
   }, [search, status, from, to]);
 
-  // Debounce search; other filters apply immediately.
+  const reloadAll = useCallback(async () => {
+    await load();
+    if (onLedgerChanged) onLedgerChanged();
+  }, [load, onLedgerChanged]);
+
   useEffect(() => {
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(debounceRef.current);
   }, [load, search]);
 
-  // Which invoices have a live payment address. Deliberately independent of
-  // `load` so retyping in the search box does not refetch it, and silent on
-  // failure — the indicator is a convenience and must never break the ledger.
   useEffect(() => {
     let active = true;
     fetchPaymentAddresses()
@@ -124,24 +113,22 @@ export default function DebtsPanel() {
         if (!active) return;
         const ids = (data.addresses || [])
           .filter((a) => a.status === "active")
-          .map((a) => String(a.debtId));
-        setCryptoIds(new Set(ids));
+          .map((a) => [String(a.debtId), a.tokenSymbol || null]);
+        setCryptoIds(new Map(ids));
       })
       .catch(() => {
-        if (active) setCryptoIds(new Set());
+        if (active) setCryptoIds(new Map());
       });
     return () => {
       active = false;
     };
   }, [cryptoKey]);
 
-  // --- sorting toggles asc/desc via a "_asc" suffix (client-side) ---
   function onSort(key) {
     setSort((cur) => (cur === key ? `${key}_asc` : key));
   }
   const sortedDebts = useMemo(() => sortDebts(debts, sort), [debts, sort]);
 
-  // --- selection ---
   function toggle(id) {
     setSelected((s) => {
       const next = new Set(s);
@@ -154,55 +141,69 @@ export default function DebtsPanel() {
   }
   const clearSel = () => setSelected(new Set());
 
-  // --- actions ---
   async function createDebt(payload) {
     await http.post("/api/debts", payload);
     setAdding(false);
-    await load();
+    await reloadAll();
   }
   async function saveEdit(payload) {
     await http.patch(`/api/debts/${editing._id}`, payload);
     setEditing(null);
-    await load();
+    await reloadAll();
   }
   async function deleteDebt(debt) {
-    if (!window.confirm(`Delete debt for ${debt.debtorName}? This removes its payments and reminders.`)) return;
-    await http.delete(`/api/debts/${debt._id}`);
+    if (
+      !window.confirm(
+        `Delete the invoice for ${debt.debtorName}?
+
+` +
+          "This also removes its payments, its reminders and its crypto payment address. " +
+          "If that address is still holding money, sweep it first."
+      )
+    )
+      return;
+    try {
+      await http.delete(`/api/debts/${debt._id}`);
+    } catch (err) {
+      const data = err?.response?.data;
+      if (data?.code === "unswept_funds") {
+        const where = (data.addresses || [])
+          .map((a) => `${a.address} (${a.tokenSymbol})`)
+          .join(", ");
+        toast(
+          `${data.error}${where ? ` Address: ${where}` : ""}`,
+          { type: "error", duration: 12000 }
+        );
+        return;
+      }
+      toast(data?.error || "The invoice could not be deleted.", { type: "error" });
+      return;
+    }
     setDetailId(null);
-    await load();
+    await reloadAll();
   }
   async function markPaid(debt) {
-    await http.patch(`/api/debts/${debt._id}/paid`);
+    try {
+      await http.patch(`/api/debts/${debt._id}/paid`);
+    } catch (err) {
+      toast(
+        err?.response?.data?.error ||
+          `${debt.debtorName}'s debt could NOT be marked paid. The balance is unchanged.`,
+        { type: "error", duration: 9000 }
+      );
+      return;
+    }
     toast(`${debt.debtorName}'s debt marked fully paid`, { type: "success" });
-    await load();
+    await reloadAll();
   }
-  /**
-   * Generate a reminder, issuing the invoice's crypto payment address first if it
-   * does not have one yet.
-   *
-   * WHY THIS CANNOT BE FULLY AUTOMATIC. The address is derived in the browser from
-   * the wallet's own password on branch m/44'/60'/0'/2/<index>. The server holds no
-   * key and must never hold one, so it cannot mint the address itself and the
-   * reminder endpoint can only attach an address that already exists. Asking for
-   * the password once, here, is the closest this can get to automatic without
-   * breaking the single signing path the whole wallet design rests on.
-   *
-   * Order matters: the address must be saved BEFORE the reminder is generated,
-   * because `generateReminderForDebt` looks up the active address and folds the
-   * payment block into the message at generation time. Generating first would
-   * produce a reminder with no payment details and no way to add them afterwards.
-   */
   async function generateReminder(debt) {
     const wantsCrypto =
-      user?.crypto?.enabled !== false && // account setting, defaults on
-      hasWallet() && // a wallet exists in THIS browser for THIS account
-      !cryptoIds.has(String(debt._id)) && // no active address yet
-      (debt.balance ?? debt.amount) > 0; // nothing to ask for otherwise
+      user?.crypto?.enabled !== false &&
+      hasWallet() &&
+      !cryptoIds.has(String(debt._id)) &&
+      (debt.balance ?? debt.amount) > 0;
 
     if (wantsCrypto) {
-      // Hand off to the issuance modal, which owns the unlock, the atomic index
-      // allocation and the derivation. Remember the debt so the reminder is
-      // generated the moment the address lands.
       setRemindAfterAddress(debt);
       setCryptoDebt(debt);
       return;
@@ -216,8 +217,6 @@ export default function DebtsPanel() {
       setReminder({ debt, result: data });
       await load();
     } catch (err) {
-      // This had no error path at all: a failure produced an unhandled rejection
-      // and the user saw nothing happen.
       toast(err?.response?.data?.error || "Could not generate the reminder.", { type: "error" });
     }
   }
@@ -229,17 +228,33 @@ export default function DebtsPanel() {
     }
     setBulkBusy(true);
     let ok = 0;
+    let failed = 0;
+    let firstError = "";
     for (const d of targets) {
       try {
         await http.post(`/api/debts/${d._id}/remind`);
         ok++;
-      } catch {
-        /* skip */
+      } catch (err) {
+        failed++;
+        if (!firstError) firstError = err?.response?.data?.error || "";
       }
     }
     setBulkBusy(false);
     clearSel();
-    toast(`Generated ${ok} reminder${ok === 1 ? "" : "s"}${label ? ` (${label})` : ""}.`, { type: "success" });
+    const scope = label ? ` (${label})` : "";
+    if (failed === 0) {
+      toast(`Generated ${ok} reminder${ok === 1 ? "" : "s"}${scope}.`, { type: "success" });
+    } else if (ok === 0) {
+      toast(
+        `No reminders were generated${scope}. All ${failed} failed.${firstError ? ` ${firstError}` : ""}`,
+        { type: "error", duration: 9000 }
+      );
+    } else {
+      toast(
+        `Generated ${ok} of ${ok + failed} reminders${scope}. ${failed} failed.${firstError ? ` ${firstError}` : ""}`,
+        { type: "error", duration: 9000 }
+      );
+    }
     await load();
   }
 
@@ -269,40 +284,42 @@ export default function DebtsPanel() {
   const k = kpis(debts);
   const overdueCount = debts.filter((d) => d.displayStatus === "overdue").length;
   const detailDebt = detailId ? debts.find((d) => d._id === detailId) : null;
+  const reminderInline = Boolean(reminder && detailDebt && reminder.debt._id === detailDebt._id);
 
   return (
     <>
-      {loading && debts.length === 0 ? (
-        <div className="kpi-row">
-          <SkeletonBlockRow />
-        </div>
-      ) : (
-        <div className="kpi-row">
-          <StatCard label="Total outstanding" countTo={k.totalOutstanding} format={kpiNgn} icon={<CircleDollarSign size={17} />} iconTone={k.totalOutstanding > 0 ? "neg" : "neutral"} hint="Sum of open balances" />
-          <StatCard label="Overdue" countTo={overdueCount} tone={overdueCount > 0 ? "neg" : undefined} iconTone={overdueCount > 0 ? "neg" : "neutral"} icon={<AlertCircle size={17} />} hint={overdueCount === 1 ? "debt past due" : "debts past due"} />
-          <StatCard label="Collected (shown)" countTo={k.collected} format={kpiNgn} tone={k.collected > 0 ? "pos" : undefined} iconTone="pos" icon={<HandCoins size={17} />} hint="Across the filtered list" />
-          <StatCard label="Active clients" countTo={k.activeDebtors} icon={<Users size={17} />} iconTone="neutral" hint="With an open balance" />
-        </div>
-      )}
-
-      <Card
+      <PageHeader
         eyebrow="Ledger"
         title="Debts"
-        subtitle={`${debts.length} result${debts.length === 1 ? "" : "s"}`}
+        count={debts.length}
         action={
-          <div className="row wrap">
-            <Button size="sm" variant="ghost" onClick={remindAllOverdue} disabled={bulkBusy || overdueCount === 0}>
+          <>
+            <Button onClick={remindAllOverdue} disabled={bulkBusy || overdueCount === 0}>
               <BellRing size={14} /> Remind all overdue
             </Button>
-            <Button size="sm" variant="ghost" onClick={exportCsv} disabled={debts.length === 0}>
+            <Button onClick={exportCsv} disabled={debts.length === 0}>
               <Download size={14} /> CSV
             </Button>
-            <Button size="sm" variant="primary" onClick={() => setAdding(true)}>
+            <Button variant="primary" onClick={() => setAdding(true)}>
               <Plus size={14} /> Record debt
             </Button>
-          </div>
+          </>
         }
-      >
+      />
+        {loading && debts.length === 0 ? (
+          <div className="kpi-row">
+            <SkeletonBlockRow />
+          </div>
+        ) : (
+          <div className="kpi-row">
+            <StatCard label="Total outstanding" countTo={k.totalOutstanding} format={kpiNgn} icon={<CircleDollarSign size={17} />} iconTone={k.totalOutstanding > 0 ? "neg" : "neutral"} hint="Sum of open balances" />
+            <StatCard label="Overdue" countTo={overdueCount} tone={overdueCount > 0 ? "neg" : undefined} iconTone={overdueCount > 0 ? "neg" : "neutral"} icon={<AlertCircle size={17} />} hint={overdueCount === 1 ? "debt past due" : "debts past due"} />
+            <StatCard label="Collected (shown)" countTo={k.collected} format={kpiNgn} tone={k.collected > 0 ? "pos" : undefined} iconTone="pos" icon={<HandCoins size={17} />} hint="Across the filtered list" />
+            <StatCard label="Active clients" countTo={k.activeDebtors} icon={<Users size={17} />} iconTone="neutral" hint="With an open balance" />
+          </div>
+        )}
+
+      <section className="card card-flush">
         <div className="filters-row">
           <div className="search-field grow">
             <Search size={15} className="search-icon" />
@@ -351,17 +368,22 @@ export default function DebtsPanel() {
             cryptoIds={cryptoIds}
           />
         )}
-      </Card>
+      </section>
 
       <BulkActionBar count={selected.size} onRemind={remindSelected} onClear={clearSel} busy={bulkBusy} />
 
       {adding && (
-        <Modal label="Record a debt" onClose={() => setAdding(false)}>
+        <Modal label="Record a debt" view="record" onClose={() => setAdding(false)}>
           <DebtForm onSubmit={createDebt} onCancel={() => setAdding(false)} />
         </Modal>
       )}
       {editing && (
-        <Modal label={`Edit debt for ${editing.debtorName}`} onClose={() => setEditing(null)}>
+        <Modal
+          label={`Edit debt for ${editing.debtorName}`}
+          view="edit"
+          crumb="Edit debt"
+          onClose={() => setEditing(null)}
+        >
           <DebtForm initial={editing} onSubmit={saveEdit} onCancel={() => setEditing(null)} />
         </Modal>
       )}
@@ -373,9 +395,11 @@ export default function DebtsPanel() {
           onMarkPaid={markPaid}
           onEdit={(d) => { setDetailId(null); setEditing(d); }}
           onDelete={deleteDebt}
-          onChanged={load}
+          onChanged={reloadAll}
           onCrypto={(d) => { setDetailId(null); setCryptoDebt(d); }}
           cryptoKey={cryptoKey}
+          reminder={reminderInline ? reminder : null}
+          onCloseReminder={() => setReminder(null)}
         />
       )}
       {cryptoDebt && (
@@ -386,9 +410,6 @@ export default function DebtsPanel() {
             const pending = remindAfterAddress;
             setCryptoDebt(null);
             setRemindAfterAddress(null);
-            // Cancelling the address must not silently cancel the reminder the
-            // user actually asked for. Generate it without the payment block and
-            // say why it is missing, rather than appearing to do nothing.
             if (pending) {
               toast("Reminder drafted without payment details, because no address was issued.", { type: "info" });
               doGenerateReminder(pending);
@@ -401,28 +422,23 @@ export default function DebtsPanel() {
             setRemindAfterAddress(null);
             setCryptoKey((k) => k + 1);
             if (pending) {
-              // Straight on to the reminder. The address now exists, so generation
-              // folds the payment block into the message.
               toast("Payment address created. Drafting the reminder.", { type: "success" });
               doGenerateReminder(pending);
               return;
             }
-            // Land back on the invoice so the new address, QR and amount are
-            // there to read immediately rather than being hunted for.
             setDetailId(id);
             toast("Payment address created. Share it with your client.", { type: "success" });
           }}
         />
         </Suspense>
       )}
-      {reminder && (
+      {reminder && !reminderInline && (
         <ReminderPanel debt={reminder.debt} result={reminder.result} onClose={() => setReminder(null)} />
       )}
     </>
   );
 }
 
-// Local helper: a row of skeleton blocks for the KPI row.
 function SkeletonBlockRow() {
   return (
     <>

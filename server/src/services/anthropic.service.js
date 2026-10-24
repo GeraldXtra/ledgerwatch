@@ -3,25 +3,10 @@ const { formatDate } = require("../utils/reminderTemplate");
 
 const MODEL = "claude-sonnet-4-6";
 
-/**
- * LW-010. The SDK's defaults are a ten minute timeout and two retries, which
- * is a worst case near half an hour on ONE call. That call is awaited inside
- * the reminder pass, which runs under the automation loop's overlap guard, so
- * for that whole window every tick logged "previous pass still running" and
- * returned: no reminders, no price pass, and no payment watch. A confirmed
- * payment sat undetected while the log looked like healthy overlap protection.
- *
- * A reminder draft that has not come back in thirty seconds is not coming
- * back, and the template fallback is right there.
- */
 const REQUEST_TIMEOUT_MS = Number(process.env.ANTHROPIC_TIMEOUT_MS || 30000);
 
 let client = null;
 
-/**
- * Lazily create the Anthropic client. Returns null if no API key is configured,
- * so all AI features degrade gracefully (Module 1 must work with NO AI).
- */
 function getClient() {
   if (!process.env.ANTHROPIC_API_KEY) return null;
   if (!client) {
@@ -44,10 +29,6 @@ function extractText(response) {
   return text || null;
 }
 
-/**
- * Draft a nicer reminder message. Returns the AI text, or null if AI is
- * unavailable or the call fails (caller falls back to the plain template).
- */
 async function draftReminder({
   debtorName,
   amount,
@@ -101,22 +82,45 @@ async function draftReminder({
   }
 }
 
-/**
- * Answer a natural-language question over a compact summary of the user's debts.
- * Returns AI text, or null if AI is unavailable / fails (caller computes a fallback).
- */
+const MAX_DEBT_ROWS = 200;
+
+function trimDebtsForPrompt(debtsSummary) {
+  const rows = Array.isArray(debtsSummary) ? debtsSummary : [];
+  if (rows.length <= MAX_DEBT_ROWS) return { rows, total: rows.length };
+  const ranked = [...rows].sort((a, b) => {
+    const aOpen = a && a.status !== "paid" ? 0 : 1;
+    const bOpen = b && b.status !== "paid" ? 0 : 1;
+    if (aOpen !== bOpen) return aOpen - bOpen;
+    const aDue = a && a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+    const bDue = b && b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+    return aDue - bDue;
+  });
+  return { rows: ranked.slice(0, MAX_DEBT_ROWS), total: rows.length };
+}
+
 async function answerReceivablesQuery(question, debtsSummary) {
   const anthropic = getClient();
   if (!anthropic) return null;
 
+  const { rows, total } = trimDebtsForPrompt(debtsSummary);
+  const subsetNote =
+    rows.length < total
+      ? `The list below is a SUBSET: ${rows.length} of ${total} invoices, open ones first ` +
+        `and soonest due first. Do not state totals or counts across the whole book, and ` +
+        `say plainly that you are working from the most urgent ${rows.length}.`
+      : null;
+
   const prompt = [
     `You are a receivables assistant. Answer the question using ONLY the data below.`,
     `Be concise and specific (name amounts and debtors). Return plain text.`,
+    subsetNote,
     ``,
     `Question: ${question}`,
     ``,
-    `Debts (JSON): ${JSON.stringify(debtsSummary)}`,
-  ].join("\n");
+    `Debts (JSON): ${JSON.stringify(rows)}`,
+  ]
+    .filter((line) => line !== null)
+    .join("\n");
 
   try {
     const response = await anthropic.messages.create({
@@ -131,9 +135,6 @@ async function answerReceivablesQuery(question, debtsSummary) {
   }
 }
 
-/**
- * Word a market alert explanation. Returns text or null (caller uses a template).
- */
 async function explainAlert({
   symbol,
   conditionType,
@@ -171,15 +172,6 @@ async function explainAlert({
   }
 }
 
-/**
- * Market agent chat. Parses watch commands into a structured intent AND answers
- * questions using the provided context. Returns a parsed object
- * `{ watches: [{ symbol, type, value }], reply }` or null on failure/no key
- * (caller falls back to the basic parser + computed summary).
- *
- * @param {string} message
- * @param {object} context  { watches, portfolio, prices, supportedSymbols }
- */
 async function marketChat(message, context) {
   const anthropic = getClient();
   if (!anthropic) return null;
@@ -225,7 +217,6 @@ async function marketChat(message, context) {
   }
 }
 
-// Tolerant JSON extraction from the model's reply.
 function safeParseChatJson(text) {
   try {
     return JSON.parse(text);

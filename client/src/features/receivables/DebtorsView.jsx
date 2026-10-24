@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowDown, ArrowUp, Users } from "lucide-react";
 import http from "../../api/http";
-import { Avatar, Card, EmptyState, SkeletonLines } from "../../components/ui";
+import { EmptyState, PageHeader, SkeletonLines } from "../../components/ui";
 import { ngn, shortDate } from "./format";
 import ReliabilityBadge from "./ReliabilityBadge";
-import DebtorProfile from "./DebtorProfile";
+const DebtorProfile = lazy(() => import("./DebtorProfile"));
 
 const SORTS = {
   name: (a, b) => (a.debtorName || "").localeCompare(b.debtorName || ""),
@@ -50,11 +50,14 @@ export default function DebtorsView() {
   const arrow = (key) => (sort === key ? (dir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : null);
 
   return (
-    <Card
-      eyebrow="Customers"
-      title="Debtors"
-      subtitle="Every customer grouped, with a reliability score from their payment history."
-    >
+    <>
+      <PageHeader
+        eyebrow="Customers"
+        title="Debtors"
+        count={debtors ? debtors.length : undefined}
+        support="Every customer grouped, with a reliability score from their payment history."
+      />
+      <section className="card card-flush">
       {error && <p className="error-text">{error}</p>}
       {!debtors ? (
         <SkeletonLines count={5} />
@@ -77,24 +80,25 @@ export default function DebtorsView() {
                 <th><button type="button" className="th-sort" onClick={() => toggleSort("name")}>Debtor {arrow("name")}</button></th>
                 <th className="ta-right"><button type="button" className="th-sort right" onClick={() => toggleSort("outstanding")}>Outstanding {arrow("outstanding")}</button></th>
                 <th><button type="button" className="th-sort" onClick={() => toggleSort("score")}>Reliability {arrow("score")}</button></th>
-                <th className="ta-right"><button type="button" className="th-sort right" onClick={() => toggleSort("activity")}>Last activity {arrow("activity")}</button></th>
+                <th><button type="button" className="th-sort" onClick={() => toggleSort("activity")}>Last activity {arrow("activity")}</button></th>
               </tr>
             </thead>
             <tbody>
               {sorted.map((d) => (
                 <tr key={d.key} className="clickable-row" onClick={() => setOpenKey(d.key)}>
-                  <td data-label="Debtor">
+                  <td data-label="Debtor" className="cell-title">
                     <div className="cell-lead">
-                      <Avatar name={d.debtorName} />
                       <div>
-                        <div className="lead-name">{d.debtorName}</div>
+                        <button type="button" className="lead-link">
+                          {d.debtorName}
+                        </button>
                         <div className="lead-sub num">{d.debtorPhone || `${d.debtCount} debt${d.debtCount === 1 ? "" : "s"}`}</div>
                       </div>
                     </div>
                   </td>
                   <td data-label="Outstanding" align="right" className="ta-right num">{ngn(d.totalOutstanding)}</td>
-                  <td data-label="Reliability"><ReliabilityBadge score={d.reliabilityScore} band={d.band} /></td>
-                  <td data-label="Last activity" align="right" className="ta-right num">
+                  <td data-label="Reliability" className="cell-badge"><ReliabilityBadge score={d.reliabilityScore} band={d.band} /></td>
+                  <td data-label="Last activity" className="num">
                     {d.lastActivityAt ? shortDate(d.lastActivityAt) : "Nothing yet"}
                   </td>
                 </tr>
@@ -104,7 +108,13 @@ export default function DebtorsView() {
         </div>
       )}
 
-      {openKey && <DebtorProfile debtorKey={openKey} onClose={() => setOpenKey(null)} />}
-    </Card>
+      </section>
+
+      {openKey && (
+        <Suspense fallback={null}>
+          <DebtorProfile debtorKey={openKey} onClose={() => setOpenKey(null)} />
+        </Suspense>
+      )}
+    </>
   );
 }

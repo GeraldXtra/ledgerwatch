@@ -1,23 +1,17 @@
 const User = require("../models/User");
 const publicUser = require("../utils/publicUser");
-const { getChain } = require("../config/chains");
+const { getChain, tokensFor } = require("../config/chains");
+const { resolveCoinOnChain } = require("../services/tokenResolver.service");
+const { readTokenMeta } = require("../services/walletHistory.service");
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
-/**
- * The shared demo account can never trade live.
- *
- * ENFORCED HERE, ON THE SERVER, not by hiding a toggle. Anyone can call this
- * endpoint directly, and the demo credentials are published in the README — so
- * the UI hiding the control is defence in depth, and this is the actual control.
- */
 const PROTECTED_EMAIL = "demo@ledgerwatch.app";
 
 function isDemo(user) {
   return String(user.email || "").toLowerCase() === PROTECTED_EMAIL;
 }
 
-/** Reused by the execution paths, so the lock cannot be bypassed by route. */
 function assertCanTradeLive(user) {
   if (isDemo(user)) {
     const err = new Error(
@@ -28,7 +22,6 @@ function assertCanTradeLive(user) {
   }
 }
 
-// PATCH /api/trading/mode  { mode: "paper" | "live" }
 async function setMode(req, res) {
   try {
     const mode = req.body && req.body.mode;
@@ -51,7 +44,6 @@ async function setMode(req, res) {
   }
 }
 
-// GET /api/trading/tokens?chainId=
 async function listTokens(req, res) {
   try {
     const chainId = Number(req.query.chainId);
@@ -64,39 +56,81 @@ async function listTokens(req, res) {
   }
 }
 
-// POST /api/trading/tokens  { chainId, address, symbol, decimals }
+const MAX_CUSTOM_TOKENS = 50;
+
 async function addToken(req, res) {
   try {
     const { chainId, address, symbol, decimals } = req.body || {};
-    if (!getChain(chainId)) {
+    const chain = getChain(chainId);
+    if (!chain) {
       return res.status(400).json({ error: "Unknown or disabled chain" });
     }
     if (!ADDRESS_RE.test(address || "")) {
       return res.status(400).json({ error: "Invalid contract address" });
     }
-    // Decimals come from the contract on the client. Validated here anyway —
-    // a bad value silently misreads every balance for that token.
-    const d = Number(decimals);
-    if (!Number.isInteger(d) || d < 0 || d > 36) {
-      return res.status(400).json({ error: "Invalid token decimals" });
-    }
-    if (!symbol || String(symbol).length > 24) {
+    if (!symbol || typeof symbol !== "string" || symbol.length > 24) {
       return res.status(400).json({ error: "Invalid token symbol" });
+    }
+    const claimedDecimals = Number(decimals);
+    if (!Number.isInteger(claimedDecimals) || claimedDecimals < 0 || claimedDecimals > 36) {
+      return res.status(400).json({ error: "Invalid token decimals" });
     }
 
     const user = await User.findById(req.user._id).select("customTokens");
+    const lower = address.toLowerCase();
     const exists = (user.customTokens || []).some(
-      (t) => t.chainId === Number(chainId) && t.address.toLowerCase() === address.toLowerCase()
+      (t) => t.chainId === Number(chainId) && t.address.toLowerCase() === lower
     );
-    if (!exists) {
-      user.customTokens.push({
-        chainId: Number(chainId),
-        address,
-        symbol: String(symbol),
-        decimals: d,
+    if (exists) return res.status(201).json({ tokens: user.customTokens });
+
+    if ((user.customTokens || []).length >= MAX_CUSTOM_TOKENS) {
+      return res.status(400).json({
+        error: `You can keep ${MAX_CUSTOM_TOKENS} custom tokens. Remove one before adding another.`,
       });
-      await user.save();
     }
+
+    const meta = await readTokenMeta(chain, address);
+    if (!meta || !meta.readable) {
+      return res.status(502).json({
+        error:
+          `The contract at ${address} on ${chain.name} did not answer with a symbol and decimals, ` +
+          `so it was not added. That is either not a token contract, or ${chain.name} could not be ` +
+          `reached just now. Nothing was saved.`,
+      });
+    }
+
+    if (meta.decimals !== claimedDecimals) {
+      return res.status(400).json({
+        error:
+          `The contract at ${address} reports ${meta.decimals} decimals and this request said ` +
+          `${claimedDecimals}. Those disagree, so it was refused rather than guessed: trading on ` +
+          `the wrong decimals moves the wrong amount.`,
+      });
+    }
+
+    for (const candidate of [String(symbol), String(meta.symbol || "")]) {
+      const upper = candidate.toUpperCase();
+      if (!upper) continue;
+      const clash = tokensFor(chain).find(
+        (t) => String(t.symbol).toUpperCase() === upper && String(t.address).toLowerCase() !== lower
+      );
+      if (clash) {
+        return res.status(400).json({
+          error:
+            `The verified ${clash.symbol} on ${chain.name} is at ${clash.address}. Two contracts ` +
+            `cannot both be ${clash.symbol}, so this one was refused. Trade the verified one, or ` +
+            `add this contract under a name that does not copy it.`,
+        });
+      }
+    }
+
+    user.customTokens.push({
+      chainId: Number(chainId),
+      address,
+      symbol: String(symbol),
+      decimals: meta.decimals,
+    });
+    await user.save();
     return res.status(201).json({ tokens: user.customTokens });
   } catch (err) {
     console.error("addToken error:", err.message);
@@ -104,7 +138,6 @@ async function addToken(req, res) {
   }
 }
 
-// DELETE /api/trading/tokens  { chainId, address }
 async function removeToken(req, res) {
   try {
     const { chainId, address } = req.body || {};
@@ -121,4 +154,32 @@ async function removeToken(req, res) {
   }
 }
 
-module.exports = { setMode, listTokens, addToken, removeToken, assertCanTradeLive, isDemo };
+async function resolveToken(req, res) {
+  try {
+    const coinId = String((req.query && req.query.coinId) || "").trim().toLowerCase();
+    const chainId = Number((req.query && req.query.chainId) || NaN);
+
+    if (!/^[a-z0-9][a-z0-9._-]{0,80}$/.test(coinId)) {
+      return res.status(400).json({ error: "That is not a valid coin id." });
+    }
+    if (!Number.isInteger(chainId) || !getChain(chainId)) {
+      return res.status(400).json({ error: "Unknown or disabled chain" });
+    }
+
+    const result = await resolveCoinOnChain({ coinId, chainId });
+    return res.json(result);
+  } catch (err) {
+    console.error("trading resolveToken error:", err.message);
+    return res.status(500).json({ error: "Could not check that coin against the network." });
+  }
+}
+
+module.exports = {
+  setMode,
+  listTokens,
+  addToken,
+  removeToken,
+  resolveToken,
+  assertCanTradeLive,
+  isDemo,
+};

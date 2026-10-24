@@ -18,9 +18,6 @@ function receiptText(r) {
   ].join("\n");
 }
 
-/**
- * Printable receipt card for a payment, with copy-as-text (for WhatsApp) and print.
- */
 export default function ReceiptCard({ receipt }) {
   const [copied, setCopied] = useState(false);
 
@@ -30,7 +27,6 @@ export default function ReceiptCard({ receipt }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {
-      /* clipboard unavailable */
     }
   }
 

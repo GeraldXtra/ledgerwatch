@@ -10,9 +10,8 @@ const { runPaymentWatchPass } = require("./paymentWatch.service");
 const { notifyUser, signActionToken } = require("./push.service");
 const { emailConfigured } = require("./notify.service");
 
-const DEFAULT_INTERVAL_MS = 60000; // 60s for demo
+const DEFAULT_INTERVAL_MS = 60000;
 
-// Module-level state, exposed via getStatus() for the /status route.
 const state = {
   active: false,
   intervalMs: DEFAULT_INTERVAL_MS,
@@ -22,19 +21,16 @@ const state = {
   lastDebtsChecked: null,
   lastAlertsCreated: null,
   lastWatchesChecked: null,
+  lastAddressesChecked: null,
+  lastPaymentsDetected: null,
+  lastPaymentsSettled: null,
+  lastPassMs: null,
 };
 
 let intervalHandle = null;
 
-/**
- * Section 4 REMINDER PASS (no overlap guard — called under runAllPasses' guard).
- * Finds pending debts that are due and past their cadence window, and generates
- * a reminder for each via the shared engine. Each debt is wrapped in try/catch.
- * @returns {Promise<{ generated:number, debtsChecked:number }>}
- */
 async function doReminderPass({ userId } = {}) {
   const now = Date.now();
-  // Remind debts that are still owed — pending OR partially paid — and past due.
   const query = {
     status: { $in: ["pending", "partially_paid"] },
     dueDate: { $lte: new Date(now) },
@@ -45,37 +41,23 @@ async function doReminderPass({ userId } = {}) {
   const debtsChecked = candidates.length;
   let generated = 0;
 
-  /**
-   * WHY NOTHING WAS SENT.
-   *
-   * This pass used to report only `generated` and `debtsChecked`, so "the agent
-   * is not sending my reminders" had no answer short of reading the source. There
-   * are six independent reasons a debt produces no email, and five of them are
-   * configuration rather than failure, so nothing errors and nothing is logged.
-   * Counting them is the difference between a silent no-op and a sentence that
-   * names the fix.
-   */
   const skips = {
-    notDueYet: 0, // due date is in the future — excluded by the query above
-    cadenceNotElapsed: 0, // reminded too recently for this debt's cadence
+    notDueYet: 0,
+    cadenceNotElapsed: 0,
     ownerMissing: 0,
-    autoSendOff: 0, // owner has not enabled automatic sending
-    emailChannelOff: 0, // autoSend on, but the email channel is not enabled
-    noEmailAddress: 0, // nothing to send to
-    emailNotConfigured: 0, // SMTP missing on the server
+    autoSendOff: 0,
+    emailChannelOff: 0,
+    noEmailAddress: 0,
+    emailNotConfigured: 0,
   };
 
-  // Counted separately because the query already filtered them out: a user who
-  // just added a debtor due next week sees no activity and assumes it is broken.
   const notDueQuery = { status: { $in: ["pending", "partially_paid"] }, dueDate: { $gt: new Date(now) } };
   if (userId) notDueQuery.userId = userId;
   skips.notDueYet = await Debt.countDocuments(notDueQuery);
 
-  // Cache users within a pass so we don't refetch the same owner repeatedly.
   const userCache = new Map();
 
   for (const debt of candidates) {
-    // Per-debt cadence guard (reminderCadenceDays varies per debt).
     const cadenceMs = (debt.reminderCadenceDays || 3) * DAY_MS;
     const eligible =
       !debt.lastRemindedAt ||
@@ -94,24 +76,17 @@ async function doReminderPass({ userId } = {}) {
       }
       if (!owner) {
         skips.ownerMissing++;
-        continue; // orphaned debt — skip, don't crash
+        continue;
       }
 
       const result = await generateReminderForDebt(debt, owner);
       generated++;
 
-      // Opt-in auto-send: dispatch through the owner's enabled channels. Default is
-      // OFF, so absent config means we only GENERATE (as before). dispatchReminder is
-      // idempotent within the cadence window and degrades gracefully when a provider
-      // is unconfigured, so this never throws the pass.
       const autoSend = owner.autoSend || {};
       let autoDispatched = false;
       if (!autoSend.enabled) {
         skips.autoSendOff++;
       } else {
-        // Tally the email path specifically. WhatsApp has a manual fallback that
-        // always works; email has none, so a silent skip there is the one people
-        // actually notice and cannot explain.
         if (!autoSend.email) skips.emailChannelOff++;
         else if (!debt.debtorEmail) skips.noEmailAddress++;
         else if (!emailConfigured()) skips.emailNotConfigured++;
@@ -129,9 +104,6 @@ async function doReminderPass({ userId } = {}) {
         }
       }
 
-      // Actionable push when the human still has to act (auto-send OFF). The payload
-      // carries per-action tokens so the notification buttons can call the server.
-      // No-ops when push is unconfigured.
       if (!autoDispatched) {
         try {
           const tokens = {};
@@ -157,15 +129,9 @@ async function doReminderPass({ userId } = {}) {
       }
     } catch (err) {
       console.error(`Automation: failed to remind debt ${debt._id}:`, err.message);
-      // continue to the next debt
     }
   }
 
-  /**
-   * Say why, in one line, when a pass generates reminders but emails none of
-   * them. Ordered by how often each one is the real answer, and only the top
-   * blocker is printed so the log stays readable on a 60 second timer.
-   */
   if (debtsChecked > 0 && generated > 0) {
     const why =
       (skips.emailNotConfigured && `SMTP is not configured on the server, so ${skips.emailNotConfigured} email(s) were skipped`) ||
@@ -188,11 +154,6 @@ async function doReminderPass({ userId } = {}) {
   return { generated, debtsChecked, skips };
 }
 
-/**
- * Run BOTH the reminder pass and the price pass under a single overlap guard.
- * @param {{ userId?: string }} [opts]
- * @returns {Promise<{ generated:number, debtsChecked:number, alertsCreated:number, watchesChecked:number, skipped?:boolean }>}
- */
 async function runAllPasses({ userId } = {}) {
   if (state.isRunning) {
     return {
@@ -204,9 +165,9 @@ async function runAllPasses({ userId } = {}) {
     };
   }
   state.isRunning = true;
+  const startedAt = Date.now();
 
   try {
-    // Reminder pass — never lets the whole run die.
     let reminders = { generated: 0, debtsChecked: 0 };
     try {
       reminders = await doReminderPass({ userId });
@@ -214,7 +175,6 @@ async function runAllPasses({ userId } = {}) {
       console.error("Automation: reminder pass error:", err.message);
     }
 
-    // Price pass (section 4) — runPricePass guards each watch internally.
     let prices = { alertsCreated: 0, watchesChecked: 0 };
     try {
       prices = await runPricePass({ userId });
@@ -222,9 +182,6 @@ async function runAllPasses({ userId } = {}) {
       console.error("Automation: price pass error:", err.message);
     }
 
-    // Payment watch pass — inbound stablecoin transfers to invoice addresses.
-    // Deliberately a third pass inside THIS loop rather than a second interval,
-    // so it shares the overlap guard and fires from the manual trigger too.
     let payments = { addressesChecked: 0, detected: 0, confirmed: 0, settled: 0 };
     try {
       payments = await runPaymentWatchPass({ userId });
@@ -238,7 +195,18 @@ async function runAllPasses({ userId } = {}) {
     state.lastAlertsCreated = prices.alertsCreated;
     state.lastWatchesChecked = prices.watchesChecked;
     state.lastPaymentsSettled = payments.settled;
+    state.lastPaymentsDetected = payments.detected;
     state.lastAddressesChecked = payments.addressesChecked;
+    state.lastPassMs = Date.now() - startedAt;
+
+    if (state.intervalMs && state.lastPassMs > state.intervalMs) {
+      console.warn(
+        `Automation: pass took ${Math.round(state.lastPassMs / 1000)}s, longer than the ` +
+          `${Math.round(state.intervalMs / 1000)}s interval. Ticks in the meantime were skipped ` +
+          `by the overlap guard, so no reminders were sent and no payments were detected while ` +
+          `it ran.`
+      );
+    }
 
     return {
       generated: reminders.generated,
@@ -255,9 +223,6 @@ async function runAllPasses({ userId } = {}) {
   }
 }
 
-/**
- * Start the background interval. Must be called AFTER the DB is connected.
- */
 function startAutomation() {
   state.intervalMs = Number(process.env.AUTOMATION_INTERVAL_MS) || DEFAULT_INTERVAL_MS;
 
@@ -271,16 +236,16 @@ function startAutomation() {
       } else {
         console.log(
           `Automation: reminder pass — generated ${result.generated} (checked ${result.debtsChecked}); ` +
-            `price pass — alerts ${result.alertsCreated} (watches ${result.watchesChecked})`
+            `price pass — alerts ${result.alertsCreated} (watches ${result.watchesChecked}); ` +
+            `payment pass — addresses ${result.addressesChecked}, detected ${result.paymentsDetected}, ` +
+            `confirmed ${result.paymentsConfirmed}, settled ${result.paymentsSettled}`
         );
       }
     } catch (err) {
-      // runAllPasses shouldn't throw, but never let the interval die.
       console.error("Automation: pass error:", err.message);
     }
   }, state.intervalMs);
 
-  // Don't keep the event loop alive solely for this timer.
   if (typeof intervalHandle.unref === "function") intervalHandle.unref();
 
   state.active = true;
@@ -297,6 +262,10 @@ function getStatus() {
     lastDebtsChecked: state.lastDebtsChecked,
     lastAlertsCreated: state.lastAlertsCreated,
     lastWatchesChecked: state.lastWatchesChecked,
+    lastAddressesChecked: state.lastAddressesChecked,
+    lastPaymentsDetected: state.lastPaymentsDetected,
+    lastPaymentsSettled: state.lastPaymentsSettled,
+    lastPassMs: state.lastPassMs,
   };
 }
 

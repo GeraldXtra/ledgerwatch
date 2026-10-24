@@ -5,42 +5,50 @@ import { Avatar, Button, useToast } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
-const OUTPUT_SIZE = 512; // square, matching the avatar's object-fit: cover
+const OUTPUT_SIZE = 512;
 
-/**
- * Square-crop and downscale in the browser before upload. A phone photo is
- * several MB; this lands around 60kB, which keeps the user document small and
- * stays far inside the server's 2MB decoded cap.
- */
+const MAX_INPUT_BYTES = 20 * 1024 * 1024;
+
 function processImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("Could not read that file"));
     reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error("That file is not a readable image"));
-      img.onload = () => {
-        // Centre-crop to a square, then draw at OUTPUT_SIZE.
-        const side = Math.min(img.width, img.height);
-        const sx = (img.width - side) / 2;
-        const sy = (img.height - side) / 2;
+      try {
+        const img = new Image();
+        img.onerror = () => reject(new Error("That file is not a readable image"));
+        img.onload = () => {
+          try {
+            const side = Math.min(img.width, img.height);
+            const sx = (img.width - side) / 2;
+            const sy = (img.height - side) / 2;
 
-        const canvas = document.createElement("canvas");
-        canvas.width = OUTPUT_SIZE;
-        canvas.height = OUTPUT_SIZE;
-        const ctx = canvas.getContext("2d");
-        ctx.imageSmoothingQuality = "high";
-        ctx.drawImage(img, sx, sy, side, side, 0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
+            const canvas = document.createElement("canvas");
+            canvas.width = OUTPUT_SIZE;
+            canvas.height = OUTPUT_SIZE;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+              throw new Error(
+                "This browser would not give a drawing surface for that image, which usually means it is too large"
+              );
+            }
+            ctx.imageSmoothingQuality = "high";
+            ctx.drawImage(img, sx, sy, side, side, 0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
 
-        resolve(canvas.toDataURL("image/jpeg", 0.86));
-      };
-      img.src = reader.result;
+            resolve(canvas.toDataURL("image/jpeg", 0.86));
+          } catch (err) {
+            reject(err instanceof Error ? err : new Error("That image could not be processed"));
+          }
+        };
+        img.src = reader.result;
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error("That image could not be opened"));
+      }
     };
     reader.readAsDataURL(file);
   });
 }
 
-/** Profile picture control: click or drag to select, live preview, remove. */
 export default function AvatarUpload() {
   const { user, applyUser } = useAuth();
   const toast = useToast();
@@ -54,6 +62,14 @@ export default function AvatarUpload() {
     if (!file) return;
     if (!ACCEPTED.includes(file.type)) {
       setError("Choose a JPEG, PNG or WebP image.");
+      return;
+    }
+    if (file.size > MAX_INPUT_BYTES) {
+      setError(
+        `That image is ${(file.size / (1024 * 1024)).toFixed(1)}MB, which is too large to open here. Choose one under ${
+          MAX_INPUT_BYTES / (1024 * 1024)
+        }MB.`
+      );
       return;
     }
     setBusy(true);

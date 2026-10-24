@@ -1,20 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import QRCode from "qrcode";
-import {
-  ArrowDownToLine,
-  Check,
-  Coins,
-  Copy,
-  ExternalLink,
-  Hourglass,
-  Ban,
-  TriangleAlert,
-} from "lucide-react";
-import { Button, SkeletonLines } from "../../components/ui";
+import { ArrowDownToLine, Ban, Check, Coins, Copy, ExternalLink, Hourglass, ShieldCheck, TriangleAlert } from "lucide-react";
+import { Button, Card, Input, SkeletonLines } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { getStoredAddress, hasWallet } from "../wallet/keystore";
+import { verifyAddress } from "../wallet/derivation";
 import ProgressBar from "./ProgressBar";
 import SweepModal from "./SweepModal";
+import { confirmationsFor } from "./confirmations";
 import { fetchPaymentAddresses, revokePaymentAddress } from "./cryptoApi";
 import {
   agoLabel,
@@ -27,7 +20,6 @@ import {
   usdcAmount,
 } from "./format";
 
-// Status of the address itself, as a pill tone the design system already knows.
 const STATUS_TONE = {
   active: "scheduled",
   paid: "paid",
@@ -44,23 +36,10 @@ const STATUS_LABEL = {
   swept: "Swept to wallet",
 };
 
-/**
- * The crypto payment address on an invoice: where to send, how much, how long
- * is left, and exactly what has arrived so far.
- *
- * The detected/confirmed distinction is the point of this panel. Money that has
- * landed on chain but is not yet deep enough to trust must be VISIBLE — telling
- * someone chasing a debt "nothing has arrived" while a transfer sits two blocks
- * deep would be false. So detected and confirmed are shown separately, in
- * different tones, and the confirmation count is spelled out against the depth
- * being waited for.
- */
 export default function CryptoPaymentPanel({ debt, refreshKey = 0 }) {
   const { user } = useAuth();
   const [addresses, setAddresses] = useState(null);
   const [chains, setChains] = useState([]);
-  // Today's rate, for comparison against each address's snapshot. The snapshot
-  // still settles the invoice; this only makes the drift visible.
   const [currentRate, setCurrentRate] = useState(null);
   const [error, setError] = useState("");
 
@@ -86,6 +65,33 @@ export default function CryptoPaymentPanel({ debt, refreshKey = 0 }) {
     load();
   }, [load, refreshKey]);
 
+  const needsLiveUpdates = (addresses || []).some((pa) => {
+    if (pa.status !== "active" && pa.status !== "expired") return false;
+    const observed = pa.observed || [];
+    const confirming = observed.some((o) => o.status === "detected");
+    const nothingYet = observed.length === 0;
+    return confirming || nothingYet;
+  });
+
+  useEffect(() => {
+    if (!needsLiveUpdates) return undefined;
+
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      load();
+    }, 12000);
+    return () => clearInterval(id);
+  }, [needsLiveUpdates, load]);
+
+  useEffect(() => {
+    if (!needsLiveUpdates || typeof document === "undefined") return undefined;
+    const onVisible = () => {
+      if (!document.hidden) load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [needsLiveUpdates, load]);
+
   if (addresses === null) return <SkeletonLines count={3} />;
   if (error) {
     return (
@@ -97,8 +103,8 @@ export default function CryptoPaymentPanel({ debt, refreshKey = 0 }) {
   if (addresses.length === 0) return null;
 
   return (
-    <div className="stack-sm">
-      <span className="overline">Crypto payment</span>
+    <Card title="Crypto payment">
+      <div className="stack-sm">
       {addresses.map((pa) => (
         <AddressCard
           key={pa._id}
@@ -106,27 +112,36 @@ export default function CryptoPaymentPanel({ debt, refreshKey = 0 }) {
           chain={chains.find((c) => c.chainId === pa.chainId) || null}
           onChanged={load}
           sweepDestination={user?.crypto?.sweepDestination || null}
-          // Loaded once for the whole panel and shared by every card, rather
-          // than each card fetching today's rate for itself.
+          confirmationsNeeded={confirmationsFor(pa.chainId, user)}
           currentRate={currentRate}
         />
       ))}
-    </div>
+      </div>
+    </Card>
   );
 }
 
-function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = null }) {
+function AddressCard({
+  pa,
+  chain,
+  onChanged,
+  sweepDestination,
+  currentRate = null,
+  confirmationsNeeded = null,
+}) {
   const [qr, setQr] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [verifyPassword, setVerifyPassword] = useState("");
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifyResult, setVerifyResult] = useState(null);
   const [copied, setCopied] = useState(false);
   const [left, setLeft] = useState(() => countdown(pa.expiresAt));
   const [revoking, setRevoking] = useState(false);
+  const [revokeError, setRevokeError] = useState("");
   const [sweepOpen, setSweepOpen] = useState(false);
 
   const isActive = pa.status === "active";
 
-  // After expiry the address drops to a low-frequency grace watch rather than
-  // being abandoned, so late money is still detected and credited. Mirrors
-  // PAYMENT_GRACE_DAYS on the server.
   const GRACE_DAYS = 30;
   const graceUntil = pa.expiredAt
     ? new Date(new Date(pa.expiredAt).getTime() + GRACE_DAYS * 86400000)
@@ -149,9 +164,6 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
     };
   }, [pa.address]);
 
-  // Live countdown, ticking once a second and cleared on unmount. Only runs
-  // while the address is actually active — there is nothing to count down to on
-  // one that is already paid, expired or revoked.
   useEffect(() => {
     if (!isActive) return undefined;
     setLeft(countdown(pa.expiresAt));
@@ -165,7 +177,6 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* clipboard blocked — the address is on screen to copy by hand */
     }
   }
 
@@ -178,11 +189,17 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
       return;
     }
     setRevoking(true);
+    setRevokeError("");
     try {
       await revokePaymentAddress(pa._id);
       await onChanged();
-    } catch {
-      /* the panel reloads either way; a failed revoke leaves it active */
+    } catch (err) {
+      setRevokeError(
+        err?.response?.data?.error ||
+          "The address could not be revoked, so it is still active and still being watched. Try again."
+      );
+      await onChanged().catch(() => {
+      });
     } finally {
       setRevoking(false);
     }
@@ -193,13 +210,18 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
   const detectedTxs = observed.filter((t) => t.status === "detected");
   const orphanedTxs = observed.filter((t) => t.status === "orphaned");
 
-  // `receivedUsdc` counts CONFIRMED money only — that is what has settled
-  // against the invoice. Detected money is totalled separately so it can be
-  // shown as incoming without being counted as received.
   const received = Number(pa.receivedUsdc) || 0;
   const expected = Number(pa.expectedUsdc) || 0;
   const pending = detectedTxs.reduce((sum, t) => sum + unitsToNumber(t.value, pa.tokenDecimals), 0);
-  const stillNeeded = Math.max(0, Math.round((expected - received) * 100) / 100);
+
+  const unsettled = confirmedTxs
+    .filter((t) => !t.settledPaymentId)
+    .reduce((sum, t) => sum + unitsToNumber(t.value, pa.tokenDecimals), 0);
+  const stillNeeded = Math.max(0, Math.round((expected - unsettled) * 100) / 100);
+
+  const unit = pa.tokenSymbol || "USDC";
+
+  const canVerify = hasWallet() && pa.derivationIndex != null;
 
   const explorerTx = (hash) => (chain?.explorer ? `${chain.explorer}/tx/${hash}` : null);
   const explorerAddress = chain?.explorer ? `${chain.explorer}/address/${pa.address}` : null;
@@ -219,10 +241,6 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
           </div>
         </div>
         <div className="row wrap">
-          {/* A hardcoded "Testnet" badge sat here, on the panel that shows the
-              address a real payer is given. On a mainnet address it labelled
-              real money as practice. Removed rather than made conditional: the
-              chain name is already the card title. */}
           <span className={`pill ${STATUS_TONE[pa.status] || "pending"}`}>
             <span className="pill-dot" />
             {STATUS_LABEL[pa.status] || pa.status}
@@ -253,7 +271,93 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
                 <ExternalLink size={14} /> Explorer
               </a>
             )}
+            {canVerify && (
+              <Button variant="ghost" size="sm" onClick={() => setVerifying(true)}>
+                <ShieldCheck size={14} /> Check it is mine
+              </Button>
+            )}
           </div>
+
+          {verifyResult && (
+            <p
+              className={
+                verifyResult.ok ? "caption value-pos" : "settings-note danger"
+              }
+              style={{ marginTop: 8 }}
+            >
+              {verifyResult.message}
+            </p>
+          )}
+
+          {verifying && (
+            <form
+              className="stack-tight"
+              style={{ marginTop: 10 }}
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setVerifyBusy(true);
+                setVerifyResult(null);
+                try {
+                  const ok = await verifyAddress(
+                    verifyPassword,
+                    pa.derivationIndex,
+                    pa.address
+                  );
+                  setVerifyResult(
+                    ok
+                      ? {
+                          ok: true,
+                          message:
+                            "Confirmed. This address was derived from your own recovery phrase, " +
+                            "so anything sent to it is yours.",
+                        }
+                      : {
+                          ok: false,
+                          message:
+                            "This address does NOT match what your wallet derives at this index. " +
+                            "Do not give it to anyone. Revoke it and issue a new one.",
+                        }
+                  );
+                  setVerifying(false);
+                  setVerifyPassword("");
+                } catch (err) {
+                  setVerifyResult({
+                    ok: false,
+                    message:
+                      /password|decrypt/i.test(err?.message || "")
+                        ? "That password did not open your wallet, so the address was not checked."
+                        : `The address could not be checked: ${err?.message || "unknown error"}.`,
+                  });
+                } finally {
+                  setVerifyBusy(false);
+                }
+              }}
+            >
+              <Input
+                type="password"
+                value={verifyPassword}
+                onChange={(e) => setVerifyPassword(e.target.value)}
+                placeholder="Wallet password"
+                autoFocus
+              />
+              <div className="row wrap">
+                <Button type="submit" size="sm" disabled={verifyBusy || !verifyPassword}>
+                  {verifyBusy ? "Checking…" : "Check"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setVerifying(false);
+                    setVerifyPassword("");
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          )}
         </div>
 
         <div className="crypto-detail-col">
@@ -263,6 +367,14 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
               <dd className="num">
                 {usdc(expected, pa.tokenSymbol)}
                 <span className="quote-sub">in {pa.tokenSymbol || "USDC"}</span>
+                {pa.quote &&
+                  pa.quote.expectedUsdc != null &&
+                  Math.abs(pa.quote.expectedUsdc - expected) > 0.004 && (
+                    <span className="quote-sub">
+                      quoted {usdc(pa.quote.expectedUsdc, pa.tokenSymbol)} when issued
+                      {pa.quote.reconstructed ? " (reconstructed)" : ""}
+                    </span>
+                  )}
               </dd>
             </div>
             <div>
@@ -270,19 +382,10 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
               <dd className="num">
                 {ngn(pa.invoiceBalanceNgn)}
                 <span className="quote-sub">
-                  at {ngn(pa.ngnPerUsd)} per {pa.tokenSymbol || "USDC"}, {agoLabel(pa.rateTimestamp)}
+                  at {ngn(pa.ngnPerUsd)} per {pa.tokenSymbol || "USDC"},{" "}
+                  {pa.rateIsFallback ? "fallback rate, not live" : agoLabel(pa.rateTimestamp)}
                 </span>
-                {/* SNAPSHOT vs CURRENT. The snapshot is what settles this invoice
-                    settles this invoice. A payer who sends what they were quoted clears it whatever
-                    the naira does. The owner still needs to see how far the rate
-                    has moved, so both are shown and the drift is named. Withheld
-                    below 0.5% because a rate always wobbles slightly and flagging
-                    noise would train people to ignore it. */}
                 {!currentRate || !(currentRate.ngnPerUsd > 0) ? (
-                  /* Today's rate could not be read. Said out loud rather than
-                     omitted: an absent comparison looks identical to "the rate
-                     has not moved", which is a claim we cannot make. The
-                     snapshot above is unaffected and still settles the invoice. */
                   <span className="quote-sub">
                     Today&rsquo;s rate is unavailable, so no comparison is shown. This invoice is
                     unaffected. It settles at the rate above.
@@ -315,9 +418,6 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
                 ) : (
                   dateTime(pa.expiresAt)
                 )}
-                {/* Watching does not stop at expiry. Money sent late is still
-                    found and credited, so say so rather than leaving the payer's
-                    position looking hopeless. */}
                 {inGrace && (
                   <span className="quote-sub">
                     still watching for late payments until {shortDate(graceUntil)}
@@ -327,7 +427,17 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
             </div>
           </dl>
 
-          {pa.unidentifiedBalanceAt && (
+          {pa.unattributedUsdc > 0 && (
+            <p className="settings-note danger">
+              <TriangleAlert size={15} />
+              {usdc(pa.unattributedUsdc, pa.tokenSymbol)} arrived here when this invoice owed
+              nothing, so it was not credited to it
+              {pa.unattributedAt ? ` (${dateTime(pa.unattributedAt)})` : ""}. The money is safe at
+              this address, which is derived from your own wallet, and you can sweep it into your
+              wallet below.
+            </p>
+          )}
+          {pa.unidentifiedBalanceAt && !(pa.unattributedUsdc > 0) && (
             <p className="settings-note danger">
               <TriangleAlert size={15} />
               This address is holding more than the transfers listed below account for. The funds
@@ -339,28 +449,25 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
 
           <div className="crypto-progress">
             <div className="row space-between crypto-progress-head">
-              <span className="overline">Confirmed and settled</span>
+              <span className="overline">Confirmed against what is still owed</span>
               <span className="num mono-strong">
-                {usdcAmount(received)} of {usdc(expected)}
+                {usdcAmount(unsettled)} of {usdc(expected, pa.tokenSymbol)}
               </span>
             </div>
-            <ProgressBar paid={received} total={expected || 1} />
-            {/* The unit sits on its own line in these tiles. Each one has only
-                about 100px of width inside this modal, and "36,799.89 USDC" on a
-                single line needs very nearly all of it. */}
+            <ProgressBar paid={unsettled} total={expected || 1} />
             <div className="crypto-progress-figures">
               <div className="crypto-figure">
                 <span className="overline">Received</span>
                 <span className="num mono-strong value-pos">
                   {usdcAmount(received)}
-                  <span className="figure-unit">USDC</span>
+                  <span className="figure-unit">{unit}</span>
                 </span>
               </div>
               <div className="crypto-figure">
                 <span className="overline">Incoming, unconfirmed</span>
                 <span className={`num mono-strong ${pending > 0 ? "value-warn" : ""}`}>
                   {usdcAmount(pending)}
-                  <span className="figure-unit">USDC</span>
+                  <span className="figure-unit">{unit}</span>
                 </span>
               </div>
               <div className="crypto-figure">
@@ -369,7 +476,7 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
                   {stillNeeded > 0 ? (
                     <>
                       {usdcAmount(stillNeeded)}
-                      <span className="figure-unit">USDC</span>
+                      <span className="figure-unit">{unit}</span>
                     </>
                   ) : (
                     "Nothing"
@@ -416,20 +523,19 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
                     {t.status === "confirmed" && (
                       <>Confirmed{t.confirmedAt ? ` · ${dateTime(t.confirmedAt)}` : ""}</>
                     )}
-                    {t.status === "detected" && (
-                      <>
-                        Detected · {t.confirmations || 0} of {confirmationsNeeded(pa, chain)}{" "}
-                        confirmations
-                      </>
-                    )}
+                    {t.status === "detected" &&
+                      (confirmationsNeeded ? (
+                        <>
+                          Detected · {t.confirmations || 0} of {confirmationsNeeded} confirmations
+                        </>
+                      ) : (
+                        <>Detected · {t.confirmations || 0} confirmations so far</>
+                      ))}
                     {t.status === "orphaned" && <>Vanished in a reorg · not counted</>}
                   </div>
                 </div>
               </div>
               <div className="row">
-                {/* Late money still counts and still settles, at the rate the
-                    payer was originally quoted. Flagged so a settlement on an
-                    invoice that looked closed is never a surprise. */}
                 {t.late && <span className="pill warn">Late</span>}
                 <span className={`pill ${txTone(t.status)}`}>
                   <span className="pill-dot" />
@@ -496,9 +602,6 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
           anyone.
         </p>
         <div className="row">
-          {/* Sweeping is offered whenever money has actually arrived, whatever the
-              address status: a revoked or expired address can still be holding
-              funds, and stranding them would be the worse outcome. */}
           {received > 0 && hasWallet() && (
             <Button variant="secondary" size="sm" onClick={() => setSweepOpen(true)}>
               <ArrowDownToLine size={14} /> Sweep to wallet
@@ -510,6 +613,11 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
             </Button>
           )}
         </div>
+        {revokeError && (
+          <p className="error-text" style={{ margin: 0 }}>
+            {revokeError}
+          </p>
+        )}
       </div>
 
       {sweepOpen && (
@@ -517,8 +625,6 @@ function AddressCard({ pa, chain, onChanged, sweepDestination, currentRate = nul
           addresses={[pa]}
           chains={chain ? [chain] : []}
           mainAddress={getStoredAddress()}
-          // Settings may name somewhere other than this device's wallet; the
-          // modal warns when the two differ.
           destination={sweepDestination || getStoredAddress()}
           onClose={() => setSweepOpen(false)}
           onDone={onChanged}
@@ -534,20 +640,6 @@ function txTone(status) {
   return "pending";
 }
 
-function confirmationsNeeded(pa, chain) {
-  // Sepolia L1 reorgs deeper than the L2s, hence the split. Mirrors
-  // server/src/config/derivation.js — shown so the wait is explained rather
-  // than just being a spinner.
-  if (pa.chainId === 11155111) return 12;
-  return chain && chain.testnet === false ? 12 : 5;
-}
-
-/**
- * Raw token units -> a display number. Uses BigInt for the integer part because
- * a raw 18-decimal value exceeds IEEE-754 integer safety; USDC's 6 decimals
- * would survive Number(), but this must stay correct if another token is ever
- * configured.
- */
 function unitsToNumber(raw, decimals = 6) {
   try {
     const d = BigInt(Math.max(0, Number(decimals) || 0));

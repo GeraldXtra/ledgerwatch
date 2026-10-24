@@ -36,31 +36,12 @@ function ChartTooltip({ active, payload }) {
   );
 }
 
-/**
- * Real interactive coin chart from /api/coins/:id/chart. Timeframe buttons refetch;
- * area chart with a gradient tinted to the line color; line green when the period is up,
- * muted red when down. Skeleton while loading, designed empty state if no data.
- */
 export default function CoinChart({ coinId, defaultDays = 7 }) {
   const [days, setDays] = useState(defaultDays);
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
 
-  /**
-   * RETRIES, because one attempt was not enough and "No chart data" was a lie.
-   *
-   * This fetched once. The server builds its chart cache on demand from the
-   * price provider, so the very first request for a coin can come back empty
-   * while that fill is still in flight or after a rate limited attempt — and an
-   * empty `prices` array is a RESOLVED response, not an error, so the old code
-   * treated it as "this coin has no history" and rendered the empty state
-   * permanently. Reopening the modal was the only way to try again, which is
-   * why the chart appeared only after a reload.
-   *
-   * An empty series is therefore retried like a failure, with a widening delay,
-   * and only the last attempt is allowed to conclude there is genuinely nothing.
-   */
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -101,7 +82,7 @@ export default function CoinChart({ coinId, defaultDays = 7 }) {
   }, [coinId, days]);
 
   const up = data.length >= 2 ? data[data.length - 1].p >= data[0].p : true;
-  const stroke = up ? "var(--pos-text)" : "var(--neg-text)";
+  const stroke = up ? "var(--money)" : "var(--due)";
   const gradId = `cg-${coinId}`;
 
   const fmtX = (t) => {
@@ -140,32 +121,29 @@ export default function CoinChart({ coinId, defaultDays = 7 }) {
             <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
               <defs>
                 <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={stroke} stopOpacity={0.14} />
-                  <stop offset="100%" stopColor={stroke} stopOpacity={0} />
+                  <stop offset="0%" stopColor={stroke} stopOpacity={0.1} />
+                  <stop offset="100%" stopColor={stroke} stopOpacity={0.1} />
                 </linearGradient>
               </defs>
-              {/* Theme tokens, not hex: SVG presentation attributes accept
-                  var(), and the line colour above already relied on that. A
-                  literal grey grid was invisible on the dark ground. */}
-              <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
+              <CartesianGrid stroke="var(--line)" vertical={false} />
               <XAxis
                 dataKey="t"
                 tickFormatter={fmtX}
-                tick={{ fill: "var(--chart-tick)", fontSize: 11 }}
+                tick={{ fill: "var(--muted)", fontSize: 11 }}
                 tickLine={false}
-                axisLine={{ stroke: "var(--chart-axis)" }}
+                axisLine={{ stroke: "var(--line)" }}
                 minTickGap={48}
               />
               <YAxis
                 orientation="right"
-                tick={{ fill: "var(--chart-tick)", fontSize: 11 }}
+                tick={{ fill: "var(--muted)", fontSize: 11 }}
                 tickLine={false}
                 axisLine={false}
                 width={64}
                 domain={["auto", "auto"]}
                 tickFormatter={(v) => fmtPrice(v)}
               />
-              <Tooltip content={<ChartTooltip />} cursor={{ stroke: "var(--chart-cursor-line)" }} />
+              <Tooltip content={<ChartTooltip />} cursor={{ stroke: "var(--line-strong)" }} />
               <Area
                 type="monotone"
                 dataKey="p"
@@ -174,7 +152,7 @@ export default function CoinChart({ coinId, defaultDays = 7 }) {
                 fill={`url(#${gradId})`}
                 dot={false}
                 isAnimationActive={!reduceMotion()}
-                activeDot={{ r: 3, fill: stroke, stroke: "var(--chart-dot-ring)", strokeWidth: 2 }}
+                activeDot={{ r: 3, fill: stroke, stroke: "var(--panel)", strokeWidth: 2 }}
               />
             </AreaChart>
           </ResponsiveContainer>

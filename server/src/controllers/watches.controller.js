@@ -1,7 +1,6 @@
 const Watch = require("../models/Watch");
 const { createWatch, updateWatchCondition } = require("../services/market.service");
 
-// POST /api/watches  body: { symbol, type, value, coinId? }
 async function create(req, res) {
   try {
     const { symbol, type, value, coinId } = req.body || {};
@@ -19,7 +18,6 @@ async function create(req, res) {
   }
 }
 
-// PATCH /api/watches/:id  body: { type?, value? } — edit the condition in place
 async function update(req, res) {
   try {
     const { type, value } = req.body || {};
@@ -35,11 +33,9 @@ async function update(req, res) {
   }
 }
 
-// GET /api/watches
 async function list(req, res) {
   try {
     const mode = req.user.tradingMode === "live" ? "live" : "paper";
-    // Only this book's watches. A live user must not see paper watches.
     const watches = await Watch.find({ userId: req.user._id, mode }).sort({ createdAt: -1 });
     return res.json({ watches });
   } catch (err) {
@@ -48,7 +44,6 @@ async function list(req, res) {
   }
 }
 
-// DELETE /api/watches/:id
 async function remove(req, res) {
   try {
     const watch = await Watch.findOne({ _id: req.params.id, userId: req.user._id });
@@ -56,8 +51,11 @@ async function remove(req, res) {
     await watch.deleteOne();
     return res.json({ ok: true });
   } catch (err) {
+    if (err && err.name === "CastError") {
+      return res.status(404).json({ error: "Watch not found" });
+    }
     console.error("delete watch error:", err.message);
-    return res.status(404).json({ error: "Watch not found" });
+    return res.status(500).json({ error: "That watch could not be removed just now." });
   }
 }
 

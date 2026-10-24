@@ -1,7 +1,3 @@
-/**
- * Shimmer placeholders. `SkeletonLines` renders n text lines;
- * `SkeletonBlock` a taller block (stat cards, chart areas).
- */
 export function SkeletonLines({ count = 3 }) {
   return (
     <div className="stack-sm" aria-hidden="true">

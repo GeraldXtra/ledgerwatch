@@ -1,11 +1,3 @@
-/**
- * Outbound messaging — WhatsApp (Twilio) and Email (Nodemailer SMTP).
- *
- * BOTH channels degrade gracefully: if the provider env vars are absent, the send
- * is a no-op that returns { ok:false, skipped:true } and NEVER throws. The manual
- * wa.me link remains the always-available fallback. Providers are lazily created
- * once and reused.
- */
 let twilioClient = null;
 let twilioLoaded = false;
 let mailer = null;
@@ -30,9 +22,6 @@ function getMailer() {
   if (mailerLoaded) return mailer;
   mailerLoaded = true;
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
-  // Treat a leftover example value as unconfigured. Building a transport around
-  // `you@gmail.com` produces an auth rejection that looks like a bug in this app
-  // rather than a blank field in .env.
   const usable =
     SMTP_HOST && SMTP_PORT && SMTP_USER && SMTP_PASS && emailConfigStatus().configured;
   if (usable) {
@@ -42,14 +31,6 @@ function getMailer() {
         port: Number(SMTP_PORT),
         secure: Number(SMTP_PORT) === 465,
         auth: { user: SMTP_USER, pass: SMTP_PASS },
-        /**
-         * TIMEOUTS MATTER MORE THAN THEY LOOK. Without them nodemailer waits on
-         * its own very generous defaults, so a network blip reaching Gmail holds
-         * the HTTP request open until the browser gives up — and the user sees a
-         * bare "Send failed" with no server response to explain it. There is a
-         * real `connect ETIMEDOUT ...:587` in this app's own delivery history.
-         * Failing in seconds with a nameable error is far more useful.
-         */
         connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 10000),
         greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 10000),
         socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20000),
@@ -62,12 +43,6 @@ function getMailer() {
   return mailer;
 }
 
-/**
- * Confirm the SMTP credentials and connection at boot.
- *
- * Left until the first send, a wrong password or an unreachable host is only
- * discovered when a user is waiting on a reminder. Never throws.
- */
 async function verifyEmail() {
   const transport = getMailer();
   if (!transport) {
@@ -101,11 +76,6 @@ async function verifyEmail() {
   }
 }
 
-/**
- * A nodemailer error turned into a typed reason plus wording a non-technical
- * user can act on. `err.message` alone loses `code`, `responseCode` and
- * `response`, which are the fields that actually name the cause.
- */
 function classifyMailError(err) {
   const code = err && err.code;
   const responseCode = err && err.responseCode;
@@ -143,25 +113,12 @@ function describeMailError(err) {
   return classifyMailError(err).message;
 }
 
-/**
- * Reserved, non-routable domains (RFC 2606 / RFC 6761). Mail to these is often
- * ACCEPTED at the SMTP handshake and bounced afterwards, so the send records as
- * "sent" and nothing ever arrives — which is worse than a visible failure.
- */
 const NON_ROUTABLE_DOMAIN = /@([^@]*\.)?(example|test|invalid|localhost)(\.[a-z]{2,})?$/i;
 
 function isNonRoutableEmail(address) {
   return NON_ROUTABLE_DOMAIN.test(String(address || "").trim());
 }
 
-/**
- * Values shipped in .env.example. A placeholder is WORSE than an empty value:
- * empty makes `getMailer()` return null and every send reports "not-configured",
- * which is at least honest. A placeholder passes the truthiness check, so the
- * transport is built, Gmail rejects the credentials, and the failure arrives as
- * an authentication error that reads like a code fault. This app has already been
- * bitten by exactly that shape with ANTHROPIC_API_KEY.
- */
 const PLACEHOLDER_TOKENS = [
   "you@gmail.com",
   "your-app-password",
@@ -170,25 +127,11 @@ const PLACEHOLDER_TOKENS = [
   "change-me",
 ];
 
-/**
- * Substring rather than exact match. MAIL_FROM is a display name wrapped around
- * an address (`LedgerWatch <you@gmail.com>`), so an exact comparison misses the
- * example value that is actually sitting there. Matching the token catches every
- * form the same placeholder takes.
- */
 const isPlaceholder = (v) => {
   const s = String(v || "").trim().toLowerCase();
   return s !== "" && PLACEHOLDER_TOKENS.some((t) => s.includes(t));
 };
 
-/**
- * Why email is or is not usable, in enough detail to act on.
- *
- * `emailConfigured()` used to answer this as a bare boolean AND omitted
- * SMTP_PORT, which `getMailer()` requires — so it could report "configured"
- * while every send was skipped. Naming the missing variable is the difference
- * between a user fixing it in a minute and assuming the feature is broken.
- */
 function emailConfigStatus() {
   const required = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_FROM"];
   const missing = required.filter((k) => !process.env[k]);
@@ -219,7 +162,6 @@ const whatsappConfigured = () =>
   Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM);
 const emailConfigured = () => emailConfigStatus().configured;
 
-// Normalise a phone to the E.164 form Twilio's WhatsApp channel expects.
 function toWhatsAppAddress(phone) {
   const { normalizePhone } = require("../utils/phone");
   const { valid, intl } = normalizePhone(phone);
@@ -227,46 +169,14 @@ function toWhatsAppAddress(phone) {
   return `whatsapp:+${intl}`;
 }
 
-/**
- * @returns {Promise<{ok:boolean, skipped?:boolean, providerId?:string, error?:string}>}
- */
-/**
- * WHATSAPP DELIVERY — three providers behind one call.
- *
- * Twilio was the original and it is the wrong default for this product. It bills
- * per message on top of Meta's own fee, it needs a paid account before a single
- * real message leaves the sandbox, and the sandbox requires every recipient to
- * text a join code first, which no debtor will ever do. For a small business
- * chasing its own invoices that is a cost and a friction it does not need.
- *
- *   link   (default) Free, works today, no account anywhere. The message is
- *          prepared and handed back as a wa.me link for the owner to send from
- *          their own WhatsApp. One tap per debtor. It keeps the human in the
- *          loop, which is this product's stated design rule anyway, and it costs
- *          nothing. Its honest limit: it cannot fire unattended at 2am.
- *
- *   cloud  WhatsApp Cloud API, direct from Meta, no reseller in between. Meta's
- *          free tier covers a small business comfortably and there is no
- *          per-message platform fee on top. This is the option to grow into and
- *          the only one that can send while nobody is watching.
- *
- *   twilio Kept so an existing configuration keeps working. Not recommended.
- *
- * Every provider returns the same shape, so callers never branch on which one is
- * active. `queued: true` means "prepared for a human to send", which is a real
- * outcome and NOT a failure: recording it as one would put a red error in front
- * of the user for the path that is working exactly as designed.
- */
 function whatsappProvider() {
   const explicit = String(process.env.WHATSAPP_PROVIDER || "").trim().toLowerCase();
   if (explicit) return explicit;
-  // Infer, so an existing Twilio setup keeps working with no new variable.
   if (process.env.WHATSAPP_CLOUD_TOKEN && process.env.WHATSAPP_CLOUD_PHONE_ID) return "cloud";
   if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) return "twilio";
   return "link";
 }
 
-/** wa.me deep link with the message pre-filled. Free, and always available. */
 function buildWaLink(toPhone, body) {
   const { normalizePhone } = require("../utils/phone");
   const { valid, intl } = normalizePhone(toPhone);
@@ -294,13 +204,6 @@ async function sendViaCloud(toPhone, body) {
     );
     return { ok: true, providerId: data?.messages?.[0]?.id || null, provider: "cloud" };
   } catch (err) {
-    /**
-     * Meta's own error text is far more useful than the axios wrapper's, and the
-     * commonest failure by a mile is code 131047: outside the 24 hour window a
-     * business may only open a conversation with an approved template, never
-     * free text. Saying that plainly is the difference between a fixable problem
-     * and an unexplained failure.
-     */
     const meta = err?.response?.data?.error;
     const code = meta?.code;
     let message = meta?.message || err.message;
@@ -338,7 +241,6 @@ async function sendWhatsApp(toPhone, body) {
   if (provider === "cloud") return sendViaCloud(toPhone, body);
   if (provider === "twilio") return sendViaTwilio(toPhone, body);
 
-  // link — the free default.
   const link = buildWaLink(toPhone, body);
   if (!link) return { ok: false, reason: "invalid-number", error: "That phone number is not valid for WhatsApp." };
   return {
@@ -384,58 +286,43 @@ function whatsappConfigStatus() {
   };
 }
 
-/**
- * A From header nodemailer and every client will parse the same way.
- *
- * `MAIL_FROM="LedgerWatch you@gmail.com"` (no angle brackets) is the easy mistake
- * to make in a .env, and it renders the display name wrongly rather than failing
- * loudly. If there is a bare address with a name in front of it, wrap it.
- */
 function normalizeFrom(raw) {
   const value = String(raw || "").trim();
   if (!value) return "";
-  if (/<[^>]+@[^>]+>/.test(value)) return value; // already correct
+  if (/<[^>]+@[^>]+>/.test(value)) return value;
   const match = value.match(/^(.*?)\s*([^\s<>]+@[^\s<>]+)$/);
   if (!match) return value;
   const [, name, address] = match;
   return name ? `"${name.replace(/"/g, "")}" <${address}>` : address;
 }
 
-/**
- * @param {string} to
- * @param {string} subject
- * @param {string} html
- * @param {{text?:string, attachments?:Array}} [opts]
- *   `attachments` may carry inline images with a `cid`. That is the ONLY reliable
- *   way to show an image in Gmail: `data:` URI images are stripped outright, so a
- *   QR embedded that way silently never appears.
- */
-/**
- * Where an unsubscribe click lands. Uses the deployed client URL so the link is
- * real rather than decorative — an unsubscribe header pointing nowhere is worse
- * than none, because it invites a complaint when the link fails.
- */
 function unsubscribeUrl(to) {
-  const base = (process.env.CLIENT_URL || "http://localhost:5173").split(",")[0].trim();
-  return `${base}/unsubscribe?email=${encodeURIComponent(to || "")}`;
+  const base = String(process.env.MAIL_UNSUBSCRIBE_URL || "").trim();
+  if (!base) return null;
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}email=${encodeURIComponent(to || "")}`;
 }
 
-/** The mailbox an unsubscribe request can be emailed to. */
 function unsubscribeMailbox() {
   const raw = process.env.MAIL_UNSUBSCRIBE || process.env.MAIL_FROM || "";
-  // MAIL_FROM may be `"Name" <addr>`; the header needs the bare address.
   const match = String(raw).match(/<([^>]+)>/);
   return (match ? match[1] : raw).trim() || "unsubscribe@localhost";
+}
+
+function unsubscribeHeaders(to) {
+  const url = unsubscribeUrl(to);
+  const mailto = `<mailto:${unsubscribeMailbox()}?subject=unsubscribe>`;
+  if (!url) return { "List-Unsubscribe": mailto };
+  return {
+    "List-Unsubscribe": `<${url}>, ${mailto}`,
+    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+  };
 }
 
 async function sendEmail(to, subject, html, opts = {}) {
   const transport = getMailer();
   const from = normalizeFrom(process.env.MAIL_FROM);
   if (!transport || !from) {
-    // Name the missing or placeholder variable rather than saying "no SMTP
-    // settings". The generic wording sent people looking for a bug in the app;
-    // "Missing in server/.env: SMTP_PASS" is something a user can act on without
-    // reading any code.
     return {
       ok: false,
       skipped: true,
@@ -447,11 +334,6 @@ async function sendEmail(to, subject, html, opts = {}) {
     return { ok: false, reason: "no-address", error: "This client has no email address on file." };
   }
 
-  /**
-   * Drop an attachment whose bytes are missing rather than letting it fail the
-   * whole message. A reminder that arrives without its logo is a cosmetic loss;
-   * a reminder that never arrives because an icon moved is a real one.
-   */
   const attachments = (opts.attachments || []).filter((a) => {
     const present = a && a.content && a.content.length > 0;
     if (!present) {
@@ -464,50 +346,21 @@ async function sendEmail(to, subject, html, opts = {}) {
     const info = await transport.sendMail({
       from,
       to,
-      // Replies should reach the sender, and a From/Reply-To that disagree with
-      // each other is itself a mild spam signal. Defaults to From when unset.
       replyTo: normalizeFrom(process.env.MAIL_REPLY_TO) || from,
       subject,
       html,
-      // A text/plain alternative alongside the HTML. Bulk senders that omit it
-      // score worse with spam filters, and some clients show it in previews.
       text: opts.text || undefined,
       attachments: attachments.length ? attachments : undefined,
 
-      /**
-       * DELIVERABILITY HEADERS.
-       *
-       * Be honest about what these can and cannot do: without a custom domain
-       * there is no SPF or DKIM ALIGNMENT, and alignment is the single largest
-       * factor in inbox placement. Everything here is the rest of the checklist
-       * — worth doing, and not a substitute. See the README section on DNS.
-       *
-       * Deliberately absent: tracking pixels and redirect links. Both are strong
-       * spam signals and neither is worth the analytics.
-       */
       headers: {
-        // A well-formed unsubscribe path is one of the clearest "legitimate bulk
-        // sender" signals there is. BOTH forms, because Gmail honours the HTTPS
-        // one-click and older clients only understand mailto.
-        "List-Unsubscribe": `<${unsubscribeUrl(to)}>, <mailto:${unsubscribeMailbox()}?subject=unsubscribe>`,
-        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-        // Says plainly that a machine sent this, so filters do not read it as a
-        // human failing to get a reply. Also stops well-behaved auto-responders
-        // from bouncing back at us.
+        ...unsubscribeHeaders(to),
         "Auto-Submitted": "auto-generated",
         "X-Auto-Response-Suppress": "OOF, AutoReply",
-        // Transactional, not marketing: "bulk" is the honest value for an
-        // automated reminder a customer expects.
         Precedence: "bulk",
         "X-Entity-Ref-ID": `ledgerwatch-${Date.now()}`,
       },
-      // Message-ID, Date and MIME-Version are generated by nodemailer to spec.
-      // Setting them by hand risks a malformed value, which is worse than the
-      // correct one we already get.
     });
 
-    // Accepted at the handshake is not the same as delivered. A reserved domain
-    // is accepted and then bounced, so say so rather than reporting clean success.
     if (isNonRoutableEmail(to)) {
       console.warn(`[email] ${to} uses a reserved domain — this will bounce and never arrive.`);
       return {
@@ -520,8 +373,6 @@ async function sendEmail(to, subject, html, opts = {}) {
     return { ok: true, providerId: info.messageId };
   } catch (err) {
     const { reason, message } = classifyMailError(err);
-    // The FULL error, not just err.message — code, responseCode, command and the
-    // server's own response text are what actually identify the cause.
     console.error("[email] send failed:", {
       reason,
       code: err.code,
@@ -534,25 +385,12 @@ async function sendEmail(to, subject, html, opts = {}) {
   }
 }
 
-/**
- * Inline logo attachment, read from the client's PWA icon so the email mark and
- * the app mark can never drift apart. Cached after the first read.
- * Returns null if the file is missing, and the header falls back to text.
- */
 let logoAttachment;
 function getLogoAttachment() {
-  // Only a SUCCESSFUL read is cached. The previous version cached the failure
-  // too and did so silently, so a single bad read — a different working
-  // directory at boot, a file briefly locked by a sync client, this repo living
-  // in OneDrive — meant every email for the entire life of the process went out
-  // with no logo, and nothing anywhere said why. A retry costs one small file
-  // read.
   if (logoAttachment) return logoAttachment;
 
   const candidates = [
-    // Normal layout: server/src/services -> repo root -> client/public
     require("path").resolve(__dirname, "../../../client/public/icon-192.png"),
-    // Deployed layouts where the client is built alongside the server.
     require("path").resolve(process.cwd(), "../client/public/icon-192.png"),
     require("path").resolve(process.cwd(), "client/public/icon-192.png"),
     require("path").resolve(process.cwd(), "public/icon-192.png"),
@@ -572,26 +410,15 @@ function getLogoAttachment() {
         return logoAttachment;
       }
     } catch {
-      // Try the next candidate path.
     }
   }
 
-  // Says so, every time, rather than failing silently forever.
   console.warn(
     `[email] logo not found — emails will send without it. Looked in: ${candidates.join(" | ")}`
   );
   return null;
 }
 
-/**
- * The branded reminder email.
- *
- * WRITTEN FOR EMAIL CLIENTS, NOT BROWSERS. Nested tables rather than flexbox or
- * grid, every style inlined, no external stylesheet, no web font, and images only
- * as `cid:` attachments. Outlook renders through Word's engine and Gmail strips
- * <style> blocks and `data:` images, so anything cleverer than this silently
- * degrades for most of the people who will actually read it.
- */
 const FONT = "'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 const INK = "#0a1428";
 const NAVY = "#16294a";
@@ -632,8 +459,6 @@ function buildReminderEmail({
 
   const supplier = esc(businessName || "your supplier");
 
-  // Preheader: the grey line clients show beside the subject. Kept out of sight in
-  // the body itself, otherwise the first words of the letter get repeated.
   const preheader = amount
     ? `${money(amount)} naira outstanding to ${supplier}`
     : `A payment reminder from ${supplier}`;

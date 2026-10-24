@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { BarChart3, Receipt, Sparkles, Users } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import http from "../../api/http";
 import {
   Button,
@@ -14,11 +14,18 @@ import DebtsPanel from "./DebtsPanel";
 import DebtorsView from "./DebtorsView";
 import { kpiNgn } from "./format";
 
-const TABS = [
-  { id: "overview", label: "Overview", icon: <BarChart3 size={15} /> },
-  { id: "debts", label: "Debts", icon: <Receipt size={15} /> },
-  { id: "debtors", label: "Debtors", icon: <Users size={15} /> },
-];
+const VIEWS = ["overview", "debts", "debtors"];
+
+const PARENT = {
+  debt: "debts",
+  record: "debts",
+  edit: "debts",
+  reminder: "debts",
+  crypto: "debts",
+  sweep: "debts",
+  debtor: "debtors",
+  statement: "debtors",
+};
 
 function AssistantCard() {
   const [question, setQuestion] = useState("");
@@ -46,7 +53,7 @@ function AssistantCard() {
       subtitle="Ordinary questions, answered over your own figures. Who owes most, who never pays on time."
     >
       <div className="stack">
-        <form onSubmit={ask} className="row wrap">
+        <form onSubmit={ask} className="ask-row">
           <Input
             className="grow"
             placeholder="Try: who owes me the most?"
@@ -55,7 +62,7 @@ function AssistantCard() {
             aria-label="Ask about your receivables"
           />
           <Button type="submit" variant="secondary" disabled={asking}>
-            <Sparkles size={14} /> {asking ? "Thinking..." : "Ask"}
+            {asking ? "Thinking..." : "Ask"}
           </Button>
         </form>
         {asking && <SkeletonLines count={2} />}
@@ -66,24 +73,29 @@ function AssistantCard() {
 }
 
 function Receivables() {
-  const [tab, setTab] = useState("overview");
+  const [params] = useSearchParams();
+  const wanted = params.get("view");
+  const lastTab = useRef("overview");
+  const tab = VIEWS.includes(wanted)
+    ? wanted
+    : PARENT[wanted] || (wanted ? lastTab.current : "overview");
+  lastTab.current = tab;
 
-  /**
-   * The analytics live here rather than inside the overview panel, because the
-   * folio at the top of the page states them and the folio belongs to the page.
-   *
-   * This is the change that retired the row of four boxed KPI cards. The same
-   * request, the same numbers, stated once at the top in the figures rail
-   * instead of twice: once in a box and once in a chart caption.
-   */
   const [analytics, setAnalytics] = useState(null);
   const [analyticsError, setAnalyticsError] = useState("");
+
+  const [analyticsKey, setAnalyticsKey] = useState(0);
+  const refreshAnalytics = useCallback(() => setAnalyticsKey((k) => k + 1), []);
 
   useEffect(() => {
     let active = true;
     http
       .get("/api/receivables/analytics")
-      .then(({ data }) => active && setAnalytics(data))
+      .then(({ data }) => {
+        if (!active) return;
+        setAnalytics(data);
+        setAnalyticsError("");
+      })
       .catch(
         (err) =>
           active &&
@@ -92,12 +104,10 @@ function Receivables() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [analyticsKey, tab]);
 
   const overdue = analytics?.countByStatus?.overdue || 0;
 
-  // Nothing is stated until it is known. An empty figures rail is honest; a rail
-  // of zeroes while the request is still in flight is a wrong number.
   const figures = analytics
     ? [
         {
@@ -131,43 +141,28 @@ function Receivables() {
 
   return (
     <>
-      <PageHeader
-        title="Receivables"
-        support="What you are owed, who owes it, and how long it has been waiting."
-        figures={figures}
-      />
+      {tab === "overview" && (
+        <PageHeader
+          title="Receivables"
+          support="What you are owed, who owes it, and how long it has been waiting."
+          figures={figures}
+        />
+      )}
 
-      <div className="subtabs" role="tablist">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            className={tab === t.id ? "subtab active" : "subtab"}
-            onClick={() => setTab(t.id)}
-          >
-            {t.icon}
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <div key={tab} className="stack subtab-panel">
+      <div key={tab} className="page-stack subtab-panel">
         {tab === "overview" && (
           <>
             <ReceivablesOverview data={analytics} error={analyticsError} />
             <AssistantCard />
           </>
         )}
-        {tab === "debts" && <DebtsPanel />}
+        {tab === "debts" && <DebtsPanel onLedgerChanged={refreshAnalytics} />}
         {tab === "debtors" && <DebtorsView />}
       </div>
     </>
   );
 }
 
-// ToastProvider wraps the tab so Receivables and its children can raise toasts.
 export default function ReceivablesPage() {
   return (
     <ToastProvider>

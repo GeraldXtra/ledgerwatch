@@ -5,49 +5,131 @@ import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
 import Dashboard from "./pages/Dashboard";
 import ReceivablesPage from "./features/receivables/ReceivablesPage";
-import MarketWatchPage from "./features/market/MarketWatchPage";
-import SettingsPage from "./pages/Settings";
-import LogoMark from "./components/LogoMark";
 
-// Wallet pulls in ethers + qrcode — code-split so those load only on demand.
 const WalletPage = lazy(() => import("./features/wallet/WalletPage"));
-// The guide, the policy pages and the contact form carry a lot of text that
-// the app itself never needs. Split, so signing in does not download it.
+
+const MarketWatchPage = lazy(() => import("./features/market/MarketWatchPage"));
+
+const SettingsPage = lazy(() => import("./pages/Settings"));
 const DocsPage = lazy(() => import("./pages/DocsPage"));
 const LegalPage = lazy(() => import("./pages/LegalPage"));
 const ContactPage = lazy(() => import("./pages/ContactPage"));
 
 function Booting() {
   return (
-    <div className="center-screen">
-      <div className="stack-sm" style={{ textAlign: "center" }}>
-        <div className="row" style={{ justifyContent: "center" }}>
-          <LogoMark size={34} />
+    <div className="center-screen boot" aria-busy="true">
+      <div className="boot-inner">
+        <div className="lb" aria-hidden="true">
+          <div className="lb-book">
+            <i className="lb-base l" />
+            <i className="lb-base r" />
+            <div className="lb-page ruled">
+              <i className="lb-hd" />
+              <i className="lb-col" />
+              <i className="w w1" />
+              <i className="a a1" />
+              <i className="w w2" />
+              <i className="a a2" />
+              <i className="w w3" />
+              <i className="a a3" />
+              <i className="lb-tot" />
+              <svg className="lb-tick" viewBox="0 0 24 24">
+                <path d="M4 12.5l5 5L20 6" />
+              </svg>
+            </div>
+            <div className="lb-leaf p2">
+              <i className="f" />
+              <i className="b ruled">
+                <i className="s s1" />
+                <i className="s s2" />
+                <i className="s s3" />
+                <i className="s s4" />
+              </i>
+            </div>
+            <div className="lb-leaf p1">
+              <i className="f" />
+              <i className="b ruled" />
+            </div>
+            <div className="lb-cover">
+              <i className="f">
+                <svg viewBox="9.5 4.5 40 51" fill="none">
+                  <path d="M17.5 5.2v49.6" stroke="var(--brand-ink)" strokeWidth="2" />
+                  <path
+                    d="M11 14.5h5M11 30h5M11 45.5h5"
+                    stroke="var(--brand-ink)"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M41.5 5.7h3.8a3 3 0 0 1 3 3v3.8z M48.3 46.5v3.8a3 3 0 0 1-3 3h-3.8z"
+                    fill="var(--brand-ink)"
+                  />
+                  <circle
+                    cx="33.5"
+                    cy="28.5"
+                    r="10.3"
+                    fill="var(--brand-face)"
+                    stroke="var(--brand-ink)"
+                    strokeWidth="2"
+                  />
+                  <path
+                    d="M33.5 20.7v1.8M41.3 28.5h-1.8M33.5 36.3v-1.8M25.7 28.5h1.8"
+                    stroke="var(--brand-ink)"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M33.5 28.5l-4.3-3.1M33.5 28.5l5.4-3.9"
+                    stroke="var(--brand-ink)"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                  />
+                  <circle
+                    cx="33.5"
+                    cy="28.5"
+                    r="1.6"
+                    fill="var(--brand-cover)"
+                    stroke="var(--brand-ink)"
+                    strokeWidth=".9"
+                  />
+                  <rect x="32" y="15.5" width="3" height="2.8" rx=".8" fill="var(--brand-ink)" />
+                  <rect
+                    x="26.5"
+                    y="44"
+                    width="14"
+                    height="5.2"
+                    rx="1.4"
+                    fill="var(--brand-paper)"
+                    stroke="var(--brand-ink)"
+                    strokeWidth="1.5"
+                  />
+                </svg>
+              </i>
+              <i className="b" />
+            </div>
+          </div>
         </div>
-        <div className="wordmark">
+        <div className="wordmark boot-word">
           Ledger<span className="tick">Watch</span>
         </div>
-        <p className="muted small">Loading your workspace...</p>
+        <p className="boot-text">Loading your workspace...</p>
       </div>
     </div>
   );
 }
 
-/** Signed-in users skip the public pages and land in the app. */
 function PublicOnly({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <Booting />;
   return user ? <Navigate to="/app" replace /> : children;
 }
 
-/** A code-split public page. The wait is a moment, so the fallback is quiet:
-    a reader of the guide has no "workspace" to load. */
 function Public({ children }) {
   return (
     <Suspense
       fallback={
         <div className="center-screen">
-          <p className="muted small">Loading...</p>
+          <p className="fallback-text">Loading...</p>
         </div>
       }
     >
@@ -56,7 +138,6 @@ function Public({ children }) {
   );
 }
 
-/** The dashboard requires a session. */
 function RequireAuth({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <Booting />;
@@ -83,19 +164,11 @@ export default function App() {
             </PublicOnly>
           }
         />
-        {/* The user guide. Public, so someone deciding whether to sign up can
-            read how the product works, and reachable signed in, from the Help
-            icon and the footer. */}
         <Route path="/docs" element={<Public><DocsPage /></Public>} />
         <Route path="/docs/:slug" element={<Public><DocsPage /></Public>} />
-        {/* The policy, the terms and the contact form. Public for the same
-            reason as the guide, and reachable from every footer. */}
         <Route path="/privacy" element={<Public><LegalPage which="privacy" /></Public>} />
         <Route path="/terms" element={<Public><LegalPage which="terms" /></Public>} />
         <Route path="/contact" element={<Public><ContactPage /></Public>} />
-        {/* The shell renders sidebar + topbar and an <Outlet> for the section, so
-            each tab gets a real shareable URL and /app/settings can exist. Each
-            page's own data flow is unchanged. */}
         <Route
           path="/app"
           element={

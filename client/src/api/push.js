@@ -1,15 +1,7 @@
 import http from "./http";
 
-// The API base the service worker should call. Passed on the registration URL
-// because a service worker cannot read Vite env or localStorage.
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-/**
- * Every stage logs. Push has a lot of places to fail quietly — a registration
- * that never activates, a permission that was already denied, a subscribe that
- * throws, a POST that 400s — and none of them surface anywhere the user can see.
- * The whole pipeline sat dead for a long time precisely because nothing said so.
- */
 const log = (stage, detail) =>
   console.info(`[push] ${stage}${detail !== undefined ? ": " : ""}`, detail ?? "");
 const warn = (stage, err) => console.warn(`[push] ${stage}:`, err && (err.message || err));
@@ -23,7 +15,6 @@ export function pushSupported() {
   );
 }
 
-/** Why push cannot work here, in words, or null when it can. */
 export function unsupportedReason() {
   if (typeof window === "undefined") return "Not running in a browser.";
   if (!window.isSecureContext) {
@@ -35,7 +26,6 @@ export function unsupportedReason() {
   return null;
 }
 
-// VAPID public keys are base64url; the browser needs a Uint8Array.
 function urlBase64ToUint8Array(base64String) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -45,13 +35,6 @@ function urlBase64ToUint8Array(base64String) {
   return out;
 }
 
-/**
- * Register the service worker and wait for it to be ACTIVE.
- *
- * `navigator.serviceWorker.ready` is the part that matters: `register()` resolves
- * as soon as the registration exists, but `pushManager.subscribe()` needs an
- * activated worker. Subscribing too early is a classic intermittent failure.
- */
 export async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return null;
 
@@ -70,7 +53,6 @@ export async function registerServiceWorker() {
   return ready;
 }
 
-/** Is push supported, configured server-side, and subscribed on this device? */
 export async function getPushState() {
   const reason = unsupportedReason();
   if (reason) {
@@ -105,21 +87,12 @@ export async function getPushState() {
     configured,
     subscribed,
     permission: Notification.permission,
-    // maxActions is what actually governs how many buttons a notification can
-    // show. Chrome desktop allows 2; assuming 3 silently drops the last one.
     maxActions: typeof Notification !== "undefined" && "maxActions" in Notification
       ? Notification.maxActions
       : 2,
   };
 }
 
-/**
- * Enable push for this browser. MUST be called from a real user gesture — the
- * permission prompt is never shown on page load.
- *
- * Returns a structured result rather than throwing, so the caller can always say
- * something specific about what went wrong.
- */
 export async function enablePush() {
   const reason = unsupportedReason();
   if (reason) {
@@ -170,9 +143,6 @@ export async function enablePush() {
     return { ok: false, reason: "subscribe-failed", detail: err.message };
   }
 
-  // ALWAYS re-POST, even when reusing. The browser rotates endpoints, the server
-  // row can be pruned after a 410, and a subscription the browser still holds may
-  // be one the server has never seen. Upsert by endpoint makes this idempotent.
   try {
     await http.post("/api/push/subscribe", { subscription: sub.toJSON() });
     log("stored on the server");
@@ -188,19 +158,36 @@ export async function disablePush() {
   if (!pushSupported()) return { ok: true };
   try {
     const reg = await navigator.serviceWorker.getRegistration();
-    if (reg) {
-      const sub = await reg.pushManager.getSubscription();
-      if (sub) {
-        const endpoint = sub.endpoint;
-        await sub.unsubscribe().catch(() => {});
-        await http.post("/api/push/unsubscribe", { endpoint }).catch(() => {});
-        log("unsubscribed");
-      }
+    if (!reg) return { ok: true };
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return { ok: true };
+
+    const endpoint = sub.endpoint;
+
+    try {
+      await http.post("/api/push/unsubscribe", { endpoint });
+    } catch (err) {
+      warn("could not remove the subscription from the server", err);
+      return {
+        ok: false,
+        reason: "server-unsubscribe-failed",
+        detail: err?.response?.data?.error || err.message,
+      };
     }
+
+    try {
+      await sub.unsubscribe();
+    } catch (err) {
+      warn("the browser would not release the subscription", err);
+      return { ok: false, reason: "browser-unsubscribe-failed", detail: err.message };
+    }
+
+    log("unsubscribed");
+    return { ok: true };
   } catch (err) {
     warn("disable failed", err);
+    return { ok: false, reason: "disable-failed", detail: err.message };
   }
-  return { ok: true };
 }
 
 export async function sendTestNotification() {
@@ -208,14 +195,6 @@ export async function sendTestNotification() {
   return data;
 }
 
-/**
- * Foreground bridge: while a window is focused the service worker suppresses the
- * OS notification and posts the payload here instead, so the user sees a single
- * in-app toast rather than being told the same thing twice.
- *
- * Also carries `action-result` messages, so tapping a notification button reports
- * back into the app when it is next looked at.
- */
 export function onForegroundPush(handler) {
   if (!("serviceWorker" in navigator)) return () => {};
   const listener = (event) => {
@@ -227,15 +206,6 @@ export function onForegroundPush(handler) {
   return () => navigator.serviceWorker.removeEventListener("message", listener);
 }
 
-/**
- * Register the service worker on load whenever it is supported.
- *
- * Previously this returned early unless permission was ALREADY granted, which
- * meant `navigator.serviceWorker.ready` never resolved for a first-time user and
- * the worker only appeared at the moment they clicked enable. Registering early
- * is harmless — a worker with no subscription receives nothing — and it means the
- * enable click has an activated worker waiting for it.
- */
 export async function ensureServiceWorker() {
   if (!pushSupported()) return;
   try {

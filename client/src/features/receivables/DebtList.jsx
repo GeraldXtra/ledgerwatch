@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, BellRing, Check, Coins, Inbox, Pencil, Trash2, Wallet } from "lucide-react";
-import { Avatar, EmptyState, KebabMenu, StatusPill } from "../../components/ui";
+import { EmptyState, KebabMenu, StatusPill } from "../../components/ui";
 import { ngn, shortDate } from "./format";
 import ProgressBar from "./ProgressBar";
 
@@ -7,14 +7,10 @@ const SORTABLE = [
   { key: "debtor", label: "Debtor" },
   { key: "amount", label: "Amount", align: "right" },
   { key: "balance", label: "Balance", align: "right" },
-  { key: "due", label: "Due date", align: "right" },
+  { key: "due", label: "Due date" },
   { key: "status", label: "Status" },
 ];
 
-/**
- * Debts table with row selection, balance + mini progress, sortable headers,
- * partial status, row click -> detail. Sorting is server-driven via onSort.
- */
 export default function DebtList({
   debts,
   sort,
@@ -29,9 +25,6 @@ export default function DebtList({
   onRemind,
   onRecordPayment,
   onAdd,
-  // Debt ids with a live crypto payment address. Shown as a chip so the ledger
-  // answers "which invoices are awaiting a stablecoin payment" at a glance,
-  // rather than requiring each row to be opened.
   cryptoIds,
 }) {
   if (!debts.length) {
@@ -89,6 +82,7 @@ export default function DebtList({
             const balance = debt.balance != null ? debt.balance : debt.amount;
             const isSel = selected && selected.has(debt._id);
             const hasCrypto = cryptoIds && cryptoIds.has(String(debt._id));
+            const cryptoSymbol = hasCrypto ? cryptoIds.get(String(debt._id)) : null;
             return (
               <tr key={debt._id} className={`clickable-row ${isSel ? "row-selected" : ""}`}>
                 <td data-label="" className="check-col" onClick={(e) => e.stopPropagation()}>
@@ -99,16 +93,24 @@ export default function DebtList({
                     onChange={() => onToggle(debt._id)}
                   />
                 </td>
-                <td data-label="Debtor" onClick={() => onOpen(debt)}>
+                <td data-label="Debtor" className="cell-title" onClick={() => onOpen(debt)}>
                   <div className="cell-lead">
-                    <Avatar name={debt.debtorName} />
                     <div>
-                      <div className="lead-name">{debt.debtorName}</div>
+                      <button type="button" className="lead-link">
+                        {debt.debtorName}
+                      </button>
                       <div className="lead-sub num">
                         {debt.debtorPhone || "no phone on file"}
                         {hasCrypto && (
-                          <span className="crypto-chip" title="Awaiting a crypto payment">
-                            <Coins size={11} /> USDC
+                          <span
+                            className="crypto-chip"
+                            title={
+                              cryptoSymbol
+                                ? `Awaiting a ${cryptoSymbol} payment`
+                                : "Awaiting a crypto payment"
+                            }
+                          >
+                            <Coins size={11} /> {cryptoSymbol || "Crypto"}
                           </span>
                         )}
                       </div>
@@ -124,13 +126,13 @@ export default function DebtList({
                     <ProgressBar paid={debt.amountPaid || 0} total={debt.amount} size="sm" />
                   </div>
                 </td>
-                <td data-label="Due date" align="right" className="ta-right num" onClick={() => onOpen(debt)}>
+                <td data-label="Due date" className="num" onClick={() => onOpen(debt)}>
                   {shortDate(debt.dueDate)}
                 </td>
-                <td data-label="Status" onClick={() => onOpen(debt)}>
+                <td data-label="Status" className="cell-badge" onClick={() => onOpen(debt)}>
                   <StatusPill status={status} />
                 </td>
-                <td data-label="" onClick={(e) => e.stopPropagation()}>
+                <td data-label="" className="cell-end" onClick={(e) => e.stopPropagation()}>
                   <div className="row" style={{ justifyContent: "flex-end" }}>
                     <KebabMenu
                       label={`Actions for ${debt.debtorName}`}

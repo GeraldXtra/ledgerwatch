@@ -1,17 +1,15 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, Eye, EyeOff, ShieldCheck, X } from "lucide-react";
-import { Button, Field, Input, Modal } from "../../components/ui";
+import { Button, Field, Input, Modal, PageHeader } from "../../components/ui";
 import { createWallet, encryptAndStore } from "./keystore";
 import { saveAddress } from "./walletApi";
+import { assessWalletPassword, MIN_WALLET_PASSWORD } from "./passwordStrength";
+import { useAuth } from "../../context/AuthContext";
 
-/**
- * Create a new wallet: generate → show the recovery phrase ONCE (with an explicit
- * "I've written it down" confirmation) → encrypt with a password and store only the
- * ciphertext. The plaintext key/phrase never leave this component's memory.
- */
 export default function CreateWalletModal({ onClose, onDone }) {
-  const [step, setStep] = useState("generate"); // generate → backup → password
-  const generated = useMemo(() => createWallet(), []); // in-memory only
+  const { user } = useAuth();
+  const [step, setStep] = useState("generate");
+  const generated = useMemo(() => createWallet(), []);
   const [written, setWritten] = useState(false);
   const [showPk, setShowPk] = useState(false);
   const [password, setPassword] = useState("");
@@ -20,12 +18,18 @@ export default function CreateWalletModal({ onClose, onDone }) {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
 
+  const strength = useMemo(
+    () => assessWalletPassword(password, { email: user?.email, name: user?.name }),
+    [password, user]
+  );
+
   const words = (generated.mnemonic || "").split(" ");
 
   async function finish(e) {
     e.preventDefault();
     setError("");
-    if (password.length < 8) return setError("Use at least 8 characters.");
+    const verdict = assessWalletPassword(password, { email: user?.email, name: user?.name });
+    if (!verdict.ok) return setError(verdict.reason);
     if (password !== confirm) return setError("Passwords do not match.");
     setBusy(true);
     try {
@@ -41,16 +45,18 @@ export default function CreateWalletModal({ onClose, onDone }) {
   }
 
   return (
-    <Modal label="Create wallet" onClose={onClose}>
-      <div className="row space-between">
-        <h3 className="section-title">Create a wallet</h3>
-        <Button variant="ghost" icon title="Close" onClick={onClose}>
-          <X size={15} />
-        </Button>
-      </div>
+    <Modal label="Create wallet" view="create" crumb="Create a wallet" onClose={onClose}>
+      <PageHeader
+        title="Create a wallet"
+        action={
+          <Button variant="ghost" icon title="Close" onClick={onClose}>
+            <X size={15} />
+          </Button>
+        }
+      />
 
       {step === "generate" && (
-        <div className="stack">
+        <div className="card stack">
           <div className="wallet-guarantee">
             <ShieldCheck size={16} />
             <span>
@@ -72,7 +78,7 @@ export default function CreateWalletModal({ onClose, onDone }) {
       )}
 
       {step === "backup" && (
-        <div className="stack">
+        <div className="card stack">
           <div className="wallet-warning">
             <AlertTriangle size={16} />
             <span>Anyone with this phrase can control the wallet. Never share it.</span>
@@ -118,7 +124,7 @@ export default function CreateWalletModal({ onClose, onDone }) {
       )}
 
       {step === "password" && (
-        <form className="stack" onSubmit={finish}>
+        <form className="card stack" onSubmit={finish}>
           <p className="muted small">
             Set a password to encrypt the wallet on this device. You will enter it to send.
           </p>
@@ -130,6 +136,14 @@ export default function CreateWalletModal({ onClose, onDone }) {
               autoFocus
               required
             />
+            <div className="caption muted" style={{ marginTop: 6 }}>
+              {password
+                ? strength.ok
+                  ? `${strength.label}. This password is never sent anywhere and cannot be reset.`
+                  : strength.reason
+                : `At least ${MIN_WALLET_PASSWORD} characters. Three or four unrelated words work well — ` +
+                  "this one encrypts your keys on this device and cannot be reset."}
+            </div>
           </Field>
           <Field label="Confirm password">
             <Input

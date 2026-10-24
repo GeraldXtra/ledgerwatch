@@ -8,18 +8,12 @@ function initialsOf(name) {
   return (first + last).toUpperCase() || "?";
 }
 
-// Deterministic tint per name so a debtor keeps their color across renders.
 function tintOf(name) {
   let h = 0;
   for (const ch of String(name || "")) h = (h * 31 + ch.charCodeAt(0)) % 997;
   return h % TINTS;
 }
 
-/**
- * Avatar. Renders `src` (a profile picture) when one is set and falls back to
- * coloured initials otherwise — the same fallback everywhere avatars appear.
- * `size`: "md" (28px) | "lg" (32px) | "xl" (88px), or an explicit pixel number.
- */
 export default function Avatar({ name, src, size = "md" }) {
   const px = typeof size === "number" ? size : { md: 28, lg: 32, xl: 88 }[size] || 28;
   const sized = typeof size === "number" || size === "xl";

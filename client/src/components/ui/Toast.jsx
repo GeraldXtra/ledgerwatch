@@ -10,11 +10,6 @@ const ICON = {
   error: <AlertCircle size={15} />,
 };
 
-/**
- * Lightweight toast system. Wrap the app once with <ToastProvider>, then call
- * `const toast = useToast()` and `toast(message, { type })`. Toasts auto-dismiss
- * and render through a portal so they float above everything.
- */
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
   const idRef = useRef(0);
@@ -61,15 +56,6 @@ export function ToastProvider({ children }) {
   );
 }
 
-/**
- * Stable no-op for consumers rendered outside the provider.
- *
- * Module-level ON PURPOSE. This used to be an inline `() => {}`, which is a NEW
- * function on every render — so any `useCallback(fn, [toast])` or
- * `useEffect(..., [toast])` downstream would see a changed dependency every
- * single render and re-run forever. A fallback meant to do nothing would have
- * become an infinite fetch loop.
- */
 const NOOP_TOAST = () => {};
 
 export function useToast() {

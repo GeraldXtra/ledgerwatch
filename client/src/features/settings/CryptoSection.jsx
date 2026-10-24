@@ -6,21 +6,31 @@ import { useAuth } from "../../context/AuthContext";
 import { fetchChains } from "../receivables/cryptoApi";
 import { getStoredAddress } from "../wallet/keystore";
 
-// Mirrors the clamps in server/src/services/cryptoSettings.service.js.
 const MIN_CONFIRMATIONS = 1;
-const MAX_CONFIRMATIONS = 200;
+const MAX_CONFIRMATIONS = 300;
 const MIN_EXPIRY_HOURS = 1;
 const MAX_EXPIRY_HOURS = 720;
 
-// The per-chain defaults, so the field can say what it is overriding rather than
-// showing a bare empty box. Mirrors server/src/config/derivation.js.
 const DEFAULT_CONFIRMATIONS = {
   11155111: 12,
   84532: 5,
   421614: 5,
   11155420: 5,
   80002: 5,
+
+  1: 12,
+  8453: 30,
+  10: 30,
+  42161: 240,
+  137: 135,
+  56: 135,
+  43114: 60,
 };
+
+function recommendedDepth(chainId) {
+  const v = DEFAULT_CONFIRMATIONS[chainId];
+  return Number.isFinite(v) ? v : null;
+}
 
 export default function CryptoSection() {
   const { user, updateProfile } = useAuth();
@@ -57,8 +67,6 @@ export default function CryptoSection() {
     setBusy(true);
     setError("");
     try {
-      // Blank means "my own wallet", which the server stores as null rather than
-      // as an empty string.
       const clean = { ...form, sweepDestination: form.sweepDestination.trim() || null };
       const confirmationOverrides = {};
       for (const [chainId, value] of Object.entries(overrides)) {
@@ -74,8 +82,10 @@ export default function CryptoSection() {
   }
 
   const lowered = chains.filter((ch) => {
+    const recommended = recommendedDepth(ch.chainId);
+    if (recommended == null) return false;
     const v = Number(overrides[ch.chainId]);
-    return Number.isFinite(v) && v > 0 && v < (DEFAULT_CONFIRMATIONS[ch.chainId] || 12);
+    return Number.isFinite(v) && v > 0 && v < recommended;
   });
 
   return (
@@ -198,7 +208,11 @@ export default function CryptoSection() {
                 min={MIN_CONFIRMATIONS}
                 max={MAX_CONFIRMATIONS}
                 value={overrides[ch.chainId] ?? ""}
-                placeholder={`${DEFAULT_CONFIRMATIONS[ch.chainId] || 12} (recommended)`}
+                placeholder={
+                  recommendedDepth(ch.chainId) != null
+                    ? `${recommendedDepth(ch.chainId)} (recommended)`
+                    : "the recommended depth"
+                }
                 onChange={(e) =>
                   setOverrides((o) => ({ ...o, [ch.chainId]: e.target.value }))
                 }

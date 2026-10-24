@@ -1,22 +1,7 @@
-/**
- * The crypto payment section of a reminder.
- *
- * SAFETY: this text is built PROGRAMMATICALLY and is never produced by the language
- * model. An address is 42 characters with no redundancy and no checksum a human
- * would notice — a single wrong character sends the money to an address nobody
- * controls, permanently. So the model writes the human paragraphs and this block is
- * concatenated afterwards, byte for byte identical in the AI and template paths.
- *
- * House style: warm, plain, and NO hyphens or dashes of any kind (the existing
- * reminder copy deliberately avoids them, so this matches).
- */
-
-/** e.g. "1,250,000" */
 function ngn(amount) {
   return Number(amount || 0).toLocaleString("en-NG", { maximumFractionDigits: 2 });
 }
 
-/** USDC always shows 2 decimals so the payer sees exactly what to send. */
 function usdc(amount) {
   return Number(amount || 0).toFixed(2);
 }
@@ -33,11 +18,6 @@ function expiryWords(expiresAt) {
   return `${date} at ${time}`;
 }
 
-/**
- * Plain-text block for WhatsApp and the template path.
- * @param {object} pa   PaymentAddress document
- * @param {object} chain  { name } from the chain config
- */
 function cryptoBlockText(pa, chain) {
   if (!pa || !chain) return "";
 
@@ -64,18 +44,6 @@ function cryptoBlockText(pa, chain) {
   return lines.join("\n");
 }
 
-/**
- * HTML block for the branded email: a copyable monospace address plus a QR the
- * payer can scan instead of transcribing 42 characters by hand.
- *
- * The QR is referenced by CONTENT ID, not as a `data:` URI. Gmail strips `data:`
- * images outright, so the previous data-URL version simply never appeared for
- * most recipients. `qrCid` must correspond to an inline attachment on the message.
- *
- * @param {object} pa      PaymentAddress document
- * @param {object} chain   { name } from the chain config
- * @param {string|null} qrCid  content id of the attached QR, or null for no QR
- */
 function cryptoBlockHtml(pa, chain, qrCid, hasLogo = false) {
   if (!pa || !chain) return "";
 
@@ -92,9 +60,6 @@ function cryptoBlockHtml(pa, chain, qrCid, hasLogo = false) {
            </td></tr>
            <tr><td style="padding-top:8px;font:400 12px ${FONT};color:#64748b" align="center">
              ${
-               /* The mark sits beside the caption rather than over the QR
-                  itself — anything overlapping the code risks the scan, and the
-                  point of the QR is that it reads first time. */
                hasLogo
                  ? `<img src="cid:ledgerwatch-logo" width="14" height="14" alt=""
                          style="display:inline-block;border:0;border-radius:3px;vertical-align:-3px;margin-right:5px" />`

@@ -1,12 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-const EASE = (t) => 1 - Math.pow(1 - t, 3); // ease-out cubic
+const EASE = (t) => 1 - Math.pow(1 - t, 3);
 
-/**
- * Animates a number from 0 (or the previous value) to `to` over ~600ms.
- * Purely visual. `format(n)` controls rendering (defaults to locale string).
- * Respects prefers-reduced-motion by jumping straight to the target.
- */
 export default function CountUp({ to = 0, duration = 600, format }) {
   const [display, setDisplay] = useState(to);
   const fromRef = useRef(0);

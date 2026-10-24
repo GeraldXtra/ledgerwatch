@@ -5,6 +5,7 @@ const {
   marketChat,
 } = require("../services/anthropic.service");
 const { formatAmount } = require("../utils/reminderTemplate");
+const { attachTotals } = require("../services/receivables.service");
 const {
   createWatch,
   getPortfolio,
@@ -15,61 +16,56 @@ const { supportedSymbols } = require("../services/coinMap");
 const { getPrices } = require("../services/coingecko.service");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-// A question for the agent is a sentence or two. Everything past this is paid
-// for per token at the provider and buys nothing; it was unbounded, and a
-// non-string body value reached `.trim()` and answered 500.
 const MAX_PROMPT_CHARS = 2000;
 
-/**
- * Deterministic, no-AI answer over the user's debts. Never crashes.
- * Summarizes top debtor, total outstanding, and the most overdue pending debt.
- */
 function computeFallback(debts) {
-  const pending = debts.filter((d) => d.status === "pending");
+  const open = debts.filter((d) => (d.balance || 0) > 0 && d.status !== "paid");
 
-  if (pending.length === 0) {
-    return "You have no pending debts. Everyone is settled up.";
+  if (open.length === 0) {
+    return "You have no outstanding invoices. Everyone is settled up.";
   }
 
-  const totalOutstanding = pending.reduce((sum, d) => sum + (d.amount || 0), 0);
+  const byCurrency = new Map();
+  for (const d of open) {
+    const cur = d.currency || "NGN";
+    byCurrency.set(cur, (byCurrency.get(cur) || 0) + (d.balance || 0));
+  }
+  const totals = [...byCurrency.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([cur, sum]) => formatAmount(sum, cur))
+    .join(" and ");
 
-  const topByAmount = [...pending].sort((a, b) => b.amount - a.amount)[0];
+  const topByBalance = [...open].sort((a, b) => (b.balance || 0) - (a.balance || 0))[0];
 
   const now = Date.now();
-  const overdue = pending
+  const overdue = open
     .filter((d) => new Date(d.dueDate).getTime() < now)
     .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
 
   const lines = [];
+  lines.push(`You have ${open.length} unpaid invoice(s) with ${totals} still outstanding.`);
   lines.push(
-    `You have ${pending.length} pending debt(s) totalling ${formatAmount(
-      totalOutstanding,
-      topByAmount.currency
-    )}.`
-  );
-  lines.push(
-    `Owes the most: ${topByAmount.debtorName} — ${formatAmount(
-      topByAmount.amount,
-      topByAmount.currency
-    )}.`
+    `Owes the most: ${topByBalance.debtorName} — ${formatAmount(
+      topByBalance.balance,
+      topByBalance.currency
+    )} of ${formatAmount(topByBalance.amount, topByBalance.currency)}.`
   );
   if (overdue.length) {
     const worst = overdue[0];
     const days = Math.floor((now - new Date(worst.dueDate).getTime()) / DAY_MS);
     lines.push(
       `Most overdue: ${worst.debtorName} (${days} day(s) past due, ${formatAmount(
-        worst.amount,
+        worst.balance,
         worst.currency
-      )}).`
+      )} outstanding).`
     );
   } else {
-    lines.push("None of your pending debts are overdue yet.");
+    lines.push("None of your unpaid invoices are overdue yet.");
   }
 
   return lines.join(" ");
 }
 
-// POST /api/ai/receivables-query
 async function receivablesQuery(req, res) {
   try {
     const question = String((req.body && req.body.question) || "").slice(0, MAX_PROMPT_CHARS);
@@ -77,15 +73,17 @@ async function receivablesQuery(req, res) {
       return res.status(400).json({ error: "question is required" });
     }
 
-    const debts = await Debt.find({ userId: req.user._id });
+    const raw = await Debt.find({ userId: req.user._id });
+    const debts = await attachTotals(req.user._id, raw);
 
-    // Compact summary for the AI (avoid leaking internal fields).
     const summary = debts.map((d) => ({
       debtorName: d.debtorName,
       amount: d.amount,
+      amountPaid: d.amountPaid,
+      balance: d.balance,
       currency: d.currency,
       dueDate: d.dueDate,
-      status: d.status,
+      status: d.displayStatus || d.status,
       remindedCount: (d.history || []).filter((h) => h.event === "reminded").length,
     }));
 
@@ -101,7 +99,6 @@ async function receivablesQuery(req, res) {
   }
 }
 
-// Execute a list of watch intents; returns { created, notes }.
 async function executeWatchIntents(userId, intents, mode = "paper") {
   const created = [];
   const notes = [];
@@ -120,10 +117,6 @@ async function executeWatchIntents(userId, intents, mode = "paper") {
   return { created, notes };
 }
 
-// POST /api/ai/chat  body: { message }
-// Market agent: parses "watch ..." commands into intents the backend executes,
-// and answers portfolio questions. Falls back to a basic parser + computed
-// summary with NO AI. Never crashes.
 async function chat(req, res) {
   try {
     const message = String((req.body && req.body.message) || "").slice(0, MAX_PROMPT_CHARS);
@@ -131,7 +124,6 @@ async function chat(req, res) {
       return res.status(400).json({ error: "message is required" });
     }
 
-    // Build context from the user's real data.
     const [watches, portfolio] = await Promise.all([
       Watch.find({ userId: req.user._id, active: true, mode: req.user.tradingMode === "live" ? "live" : "paper" }),
       getPortfolio(req.user._id, req.user.tradingMode === "live" ? "live" : "paper"),
@@ -151,7 +143,6 @@ async function chat(req, res) {
       supportedSymbols: supportedSymbols(),
     };
 
-    // Try the AI agent first.
     const aiResult = await marketChat(message, context);
     if (aiResult && typeof aiResult === "object") {
       const { created, notes } = await executeWatchIntents(
@@ -169,7 +160,6 @@ async function chat(req, res) {
       return res.json({ reply: reply.trim(), createdWatches: created, source: "ai" });
     }
 
-    // No-AI fallback.
     const intents = parseWatchCommand(message);
     if (intents.length) {
       const { created, notes } = await executeWatchIntents(req.user._id, intents, req.user.tradingMode === "live" ? "live" : "paper");
@@ -181,7 +171,6 @@ async function chat(req, res) {
       return res.json({ reply, createdWatches: created, source: "computed" });
     }
 
-    // Otherwise treat it as a portfolio/status question.
     const answer = await buildPortfolioSummaryText(req.user._id);
     return res.json({ reply: answer, createdWatches: [], source: "computed" });
   } catch (err) {

@@ -1,56 +1,168 @@
-import { useEffect, useRef } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
+import Breadcrumbs from "./Breadcrumbs";
 
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-/**
- * THE OPEN MODALS, OUTERMOST FIRST (LW-039).
- *
- * Every modal listened for Escape on `window`, and two listeners on the same
- * target cannot stop each other, so with a sweep running inside an invoice
- * dialog one Escape reached both: the sweep modal correctly ignored it, and the
- * invoice dialog behind it closed and unmounted the whole subtree while the
- * transactions kept broadcasting. Only the modal on top answers Escape now.
- */
 const openModals = [];
 
-/**
- * Modal dialog: overlay fade + panel rise. Closes on backdrop click and Esc.
- * Focus management: moves focus into the panel on open, traps Tab inside it,
- * and restores focus to the previously focused element on close.
- * `label` names the dialog for assistive tech.
- */
-export default function Modal({ onClose, label = "Dialog", size = "md", children }) {
+const WorkspaceContext = createContext(null);
+
+const TrailContext = createContext(null);
+
+export function TrailProvider({ trail, children }) {
+  return <TrailContext.Provider value={trail}>{children}</TrailContext.Provider>;
+}
+
+export function WorkspaceProvider({ children }) {
+  const [pane, setPane] = useState(null);
+  const [entries, setEntries] = useState([]);
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+
+  const add = useCallback((entry) => {
+    setEntries((list) => [...list.filter((e) => e.id !== entry.id), entry]);
+  }, []);
+  const remove = useCallback((id) => {
+    setEntries((list) => list.filter((e) => e.id !== id));
+  }, []);
+  const update = useCallback((id, patch) => {
+    setEntries((list) => {
+      let changed = false;
+      const next = list.map((e) => {
+        if (e.id !== id) return e;
+        if (Object.keys(patch).every((k) => e[k] === patch[k])) return e;
+        changed = true;
+        return { ...e, ...patch };
+      });
+      return changed ? next : list;
+    });
+  }, []);
+  const closeAbove = useCallback((id) => {
+    const list = entriesRef.current;
+    const at = list.findIndex((e) => e.id === id);
+    if (at === -1) return;
+    list
+      .slice(at + 1)
+      .reverse()
+      .forEach((e) => e.back());
+  }, []);
+
+  const value = useMemo(
+    () => ({ pane, setPane, entries, add, remove, update, closeAbove }),
+    [pane, entries, add, remove, update, closeAbove]
+  );
+
+  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
+}
+
+export function useWorkspace() {
+  return useContext(WorkspaceContext);
+}
+
+function useDetailEntry({ back, view, params, crumb, active = true }) {
+  const ws = useContext(WorkspaceContext);
+  const trail = useContext(TrailContext);
+  const idRef = useRef(null);
+  if (idRef.current === null) idRef.current = {};
+  const backRef = useRef(back);
+  backRef.current = back;
+
+  const name = view || "page";
+  const paramsKey = params ? JSON.stringify(params) : "";
+  const label = crumb || "";
+  const infoRef = useRef(null);
+  infoRef.current = { view: name, paramsKey, crumb: label };
+
+  const add = ws ? ws.add : null;
+  const remove = ws ? ws.remove : null;
+  const update = ws ? ws.update : null;
+
+  useLayoutEffect(() => {
+    if (!add || !active) return undefined;
+    const id = idRef.current;
+    add({ id, back: () => backRef.current && backRef.current(), ...infoRef.current });
+    return () => remove(id);
+  }, [add, remove, active]);
+
+  useLayoutEffect(() => {
+    if (!update || !active) return;
+    update(idRef.current, { view: name, paramsKey, crumb: label });
+  }, [update, active, name, paramsKey, label]);
+
+  const entries = ws ? ws.entries : [];
+  const top = entries[entries.length - 1];
+  const at = entries.findIndex((e) => e.id === idRef.current);
+  const hidden = at !== -1 && top && top.id !== idRef.current;
+
+  const crumbs =
+    ws && trail
+      ? [
+          ...trail.map((t) => ({ label: t.label, to: t.to })),
+          ...(at === -1 ? entries : entries.slice(0, at)).map((e) => ({
+            label: e.crumb,
+            onClick: () => ws.closeAbove(e.id),
+          })),
+          { label },
+        ]
+      : null;
+
+  return { ws, hidden, crumbs };
+}
+
+export function DetailPane({ onBack, active = true, view, params, crumb, label, children }) {
+  const { ws, hidden, crumbs } = useDetailEntry({ back: onBack, view, params, crumb, active });
+
+  if (!ws || !ws.pane || !active) return null;
+  return createPortal(
+    <section className="pv" aria-label={label} hidden={hidden}>
+      {crumbs && <Breadcrumbs items={crumbs} />}
+      {children}
+    </section>,
+    ws.pane
+  );
+}
+
+export default function Modal({
+  onClose,
+  label = "Dialog",
+  size = "md",
+  view,
+  params,
+  crumb,
+  children,
+}) {
   const panelRef = useRef(null);
-  // The opener is captured during the FIRST RENDER, before anything in the
-  // dialog has taken focus. Captured in the effect it would have recorded an
-  // autofocused input inside the dialog, and "restored" focus to a detached
-  // node on close.
   const previousFocusRef = useRef(null);
   if (previousFocusRef.current === null) {
     previousFocusRef.current = typeof document !== "undefined" ? document.activeElement : null;
   }
 
-  // Move focus in on open; restore it on unmount.
-  //
-  // The PANEL takes focus, not the first control. Focusing the first control
-  // drew a focus ring on whatever happened to come first (a close button, a
-  // CSV button, a segment) every time a dialog opened on a phone, which read
-  // as a highlighted choice nobody had made. The Tab trap below still keeps
-  // keyboard users inside the dialog, and their first Tab lands on the first
-  // control as before.
+  const { ws, hidden, crumbs } = useDetailEntry({
+    back: onClose,
+    view,
+    params,
+    crumb: crumb || label,
+  });
+
   useEffect(() => {
     const panel = panelRef.current;
-    // A form that autofocuses its first field has already taken focus by the
-    // time this runs, and keeps it.
     if (panel && !panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
     return () => {
       const prev = previousFocusRef.current;
-      if (prev && typeof prev.focus === "function") prev.focus();
+      if (prev && typeof prev.focus === "function" && document.contains(prev)) {
+        prev.focus({ preventScroll: true });
+      }
     };
   }, []);
 
-  // Register on the stack for the life of this modal.
   useEffect(() => {
     const id = {};
     openModals.push(id);
@@ -66,53 +178,30 @@ export default function Modal({ onClose, label = "Dialog", size = "md", children
       if (e.key === "Escape") {
         const top = openModals[openModals.length - 1];
         const mine = panelRef.current && panelRef.current.__modalId;
-        if (top && mine && top !== mine) return; // a modal above this one owns Escape
+        if (top && mine && top !== mine) return;
         onClose();
-        return;
-      }
-      // Trap Tab within the panel.
-      if (e.key === "Tab" && panelRef.current) {
-        const focusables = Array.from(
-          panelRef.current.querySelectorAll(FOCUSABLE)
-        ).filter((el) => el.offsetParent !== null);
-        if (!focusables.length) {
-          e.preventDefault();
-          return;
-        }
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        const active = document.activeElement;
-        // The panel itself holds focus right after opening; Shift+Tab from it
-        // must wrap to the last control, not escape to the page underneath.
-        if (
-          e.shiftKey &&
-          (active === first || active === panelRef.current || !panelRef.current.contains(active))
-        ) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && active === last) {
-          e.preventDefault();
-          first.focus();
-        }
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div
-        className={`modal-panel stack ${size === "lg" ? "modal-lg" : ""}`.trim()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={label}
-        tabIndex={-1}
-        ref={panelRef}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {children}
-      </div>
-    </div>
+  if (typeof document === "undefined") return null;
+
+  const panel = (
+    <section
+      className={`pv${size === "lg" ? " pv-lg" : ""}`}
+      aria-label={label}
+      tabIndex={-1}
+      ref={panelRef}
+      hidden={hidden}
+    >
+      {crumbs && <Breadcrumbs items={crumbs} />}
+      {children}
+    </section>
   );
+
+  if (!ws) return createPortal(<div className="ws-solo">{panel}</div>, document.body);
+  if (!ws.pane) return null;
+  return createPortal(panel, ws.pane);
 }

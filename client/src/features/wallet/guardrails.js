@@ -1,41 +1,9 @@
-/**
- * SPENDING GUARDRAILS for live trading.
- *
- * These did not previously exist anywhere in the app. Live trading without them
- * means a single mistyped amount, or a runaway loop, can drain a wallet with
- * nothing in the way — so they are a prerequisite for live mode, not a polish
- * item.
- *
- * ENFORCED ON THE CLIENT ONLY. This said "AND on the server when the trade is
- * recorded, because a client-side-only limit is a suggestion", which was never
- * true: `recordTx` validates the shape of a hash and an address and nothing
- * else, and it runs AFTER the transaction is broadcast, so it could not gate
- * anything even if it checked. `assertCanTradeLive` is called from exactly one
- * place and only guards setting the mode string.
- *
- * So by this file's own standard these limits ARE a suggestion. They stop an
- * honest mistake, which is most mistakes, and they stop nothing else. Anyone
- * relying on them should know which of the two they are getting. Making the
- * claim true is a server side check on a route that does not yet exist; until
- * then the comment says what the code does.
- *
- * Amounts are in the STABLECOIN the trade is denominated in, which is the live
- * cash balance. That is the DOLLAR leg of the trade, whichever side it sits on:
- * on a sell the caller must convert, because passing the asset quantity meant a
- * cap of 100 was compared against a count of Bitcoin. Native gas is handled
- * separately by preflightGas.
- */
-
-/**
- * Defaults. Mainnet is materially stricter than testnet: testnet funds are free
- * and exist to be experimented with, mainnet funds are somebody's money.
- */
 export const DEFAULT_LIMITS = {
   testnet: {
-    perTrade: 1000, // stablecoin units
+    perTrade: 1000,
     perDay: 5000,
     perSession: 2000,
-    minNativeFloor: 0.0005, // never spend the last of the gas money
+    minNativeFloor: 0.0005,
     maxPriceImpactPct: 5,
   },
   mainnet: {
@@ -49,10 +17,14 @@ export const DEFAULT_LIMITS = {
 
 export function limitsFor(chain, overrides) {
   const base = chain && !chain.testnet ? DEFAULT_LIMITS.mainnet : DEFAULT_LIMITS.testnet;
-  return { ...base, ...(overrides || {}) };
+  const clean = {};
+  for (const [key, value] of Object.entries(overrides || {})) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) clean[key] = n;
+  }
+  return { ...base, ...clean };
 }
 
-// Per-session spend lives in memory only — a session ends when the tab does.
 let sessionSpend = 0;
 export function sessionSpent() {
   return sessionSpend;
@@ -60,19 +32,7 @@ export function sessionSpent() {
 export function recordSessionSpend(amount) {
   sessionSpend += Number(amount) || 0;
 }
-export function resetSessionSpend() {
-  sessionSpend = 0;
-}
 
-/**
- * Check a proposed trade against every cap.
- *
- * @param {number} amount        stablecoin units being spent
- * @param {number} spentToday    stablecoin units already spent in the last 24h
- * @param {number} impactPct     measured price impact
- * @param {bigint} nativeAfterWei native balance that would remain after gas
- * @returns {{ok:boolean, blocks:string[], warnings:string[], needsExtraConfirm:boolean}}
- */
 export function checkTrade({ amount, limits, spentToday = 0, impactPct = 0, nativeAfterWei = null }) {
   const blocks = [];
   const warnings = [];
@@ -82,7 +42,7 @@ export function checkTrade({ amount, limits, spentToday = 0, impactPct = 0, nati
 
   if (spend > limits.perTrade) {
     blocks.push(
-      `That is over the ${limits.perTrade} per trade cap. Lower the amount, or raise the cap in Settings.`
+      `That is over the ${limits.perTrade} per trade cap, which is fixed for this network. Split it into smaller trades, or lower the amount.`
     );
   }
 
@@ -101,8 +61,6 @@ export function checkTrade({ amount, limits, spentToday = 0, impactPct = 0, nati
     );
   }
 
-  // Leaving a wallet with no gas is a soft brick: the tokens are there and
-  // nothing can be done with them.
   if (nativeAfterWei !== null) {
     const floorWei = BigInt(Math.round(limits.minNativeFloor * 1e18));
     if (nativeAfterWei < floorWei) {
@@ -112,8 +70,6 @@ export function checkTrade({ amount, limits, spentToday = 0, impactPct = 0, nati
     }
   }
 
-  // Impact does not block outright — a thin pool is a legitimate choice if the
-  // user genuinely means it — but it must be acknowledged explicitly.
   const needsExtraConfirm = impactPct > limits.maxPriceImpactPct;
   if (needsExtraConfirm) {
     warnings.push(

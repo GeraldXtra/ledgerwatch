@@ -7,22 +7,10 @@ const {
   generateReminderForDebt,
   dispatchReminder,
 } = require("../services/reminder.service");
-const {
-  attachTotals,
-  withDerived,
-  recomputeDebtStatus,
-} = require("../services/receivables.service");
+const { attachTotals, withDerived, recomputeDebtStatus, paidForDebt } = require("../services/receivables.service");
 const { resyncActivePaymentAddress } = require("../services/paymentAddress.service");
 const { onInvoiceSettled } = require("../services/settlement.service");
 
-// ---- validation helpers ---------------------------------------------------
-
-/**
- * The text fields, with the longest value each may hold. A name is a name and
- * a note is a paragraph; anything longer is a payload, and every one of these
- * ends up in an email, a WhatsApp message, a statement and a push notification.
- * An object where a string was expected used to reach Mongoose and answer 500.
- */
 const TEXT_LIMITS = { debtorName: 120, debtorPhone: 40, debtorEmail: 254, note: 2000 };
 
 function cleanText(body) {
@@ -72,9 +60,6 @@ function validateDebtFields(body, { partial = false } = {}) {
   return errors;
 }
 
-// ---- controllers ----------------------------------------------------------
-
-// POST /api/debts
 async function create(req, res) {
   try {
     const errors = validateDebtFields(req.body || {});
@@ -104,8 +89,6 @@ async function create(req, res) {
   }
 }
 
-// GET /api/debts?status=&sort=&search=&from=&to=
-// Debts come back with derived amountPaid / balance / displayStatus.
 async function list(req, res) {
   try {
     const filter = { userId: req.user._id };
@@ -120,8 +103,6 @@ async function list(req, res) {
       filter.$or = [{ debtorName: rx }, { debtorPhone: rx }];
     }
     if (from || to) {
-      // An unparseable date used to become `Invalid Date` inside the query and
-      // answer 500; it is a 400 with the reason now.
       const fromDate = from ? new Date(String(from)) : null;
       const toDate = to ? new Date(String(to)) : null;
       if ((fromDate && Number.isNaN(fromDate.getTime())) || (toDate && Number.isNaN(toDate.getTime()))) {
@@ -135,7 +116,6 @@ async function list(req, res) {
     const raw = await Debt.find(filter).sort({ createdAt: -1 });
     let debts = await attachTotals(req.user._id, raw);
 
-    // Sort in JS so balance/status (derived) are sortable too.
     const dir = 1;
     const cmp = {
       amount: (a, b) => b.amount - a.amount,
@@ -154,7 +134,6 @@ async function list(req, res) {
   }
 }
 
-// GET /api/debts/:id
 async function getOne(req, res) {
   try {
     const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
@@ -162,11 +141,14 @@ async function getOne(req, res) {
     const [withPaid] = await attachTotals(req.user._id, [debt]);
     return res.json({ debt: withPaid });
   } catch (err) {
-    return res.status(404).json({ error: "Debt not found" });
+    if (err && err.name === "CastError") {
+      return res.status(404).json({ error: "Debt not found" });
+    }
+    console.error("getOne debt error:", err.message);
+    return res.status(500).json({ error: "Could not load that invoice just now." });
   }
 }
 
-// PATCH /api/debts/:id
 async function update(req, res) {
   try {
     const errors = validateDebtFields(req.body || {}, { partial: true });
@@ -195,24 +177,8 @@ async function update(req, res) {
     }
     const amountChanged = Number(debt.amount) !== amountBefore;
 
-    /**
-     * LW-017. Every other path that changes what an invoice owes calls
-     * `resyncActivePaymentAddress`; this one did not. So the crypto address
-     * kept the quote it was issued with: raise a 100,000 naira invoice to
-     * 10,000,000 and the address still asked for 62.50 USDC, and a payer who
-     * sent exactly that settled the whole thing. The reminder and the QR both
-     * read that stale figure. Recompute and resync whenever the amount moves.
-     *
-     * An amount below what has already been paid is refused rather than
-     * silently producing a negative balance and a "paid" status that no
-     * payment justified.
-     */
     if (amountChanged) {
-      const agg = await Payment.aggregate([
-        { $match: { debtId: debt._id } },
-        { $group: { _id: null, paid: { $sum: "$amount" } } },
-      ]);
-      const paid = agg.length ? agg[0].paid : 0;
+      const paid = await paidForDebt(debt._id);
       if (Number(debt.amount) < paid) {
         return res.status(400).json({
           error: `The amount cannot be lower than the ${paid.toLocaleString("en-NG")} already recorded as paid on this invoice.`,
@@ -224,8 +190,8 @@ async function update(req, res) {
     await debt.save();
 
     if (amountChanged) {
-      const totalPaid = await recomputeDebtStatus(debt); // status may flip either way
-      await resyncActivePaymentAddress(debt._id); // the crypto quote follows the new balance
+      const totalPaid = await recomputeDebtStatus(debt);
+      await resyncActivePaymentAddress(debt._id);
       return res.json({ debt: withDerived(debt, totalPaid) });
     }
 
@@ -236,16 +202,51 @@ async function update(req, res) {
   }
 }
 
-// DELETE /api/debts/:id  (also deletes its reminders)
 async function remove(req, res) {
   try {
     const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
+    const addressesHeld = await PaymentAddress.find({
+      debtId: debt._id,
+      userId: req.user._id,
+    }).lean();
+
+    const holding = addressesHeld.filter((pa) => {
+      const seen = (pa.observed || [])
+        .filter((o) => o.status === "confirmed")
+        .reduce((sum, o) => sum + Number(o.value || 0) / 10 ** (pa.tokenDecimals || 6), 0);
+      const swept = (pa.sweeps || []).reduce((sum, x) => sum + (Number(x.amountUsdc) || 0), 0);
+      return seen - swept > 1 / 10 ** (pa.tokenDecimals || 6);
+    });
+
+    const force = String(req.query.force || "").toLowerCase() === "true";
+    if (holding.length && !force) {
+      return res.status(409).json({
+        error:
+          "This invoice has a payment address that is still holding money. Sweep it first, " +
+          "or the record of which address it is will be gone.",
+        code: "unswept_funds",
+        addresses: holding.map((pa) => ({
+          address: pa.address,
+          chainId: pa.chainId,
+          tokenSymbol: pa.tokenSymbol,
+          derivationIndex: pa.derivationIndex,
+        })),
+      });
+    }
+
+    if (holding.length && force) {
+      console.warn(
+        `[debts] invoice ${debt._id} deleted with unswept funds, forced by the owner. ` +
+          holding
+            .map((pa) => `${pa.address} (chain ${pa.chainId}, index ${pa.derivationIndex})`)
+            .join("; ")
+      );
+    }
+
     await Reminder.deleteMany({ debtId: debt._id, userId: req.user._id });
     await Payment.deleteMany({ debtId: debt._id, userId: req.user._id });
-    // Payment addresses belong to the invoice. Left behind, the watch pass keeps
-    // scanning them for an invoice that no longer exists and could never settle.
     await PaymentAddress.deleteMany({ debtId: debt._id, userId: req.user._id });
     await debt.deleteOne();
 
@@ -256,36 +257,16 @@ async function remove(req, res) {
   }
 }
 
-// PATCH /api/debts/:id/paid  (settle in full: records a payment for the remaining
-// balance so totals/analytics stay coherent, then marks paid + cancels reminders)
 async function markPaid(req, res) {
   try {
     const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
-    const agg = await Payment.aggregate([
-      { $match: { debtId: debt._id } },
-      { $group: { _id: null, paid: { $sum: "$amount" } } },
-    ]);
-    const paidSoFar = agg.length ? agg[0].paid : 0;
+    const paidSoFar = await paidForDebt(debt._id);
     const balance = (debt.amount || 0) - paidSoFar;
 
     let payment = null;
     if (balance > 0) {
-      /**
-       * IDEMPOTENT, AT THE DATABASE.
-       *
-       * Two of these requests at once, a double tap on a phone or a retry
-       * after a timeout, both read the same `paidSoFar`, both computed the same
-       * balance, and both inserted: a 500,000 naira invoice credited a million.
-       * Manual payments carry no transaction hash, so the unique index on
-       * txHash never protected them.
-       *
-       * A deterministic key in that same field does. It is built from the debt
-       * and the balance at the moment of marking, so two concurrent attempts
-       * collide and the second is told the first already did it, while a
-       * legitimate later mark after the balance has changed gets a new key.
-       */
       const key = `markpaid:${debt._id}:${Math.round(paidSoFar * 100)}`;
       try {
         payment = await Payment.create({
@@ -305,26 +286,28 @@ async function markPaid(req, res) {
       }
     }
 
-    const totalPaid = await recomputeDebtStatus(debt); // sets paid + cancels reminders
-    // Force-settling closes any active crypto address, so it stops quoting an
-    // amount for an invoice that is already paid.
+    const totalPaid = await recomputeDebtStatus(debt);
     await resyncActivePaymentAddress(debt._id);
 
-    /**
-     * THE SAME EVENT THE OTHER TWO WRITERS FIRE. This was the third writer of
-     * Payment and the only one that fired nothing (LW-015), so force settling
-     * an invoice sent no receipt and no push. One event, three consequences,
-     * from every path that closes an invoice.
-     */
     if (payment) {
-      await onInvoiceSettled({
+      const forReceipt = { ...payment.toObject(), txHash: null };
+
+      const settled = await onInvoiceSettled({
         debt,
-        payment,
+        payment: forReceipt,
         method: "bank",
         creditNgn: balance,
         totalPaid,
         fullyPaid: true,
-      }).catch(() => {});
+      }).catch((err) => ({ emailed: false, reason: err && err.message }));
+
+      if (settled && !settled.emailed) {
+        console.warn(
+          `[debts] no receipt sent for debt ${debt._id} after it was marked paid: ${
+            settled.reason || "unknown reason"
+          }`
+        );
+      }
     }
 
     return res.json({ debt: withDerived(debt, totalPaid) });
@@ -334,7 +317,6 @@ async function markPaid(req, res) {
   }
 }
 
-// GET /api/debts/:id/reminders
 async function listReminders(req, res) {
   try {
     const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
@@ -352,26 +334,20 @@ async function listReminders(req, res) {
   }
 }
 
-// POST /api/debts/:id/remind  (generate a reminder now, on demand)
 async function remind(req, res) {
   try {
     const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
-    // Shared reminder engine — identical to the automation pass.
     const result = await generateReminderForDebt(debt, req.user);
     return res.status(201).json(result);
   } catch (err) {
-    // A settled invoice answers 409 with the reason (LW-018), not a 500.
     if (err && err.status) return res.status(err.status).json({ error: err.message });
     console.error("remind error:", err.message);
     return res.status(500).json({ error: "Failed to generate reminder" });
   }
 }
 
-// POST /api/debts/:id/send  { channels: ["whatsapp","email"] }
-// Generates a reminder and dispatches it over the requested channels, recording a
-// per-channel delivery. Degrades gracefully when a provider is not configured.
 async function send(req, res) {
   try {
     const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
@@ -387,15 +363,6 @@ async function send(req, res) {
     }
 
     const result = await generateReminderForDebt(debt, req.user);
-    /**
-     * force: a PERSON pressed send on this exact debt.
-     *
-     * The cadence guard exists to stop the automation emailing a client every
-     * time the loop runs. It should never override a deliberate human action:
-     * without this, a second manual send inside the cadence window came back
-     * "skipped: already sent this cadence window" and looked like email was
-     * broken, which is precisely how it was misread.
-     */
     const deliveries = await dispatchReminder(result.reminder, debt, req.user, {
       channels,
       force: true,

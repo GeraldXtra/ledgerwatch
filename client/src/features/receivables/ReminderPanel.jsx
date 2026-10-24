@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Mail, MessageCircle, Send, TriangleAlert, X } from "lucide-react";
 import http from "../../api/http";
-import { Button, Modal, SkeletonLines, StatusPill, useToast } from "../../components/ui";
+import { Button, Modal, PageHeader, SkeletonLines, StatusPill, useToast } from "../../components/ui";
 
 function formatDateTime(value) {
   const d = new Date(value);
@@ -9,7 +9,6 @@ function formatDateTime(value) {
   return d.toLocaleString();
 }
 
-// Human copy for a per-channel delivery status.
 const DELIVERY_LABEL = {
   sent: "Sent",
   failed: "Failed",
@@ -29,35 +28,28 @@ function DeliveryChip({ delivery }) {
   );
 }
 
-/**
- * Reminder modal for a single debt: the freshly generated message, provider send
- * actions (WhatsApp / Email / Both) plus the always-available wa.me link, and the
- * reminder log with per-channel delivery records.
- * `result` is the response from POST /remind. `debt` is the target debt.
- */
-export default function ReminderPanel({ debt, result, onClose }) {
+export default function ReminderPanel({ debt, result, onClose, inline = false }) {
   const toast = useToast();
   const [reminders, setReminders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(null); // which channel-set is in flight
+  const [sending, setSending] = useState(null);
+  const [logError, setLogError] = useState("");
 
   const hasEmail = Boolean(debt.debtorEmail);
-  /**
-   * Reserved, non-routable domains (RFC 2606 / RFC 6761). Mail to these is
-   * accepted at the SMTP handshake and bounced afterwards, so it records as
-   * "sent" while never arriving — the worst of both outcomes. Mirrors the same
-   * check on the server.
-   */
   const emailUndeliverable =
     hasEmail && /@([^@]*\.)?(example|test|invalid|localhost)(\.[a-z]{2,})?$/i.test(debt.debtorEmail);
+
+  const LOG_LOAD_FAILED =
+    "The reminder history could not be loaded, so what is shown below may be incomplete. This is a connection problem, not a statement that no reminder has been sent.";
 
   async function loadReminders() {
     setLoading(true);
     try {
       const { data } = await http.get(`/api/debts/${debt._id}/reminders`);
       setReminders(data.reminders);
-    } catch {
-      setReminders([]);
+      setLogError("");
+    } catch (err) {
+      setLogError(err?.response?.data?.error || LOG_LOAD_FAILED);
     } finally {
       setLoading(false);
     }
@@ -69,9 +61,12 @@ export default function ReminderPanel({ debt, result, onClose }) {
       setLoading(true);
       try {
         const { data } = await http.get(`/api/debts/${debt._id}/reminders`);
-        if (active) setReminders(data.reminders);
-      } catch {
-        if (active) setReminders([]);
+        if (active) {
+          setReminders(data.reminders);
+          setLogError("");
+        }
+      } catch (err) {
+        if (active) setLogError(err?.response?.data?.error || LOG_LOAD_FAILED);
       } finally {
         if (active) setLoading(false);
       }
@@ -79,11 +74,8 @@ export default function ReminderPanel({ debt, result, onClose }) {
     return () => {
       active = false;
     };
-    // reload when a new reminder was generated (result changes)
   }, [debt._id, result]);
 
-  // POST /send — dispatch via the configured providers. Degrades gracefully:
-  // an unconfigured provider comes back "skipped", surfaced as an info toast.
   async function send(channels, label) {
     setSending(label);
     try {
@@ -96,9 +88,6 @@ export default function ReminderPanel({ debt, result, onClose }) {
       if (sent.length) {
         toast(`Sent via ${sent.map((d) => d.channel).join(" & ")}.`, { type: "success" });
       }
-      // Accepted by the mail server but it will not arrive — a reserved recipient
-      // domain, typically. Reported separately from success, because it looks
-      // exactly like success otherwise.
       sent
         .filter((d) => d.warning)
         .forEach((d) => toast(d.warning, { type: "error", duration: 9000 }));
@@ -118,9 +107,6 @@ export default function ReminderPanel({ debt, result, onClose }) {
       }
       await loadReminders();
     } catch (err) {
-      // No server response at all means the request never completed: a timeout,
-      // a dropped connection, or the server restarting mid-send. Say which,
-      // rather than the bare "Send failed" that explained nothing.
       const served = err?.response?.data?.error;
       toast(
         served ||
@@ -134,22 +120,29 @@ export default function ReminderPanel({ debt, result, onClose }) {
     }
   }
 
-  return (
-    <Modal label={`Reminder for ${debt.debtorName}`} onClose={onClose}>
-      <div className="row space-between">
-        <h3 className="section-title">Reminder for {debt.debtorName}</h3>
-        <Button variant="ghost" icon title="Close" onClick={onClose}>
-          <X size={15} />
-        </Button>
-      </div>
+  const closeButton = (
+    <Button variant="ghost" icon title="Close" onClick={onClose}>
+      <X size={15} />
+    </Button>
+  );
 
+  const content = (
+    <>
       {result && (
-        <>
+        <section className="card">
+          {inline && (
+            <div className="card-head">
+              <div className="card-head-main">
+                <h3 className="card-title">Reminder for {debt.debtorName}</h3>
+              </div>
+              {closeButton}
+            </div>
+          )}
+          <div className="stack">
           <div className="reminder-box">{result.messageText}</div>
-
           <div className="row wrap">
             <Button
-              variant="primary"
+              variant="secondary"
               loading={sending === "whatsapp"}
               disabled={Boolean(sending) || !result.phoneValid}
               title={result.phoneValid ? "Send via WhatsApp provider" : "No valid phone number on file"}
@@ -202,9 +195,6 @@ export default function ReminderPanel({ debt, result, onClose }) {
             </span>
           </div>
 
-          {/* Said BEFORE sending, not after. A reserved domain is accepted by the
-              mail server and bounced later, so the send reports success and the
-              client never hears from you. */}
           {emailUndeliverable && (
             <div className="against-note">
               <TriangleAlert size={15} />
@@ -215,16 +205,22 @@ export default function ReminderPanel({ debt, result, onClose }) {
               </span>
             </div>
           )}
-        </>
+          </div>
+        </section>
       )}
 
-      <div>
-        <div className="overline">Reminder log</div>
+      <section className="card">
+        <div className="card-head">
+          <div className="card-head-main">
+            <h3 className="card-title">Reminder log</h3>
+          </div>
+        </div>
+        {logError && <p className="error-text">{logError}</p>}
         {loading ? (
           <div className="mt">
             <SkeletonLines count={2} />
           </div>
-        ) : reminders.length === 0 ? (
+        ) : reminders.length === 0 && logError ? null : reminders.length === 0 ? (
           <p className="muted small">No reminders generated yet.</p>
         ) : (
           <ul className="log">
@@ -245,7 +241,21 @@ export default function ReminderPanel({ debt, result, onClose }) {
             ))}
           </ul>
         )}
-      </div>
+      </section>
+    </>
+  );
+
+  if (inline) return content;
+
+  return (
+    <Modal
+      label={`Reminder for ${debt.debtorName}`}
+      view="reminder"
+      crumb={`Reminder for ${debt.debtorName}`}
+      onClose={onClose}
+    >
+      <PageHeader title={<>Reminder for {debt.debtorName}</>} action={closeButton} />
+      {content}
     </Modal>
   );
 }

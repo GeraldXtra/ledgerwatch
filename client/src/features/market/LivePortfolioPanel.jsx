@@ -8,23 +8,9 @@ import TokenLogo from "../../components/TokenLogo";
 import { getProvider, ERC20_ABI, rpcErrorReason } from "../wallet/provider";
 import { coinIdForSymbol, stableUsdPrice } from "../wallet/usdValue";
 import { fetchTxs } from "../wallet/walletApi";
-import { usd, signedUsd } from "./format";
+import { usd, signedUsd, price as fmtPrice } from "./format";
 import { tokensForChain, CASH_CHOICES, cashTokenFor, cashChoiceOf } from "./tradeability";
 
-/**
- * The LIVE portfolio.
- *
- * Held quantities come from REAL ON-CHAIN BALANCES, never from a running total,
- * because the chain is the only thing that actually knows. Cost basis comes from
- * confirmed swap rows in WalletTx — the same records and the same reconciliation
- * the wallet already uses, not a second ledger.
- *
- * Prices come from the market data already loaded by the page. No second fetch.
- *
- * This is rendered SEPARATELY from the paper portfolio and the two are never
- * added together: one is real money and one is not, and a combined figure would
- * be meaningless at best.
- */
 export default function LivePortfolioPanel({
   chain,
   chains,
@@ -32,20 +18,17 @@ export default function LivePortfolioPanel({
   markets,
   coinIdBySymbol,
   onPickChain,
-  // Reports every balance read upward, so the page can build the real live
-  // book for the trade panel from the same read this panel displays.
   onRows,
-  // Bumped by the page after a swap lands, so this rereads the chain.
   reloadKey = 0,
   cashSymbol = "USDC",
   onCashSymbol,
+  customTokens = [],
 }) {
   const [rows, setRows] = useState(null);
   const [txs, setTxs] = useState([]);
   const [loading, setLoading] = useState(false);
-  // Why the whole read failed, when it did. Live mode must never fall back to a
-  // paper figure, so the honest alternative is to say what went wrong.
   const [loadError, setLoadError] = useState(null);
+  const [txError, setTxError] = useState(null);
   const [copied, setCopied] = useState(false);
   const [qr, setQr] = useState("");
 
@@ -54,11 +37,20 @@ export default function LivePortfolioPanel({
     setLoading(true);
     setLoadError(null);
     try {
-      const history = await fetchTxs(chain.chainId).catch(() => []);
+      let history = [];
+      try {
+        history = await fetchTxs(chain.chainId);
+        setTxError(null);
+      } catch (histErr) {
+        history = [];
+        setTxError(
+          histErr?.response?.data?.error || histErr?.message || "the server did not answer"
+        );
+      }
       setTxs(history);
 
       const provider = getProvider(chain.chainId);
-      const tokens = tokensForChain(chain);
+      const tokens = tokensForChain(chain, customTokens);
 
       const balances = await Promise.all(
         tokens.map(async (t) => {
@@ -67,19 +59,12 @@ export default function LivePortfolioPanel({
             const bal = await c.balanceOf(address);
             return { ...t, qty: Number(ethers.formatUnits(bal, t.decimals)) };
           } catch (tokenErr) {
-            // An unreadable balance is NOT a zero one. Returning 0 here meant the
-            // row was then dropped by the filter below, so an RPC failure made a
-            // token the user genuinely holds disappear from their portfolio
-            // without a word. Kept, marked as unread, and carrying the reason.
             return { ...t, qty: null, unknown: true, reason: rpcErrorReason(tokenErr) };
           }
         })
       );
       setRows(balances.filter((b) => b.unknown || b.qty > 0));
       if (onRows) onRows(balances);
-      // Held nothing AND read nothing successfully is not the same as held
-      // nothing. If every single token failed, this is a read failure, not an
-      // empty wallet, and it must not be presented as one.
       if (balances.length > 0 && balances.every((b) => b.unknown)) {
         setLoadError(balances[0].reason || "balances could not be read on this network");
       }
@@ -90,24 +75,18 @@ export default function LivePortfolioPanel({
     } finally {
       setLoading(false);
     }
-    // `reloadKey` is a deliberate dependency: bumping it is how the page asks
-    // for a reread after a swap.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chain, address, reloadKey]);
+  }, [chain, address, reloadKey, customTokens]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // A network change invalidates what was reported. Clear it up front so the
-  // trade panel never sees one chain's balances under another chain's name.
   useEffect(() => {
     if (onRows) onRows(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chain?.chainId, address]);
 
-  // Deposit QR for the zero-balance state. Same generator the wallet's Receive
-  // panel uses, so the two screens cannot drift.
   useEffect(() => {
     let active = true;
     if (!address) return;
@@ -125,7 +104,6 @@ export default function LivePortfolioPanel({
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* clipboard blocked — the address is on screen to copy by hand */
     }
   }
 
@@ -134,49 +112,35 @@ export default function LivePortfolioPanel({
     [txs]
   );
 
-  /**
-   * Cost basis per symbol from confirmed swaps. A buy adds what was paid; a sell
-   * releases a proportional share. Only swaps this app recorded contribute — a
-   * token that arrived some other way shows a holding with no basis rather than
-   * an invented one.
-   */
   const basis = useMemo(() => {
     const acc = {};
-    for (const s of swaps) {
-      const bought = s.tokenOutSymbol;
-      const spent = Number(s.value) || 0;
-      const got = Number(s.amountOut) || 0;
-      if (!bought || got <= 0) continue;
-      if (!acc[bought]) acc[bought] = { qty: 0, cost: 0 };
+    const oldestFirst = [...swaps].reverse();
+    for (const s of oldestFirst) {
       if (s.side === "buy") {
+        const bought = s.tokenOutSymbol;
+        const spent = Number(s.value) || 0;
+        const got = Number(s.amountOut) || 0;
+        if (!bought || got <= 0) continue;
+        if (!acc[bought]) acc[bought] = { qty: 0, cost: 0 };
         acc[bought].qty += got;
         acc[bought].cost += spent;
+      } else if (s.side === "sell") {
+        const sold = s.symbol;
+        const qtySold = Number(s.value) || 0;
+        const a = acc[sold];
+        if (!sold || qtySold <= 0 || !a || a.qty <= 0) continue;
+        const share = Math.min(1, qtySold / a.qty);
+        a.cost = Math.max(0, a.cost - a.cost * share);
+        a.qty = Math.max(0, a.qty - qtySold);
       }
     }
     return acc;
   }, [swaps]);
 
-  /**
-   * ONE SYMBOL TABLE, THE SAME ONE THE WALLET USES.
-   *
-   * This used to strip a leading "W" and look the remainder up in a second map:
-   * `symbol.toUpperCase().replace(/^W/, "")`. It worked by coincidence for WETH
-   * and WBTC and broke everywhere else it mattered — WETH.e became "ETH.E" and
-   * matched nothing, and it had no idea that a dollar stablecoin is a dollar, so
-   * a wallet holding USDC read "No price" here even when the feed was healthy.
-   *
-   * `usdValue.js` already owns this mapping for the wallet. Sharing it means a
-   * token cannot be priced on one screen and unpriced on the other, which is the
-   * exact drift the token logo module warns about for the same reason.
-   */
   const priceFor = (symbol) => {
-    // A dollar stablecoin is a dollar. No feed involved, so this holds on a
-    // testnet and while the price provider is unreachable.
     const stable = stableUsdPrice(symbol);
     if (stable != null) return stable;
 
-    // The wallet's own table first, then the watch-derived one, which covers
-    // coins the user searched for and added that the static map never listed.
     const coinId =
       coinIdForSymbol(symbol) || coinIdBySymbol?.[String(symbol).toUpperCase()] || null;
     const m = coinId ? markets[coinId] : null;
@@ -189,19 +153,10 @@ export default function LivePortfolioPanel({
     return sum + (p ? r.qty * p : 0);
   }, 0);
 
-  // Any holding we failed to read makes the total an understatement. Saying so
-  // is the difference between a number that is incomplete and one that is wrong.
   const unreadCount = (rows || []).filter((r) => r.unknown).length;
 
   const explorerTx = (h) => (chain?.explorer ? `${chain.explorer}/tx/${h}` : null);
 
-  /**
-   * EVERY absent precondition gets a stated answer. This component used to
-   * return null when it had no chain or no wallet, and the caller rendered it
-   * conditionally on the same two things — so "live mode with no wallet" showed
-   * nothing at all, leaving the paper hero as the only portfolio on screen. In
-   * live mode this panel is the whole story, so it has to tell all of it.
-   */
   if (!address) {
     return (
       <Card>
@@ -257,9 +212,6 @@ export default function LivePortfolioPanel({
           </p>
         </div>
         <div className="row" style={{ gap: 8, alignItems: "center" }}>
-          {/* WHICH DOLLAR FUNDS A TRADE. Only the choices this network actually
-              carries are offered, and the one in use is the one the trade panel
-              will spend on a buy and receive on a sell. */}
           {onCashSymbol && (
             <div className="seg" role="group" aria-label="Trade with" style={{ maxWidth: 180 }}>
               {CASH_CHOICES.map((choice) => {
@@ -289,8 +241,6 @@ export default function LivePortfolioPanel({
       {loading && !rows ? (
         <SkeletonLines count={3} />
       ) : loadError ? (
-        /* READ FAILED. Never a zero, never a paper figure — the balance is
-           unknown and the only honest thing to show is why. */
         <div className="live-read-error">
           <AlertTriangle size={16} />
           <div>
@@ -305,9 +255,6 @@ export default function LivePortfolioPanel({
           </div>
         </div>
       ) : !rows || rows.length === 0 ? (
-        /* GENUINELY ZERO, and confirmed so — every token read succeeded and
-           returned nothing. Made actionable rather than just stated: the address,
-           a QR, and exactly what to deposit and on which network. */
         <div className="live-zero-state">
           <p className="net-scope-lead">This wallet holds nothing on {chain.name} yet</p>
           <p className="net-scope-body">
@@ -355,20 +302,12 @@ export default function LivePortfolioPanel({
             <tbody>
               {rows.map((r) => {
                 const price = priceFor(r.symbol);
-                // Every derived figure stays null when the quantity is unknown.
-                // A value or a P&L computed from a quantity we never read would
-                // be invented, and it would look exactly like a real one.
                 const value = price && !r.unknown ? r.qty * price : null;
                 const b = basis[r.symbol];
                 const cost = !r.unknown && b && b.qty > 0 ? (b.cost / b.qty) * r.qty : null;
                 const pl = value != null && cost != null ? value - cost : null;
                 return (
                   <tr key={r.address}>
-                    {/* The same disc the wallet draws, from the same shared
-                        cache, so a token cannot appear with artwork on one
-                        screen and without it on the other. An unreadable row
-                        keeps the lettered disc rather than a confident brand
-                        mark sitting next to "could not be read". */}
                     <td>
                       <span className="cell-lead">
                         <TokenLogo symbol={r.symbol} size={22} unknown={r.unknown} />
@@ -382,7 +321,7 @@ export default function LivePortfolioPanel({
                         r.qty.toLocaleString(undefined, { maximumFractionDigits: 6 })
                       )}
                     </td>
-                    <td className="ta-right num">{price ? usd(price) : "No price"}</td>
+                    <td className="ta-right num">{price ? fmtPrice(price) : "No price"}</td>
                     <td className="ta-right num">{value != null ? usd(value) : "Not counted"}</td>
                     <td className="ta-right num">
                       {cost != null ? (
@@ -395,6 +334,8 @@ export default function LivePortfolioPanel({
                             </span>
                           )}
                         </>
+                      ) : txError ? (
+                        <span className="muted caption">history not read</span>
                       ) : (
                         <span className="muted caption">not bought here</span>
                       )}
@@ -406,6 +347,14 @@ export default function LivePortfolioPanel({
           </table>
           </div>
         </>
+      )}
+
+      {txError && (
+        <p className="muted caption" style={{ marginTop: 16 }}>
+          Your live trade history could not be read ({txError}), so cost and profit are not shown
+          against these holdings and the list of live trades is not below. Nothing about your
+          balances above depends on it.
+        </p>
       )}
 
       {swaps.length > 0 && (

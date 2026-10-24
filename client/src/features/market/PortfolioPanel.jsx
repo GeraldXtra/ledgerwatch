@@ -10,10 +10,6 @@ const COLUMNS = [
   { key: "value", label: "Value", align: "right" },
 ];
 
-/**
- * Holdings table. Rows are clickable to open the coin detail modal. Values are the
- * live-recomputed figures passed down from the page.
- */
 export default function PortfolioPanel({ portfolio, onSelect }) {
   if (!portfolio) return null;
 

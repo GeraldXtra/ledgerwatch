@@ -1,32 +1,23 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowRight,
   Bell,
   BookOpen,
   Coins,
   KeyRound,
   LineChart,
+  Menu,
   Receipt,
   ShieldCheck,
   Wallet,
 } from "lucide-react";
 import LogoMark from "../components/LogoMark";
 
-/**
- * THE FRONT PAGE
- *
- * One screen says what the product does, one row of three says what is in
- * it, three steps say how to start, and a plain footer. It replaced a five
- * section broadsheet with a parallax ledger and numbered columns, which
- * users found too much. A visitor has a few seconds to work out whether
- * this is for them; short and clear serves them better than atmosphere.
- */
-
 const ROWS = [
-  { who: "Dangote Cement", amount: "85,000", state: "Overdue 6 days", tone: "neg" },
-  { who: "Zenith Trading", amount: "42,500", state: "Reminder sent", tone: "warn" },
-  { who: "Emeka Obi Ltd", amount: "30,000", state: "Part paid", tone: "warn" },
-  { who: "Chidi Okafor", amount: "18,000", state: "Due Friday", tone: "" },
+  { who: "Dangote Cement", amount: "85,000", state: "Overdue 6 days", tone: "overdue" },
+  { who: "Zenith Trading", amount: "42,500", state: "Reminder sent", tone: "pending" },
+  { who: "Emeka Obi Ltd", amount: "30,000", state: "Part paid", tone: "partial" },
+  { who: "Chidi Okafor", amount: "18,000", state: "Due Friday", tone: "pending" },
 ];
 
 function LedgerPanel() {
@@ -39,7 +30,10 @@ function LedgerPanel() {
       {ROWS.map((r) => (
         <div className="site-panel-row" key={r.who}>
           <span className="site-panel-who">{r.who}</span>
-          <span className={`pill ${r.tone}`}>{r.state}</span>
+          <span className={`pill ${r.tone}`}>
+            <span className="pill-dot" />
+            {r.state}
+          </span>
           <span className="site-panel-amt">{r.amount}</span>
         </div>
       ))}
@@ -52,9 +46,11 @@ function LedgerPanel() {
 }
 
 export default function LandingPage() {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
     <div className="site">
-      <header className="site-nav">
+      <header className={menuOpen ? "site-nav menu-open" : "site-nav"}>
         <div className="site-nav-inner">
           <Link to="/" className="brand">
             <LogoMark size={30} />
@@ -63,22 +59,34 @@ export default function LandingPage() {
             </span>
           </Link>
           <nav className="site-nav-links">
-            <a className="site-nav-link hide-sm" href="#features">
-              Features
-            </a>
-            <Link className="site-nav-link hide-sm" to="/docs">
-              Guide
-            </Link>
-            <Link className="site-nav-link hide-sm" to="/contact">
-              Contact
-            </Link>
-            <Link className="site-nav-link hide-sm" to="/login">
-              Sign in
-            </Link>
+            <div className="site-nav-more" id="site-nav-more" onClick={() => setMenuOpen(false)}>
+              <a className="site-nav-link hide-sm" href="#features">
+                Features
+              </a>
+              <Link className="site-nav-link hide-sm" to="/docs">
+                Guide
+              </Link>
+              <Link className="site-nav-link hide-sm" to="/contact">
+                Contact
+              </Link>
+              <Link className="site-nav-link hide-sm" to="/login">
+                Sign in
+              </Link>
+            </div>
             <Link className="btn btn-primary" to="/login">
               Get started
             </Link>
           </nav>
+          <button
+            type="button"
+            className="menu-btn"
+            aria-expanded={menuOpen}
+            aria-controls="site-nav-more"
+            aria-label="Menu"
+            onClick={() => setMenuOpen((o) => !o)}
+          >
+            <Menu size={20} />
+          </button>
         </div>
       </header>
 
@@ -93,7 +101,7 @@ export default function LandingPage() {
             </p>
             <div className="site-cta">
               <Link to="/login" className="btn btn-primary btn-lg">
-                Create a free account <ArrowRight size={16} />
+                Create a free account
               </Link>
               <Link to="/docs" className="btn btn-lg">
                 <BookOpen size={16} /> Read the guide
@@ -243,8 +251,8 @@ export default function LandingPage() {
               guide explains every page if you would rather read first.
             </p>
             <div className="site-cta">
-              <Link to="/login" className="btn btn-lg">
-                Create a free account <ArrowRight size={16} />
+              <Link to="/login" className="btn btn-primary btn-lg">
+                Create a free account
               </Link>
               <Link to="/docs" className="btn btn-lg">
                 Read the guide

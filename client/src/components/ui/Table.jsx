@@ -1,8 +1,3 @@
-/**
- * Data table. `columns`: [{ key, label, align?: "right", className? }].
- * `stack` (default true) collapses rows into labeled cards on mobile — cells
- * must carry data-label, which renderRow provides via the `cell` helper.
- */
 export function Table({ columns, stack = true, className = "", children }) {
   return (
     <div className="table-wrap">
@@ -22,7 +17,6 @@ export function Table({ columns, stack = true, className = "", children }) {
   );
 }
 
-/** Cell helper that wires the mobile data-label. */
 export function Td({ label = "", align, className = "", children }) {
   const cls = [align === "right" ? "ta-right" : "", "num", className]
     .filter(Boolean)

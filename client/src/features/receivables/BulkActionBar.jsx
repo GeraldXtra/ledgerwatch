@@ -1,9 +1,6 @@
 import { BellRing, X } from "lucide-react";
 import { Button } from "../../components/ui";
 
-/**
- * Floating bar shown when rows are selected. Remind or clear the selection.
- */
 export default function BulkActionBar({ count, onRemind, onClear, busy }) {
   if (count === 0) return null;
   return (

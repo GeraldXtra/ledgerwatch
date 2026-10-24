@@ -1,0 +1,149 @@
+# CI — the gate that four documented invariants say exists and, until now, did not.
+#
+# This file is the first automation this repository has ever had. It exists to
+# assert, on every push, the things the documents already require:
+#
+#   ARCHITECTURE.md invariant 4  — "the RPC allowlist contains no signing method,
+#                                   asserted in CI"
+#   ARCHITECTURE.md invariant 19 — "no secret material in the repository,
+#                                   enforced by CI"
+#   ARCHITECTURE.md invariant 20 — "every fixed defect has a regression test"
+#   SECURITY.md 4.1 item 1       — gitleaks in CI and a pre-commit hook
+#   SECURITY.md 4.1 item 9       — the allowlist assertion
+#
+# The secrets job runs FIRST and everything else needs it, so a push that carries
+# key material fails before any other work is done. That ordering is the point:
+# this repository has leaked seed phrases once already (LW-001), and until now the
+# only control against a repeat was discipline.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A second push to the same branch cancels the first. CI on a free runner is a
+# shared resource and a superseded run proves nothing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs history to scan commits, not just the working tree.
+          # A shallow clone would only ever prove the tip is clean.
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_VERSION: 8.24.3
+
+      # Belt and braces, and it costs nothing: the paths that leaked before, by
+      # name. gitleaks matches on content; this matches on intent.
+      - name: Refuse known secret paths
+        run: |
+          if git ls-files --error-unmatch acccountSecretPhrase >/dev/null 2>&1; then
+            echo "::error::acccountSecretPhrase/ is tracked again. See docs/SECURITY.md section 6."
+            exit 1
+          fi
+          tracked=$(git ls-files -- '*.seed' '*.mnemonic' '*secret*phrase*' 'keystore*.json' '**/.env')
+          if [ -n "$tracked" ]; then
+            echo "::error::secret-shaped files are tracked:"
+            echo "$tracked"
+            exit 1
+          fi
+          echo "No secret-shaped paths tracked."
+
+  server:
+    name: Server — lint, test
+    needs: secrets
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+
+      # mongodb-memory-server downloads a mongod binary on a cold cache. Caching
+      # it turns a two minute first run into seconds, and stops a flaky download
+      # from reading as a failing test suite.
+      - name: Cache mongodb-memory-server binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongod-${{ runner.os }}-v1
+
+      - run: npm run lint
+
+      - run: npm test
+        env:
+          # The suite asserts on the boot guard, so it needs a secret that passes
+          # it. This is a throwaway value for CI only and unlocks nothing.
+          JWT_SECRET: ci-only-not-a-real-secret-000000000000
+
+  client:
+    name: Client — lint, test, build
+    needs: secrets
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
+      # The build is a REAL gate, not a formality. `VITE_API_URL` is inlined into
+      # the Content-Security-Policy at build time, so a build without it produces
+      # a bundle whose CSP names no API origin (LW-021, LW-094). Setting a stand-in
+      # here proves the substitution still happens; the deploy sets the real one.
+      - run: npm run build
+        env:
+          VITE_API_URL: https://api.ci.invalid
+          VITE_TURNSTILE_SITE_KEY: 1x00000000000000000000AA
+
+      # A guard for the failure that would otherwise reach production silently:
+      # the placeholder surviving into the built HTML means the substitution broke.
+      - name: Assert the CSP was built with a real API origin
+        run: |
+          if grep -q '%VITE_API_URL%' dist/index.html; then
+            echo "::error::%VITE_API_URL% survived into dist/index.html — the CSP names no API origin."
+            exit 1
+          fi
+          if ! grep -q 'https://api.ci.invalid' dist/index.html; then
+            echo "::error::the API origin is missing from the built Content-Security-Policy."
+            exit 1
+          fi
+          echo "CSP connect-src carries the build-time API origin."

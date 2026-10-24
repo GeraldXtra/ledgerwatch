@@ -1,35 +1,26 @@
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
-import { ArrowDown, ExternalLink, ShieldCheck, TriangleAlert, X } from "lucide-react";
-import { Button, Field, Input, Modal, SkeletonLines } from "../../components/ui";
+import { ExternalLink, ShieldCheck, TriangleAlert, X } from "lucide-react";
+import { Button, Field, Input, Modal, SkeletonLines, useToast, PageHeader } from "../../components/ui";
+import http from "../../api/http";
+import { useAuth } from "../../context/AuthContext";
 import GasNotice from "../wallet/GasNotice";
 import { approveRouter, executeSwap, planSwap } from "./liveSwap";
+import TokenProvenanceNotice, {
+  acknowledgeToken,
+  isTokenAcknowledged,
+  needsAcknowledgement,
+} from "./TokenProvenanceNotice";
 
-/**
- * The live half of a trade. The Buy/Sell decision and the amount are already
- * made in TradePanel exactly as they are in paper mode — this screen only
- * handles what happens on confirm: quote, checks, approval, signature.
- *
- * Matches the SendForm and SweepModal shape deliberately: full summary, then the
- * password, then signing. Approval and swap are two separate authorisations.
- */
-/**
- * A display amount to raw units, WITHOUT throwing on precision.
- *
- * `parseUnits(String(x), decimals)` throws "too many decimals for format" the
- * moment `x` carries more decimal places than the token has. A sell of "$100 of
- * WBTC" converts to 100 / 63214.37 = 0.0015819187947297426, nineteen places
- * against WBTC's eight, and the modal died on mount with the raw ethers error.
- * Every wrapped bitcoin and every 6 decimal stablecoin hit it, so selling
- * Bitcoin failed on six of seven chains. The value is rounded DOWN to the
- * token's own precision first: a trade can only ever spend a whole unit.
- */
 function toUnits(amountDisplay, decimals) {
   const n = Number(amountDisplay);
   if (!Number.isFinite(n) || n <= 0) throw new Error("Enter an amount greater than zero.");
-  const factor = 10 ** decimals;
-  const floored = Math.floor(n * factor) / factor;
-  return ethers.parseUnits(floored.toFixed(decimals), decimals);
+  const places = Math.max(0, Math.min(Number(decimals) || 0, 100));
+  let s = String(n);
+  if (/e/i.test(s)) s = n.toFixed(Math.min(places + 2, 100));
+  const [whole, frac = ""] = s.split(".");
+  const truncated = frac.slice(0, places);
+  return ethers.parseUnits(truncated ? `${whole}.${truncated}` : whole, decimals);
 }
 
 export default function LiveSwapModal({
@@ -42,11 +33,16 @@ export default function LiveSwapModal({
   amountDisplay,
   alertId,
   spentToday,
+  spentTodayError = "",
+  onRetrySpentToday,
+  resolveWarnings = [],
   limitOverrides,
   onClose,
   onDone,
 }) {
-  // Buy spends stablecoin for the asset; sell returns the asset to stablecoin.
+  const toast = useToast();
+  const { user, refreshUser } = useAuth();
+
   const tokenIn = side === "buy" ? cash : token;
   const tokenOut = side === "buy" ? token : cash;
 
@@ -59,13 +55,17 @@ export default function LiveSwapModal({
   const [error, setError] = useState("");
   const [impactAccepted, setImpactAccepted] = useState(false);
   const [done, setDone] = useState(null);
+  const [replan, setReplan] = useState(0);
+
+  const [addressChecked, setAddressChecked] = useState(() =>
+    isTokenAcknowledged(chain?.chainId, token?.address)
+  );
 
   useEffect(() => {
     let live = true;
     setPlan(null);
     setPlanError("");
-    // The daily cap cannot be checked without knowing what was already spent.
-    // Wait for the figure rather than planning against an assumed zero.
+    setImpactAccepted(false);
     if (spentToday == null) return undefined;
     (async () => {
       try {
@@ -90,7 +90,7 @@ export default function LiveSwapModal({
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slippage, spentToday]);
+  }, [slippage, spentToday, replan]);
 
   const explorerTx = (h) => (chain.explorer ? `${chain.explorer}/tx/${h}` : null);
 
@@ -100,14 +100,6 @@ export default function LiveSwapModal({
     try {
       await approveRouter({ plan, password, onStep: setStep });
       setPassword("");
-      /**
-       * Re-plan so the allowance and gas are re-read, and keep the OLD plan on
-       * screen until the new one exists. This used to clear `plan` first and
-       * then re-plan; if the re-quote failed after the approval had been mined
-       * and paid for, the error was written to a state that only rendered
-       * inside the plan branch, and the plan was null, so the person got four
-       * grey bars forever with an approval on chain and no explanation.
-       */
       const amountIn = toUnits(amountDisplay, tokenIn.decimals);
       const next = await planSwap({
         chain, address, tokenIn, tokenOut, amountIn,
@@ -115,6 +107,7 @@ export default function LiveSwapModal({
         limitOverrides, spentToday,
       });
       setPlan(next);
+      setImpactAccepted(false);
     } catch (err) {
       setError(
         `${friendly(err)} Your approval may already be confirmed on chain; close and reopen this trade to continue without paying for it again.`
@@ -132,6 +125,64 @@ export default function LiveSwapModal({
       const res = await executeSwap({ plan, password, side, alertId, onStep: setStep });
       setPassword("");
       setDone(res);
+
+      if (side === "buy" && plan.tokenOut && !plan.tokenOut.custom) {
+        const known = (user?.customTokens || []).some(
+          (t) =>
+            t.chainId === plan.chain.chainId &&
+            String(t.address).toLowerCase() === String(plan.tokenOut.address).toLowerCase()
+        );
+        const inRegistry = (plan.chain.tokens || []).some(
+          (t) => String(t.address).toLowerCase() === String(plan.tokenOut.address).toLowerCase()
+        );
+        if (!known && !inRegistry) {
+          try {
+            await http.post("/api/trading/tokens", {
+              chainId: plan.chain.chainId,
+              address: plan.tokenOut.address,
+              symbol: plan.tokenOut.symbol,
+              decimals: plan.tokenOut.decimals,
+            });
+            await refreshUser?.();
+          } catch (addErr) {
+            toast(
+              `${plan.tokenOut.symbol} was bought but could not be added to your token list, so it ` +
+                "will not show in your portfolio. Add it by address in the wallet.",
+              { type: "error", duration: 12000 }
+            );
+            console.error("could not remember the bought token", addErr);
+          }
+        }
+      }
+
+      if (res && res.recorded === false) {
+        toast(
+          "The trade went through, but it could not be saved to your history. It will not " +
+            "count towards today's spending limit. Transaction " + String(res.txHash).slice(0, 10) + "…",
+          { type: "error", duration: 14000 }
+        );
+      }
+
+      if (alertId) {
+        try {
+          await http.post(`/api/alerts/${alertId}/executed`, {
+            side,
+            txHash: res.txHash,
+            chainId: plan.chain.chainId,
+            qty: Number(res.amountOut) || null,
+            value: Number(plan.cashValueDisplay ?? plan.amountInDisplay) || null,
+            price: Number(plan.quote?.price) || null,
+          });
+        } catch (closeErr) {
+          toast(
+            "The trade went through, but this alert could not be marked as handled. " +
+              "Dismiss it manually, or this coin will not alert you again.",
+            { type: "error", duration: 12000 }
+          );
+          console.error("alert close failed", closeErr);
+        }
+      }
+
       onDone && onDone(res);
     } catch (err) {
       setError(friendly(err));
@@ -149,20 +200,31 @@ export default function LiveSwapModal({
 
   const blocked = plan && !plan.ok;
   const impactBlocking = plan?.needsExtraConfirm && !impactAccepted;
+  const addressBlocking = needsAcknowledgement(token) && !addressChecked;
 
   return (
-    <Modal label="Confirm live trade" onClose={busy ? () => {} : onClose} size="lg">
-      <div className="row space-between">
-        <h3 className="section-title">
-          {side === "buy" ? "Buy" : "Sell"} {coin.symbol} · live
-        </h3>
-        <Button variant="ghost" icon title="Close" onClick={onClose} disabled={busy}>
-          <X size={15} />
-        </Button>
-      </div>
+    <Modal
+      label="Confirm live trade"
+      view="swap"
+      crumb={`${side === "buy" ? "Buy" : "Sell"} ${coin.symbol} · live`}
+      onClose={busy ? () => {} : onClose}
+      size="lg"
+    >
+      <PageHeader
+        title={
+          <>
+            {side === "buy" ? "Buy" : "Sell"} {coin.symbol} · live
+          </>
+        }
+        action={
+          <Button variant="ghost" icon title="Close" onClick={onClose} disabled={busy}>
+            <X size={15} />
+          </Button>
+        }
+      />
 
-      {/* Rendered ABOVE the branches, so a failure is visible in every state,
-          including the one where there is no plan to show it under. */}
+      <section className="card stack">
+
       {error && !done && (
         <div className="against-note" role="alert">
           <TriangleAlert size={15} />
@@ -198,8 +260,40 @@ export default function LiveSwapModal({
           <TriangleAlert size={15} />
           <span>{planError}</span>
         </div>
+      ) : spentToday == null && spentTodayError ? (
+        <>
+          <div className="against-note" role="alert">
+            <TriangleAlert size={15} />
+            <span>
+              How much you have already spent on live trades in the last 24 hours could not be read
+              ({spentTodayError}), and the daily cap cannot be checked without it, so this trade was
+              not priced. Nothing was assumed and nothing was signed.
+            </span>
+          </div>
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <Button variant="ghost" onClick={onClose}>Close</Button>
+            {onRetrySpentToday && (
+              <Button variant="primary" onClick={onRetrySpentToday}>Try again</Button>
+            )}
+          </div>
+        </>
       ) : !plan ? (
         <SkeletonLines count={4} />
+      ) : !plan.quote ? (
+        <>
+          {plan.blocks.map((b, i) => (
+            <div className="against-note" key={i}>
+              <TriangleAlert size={15} />
+              <span>{b}</span>
+            </div>
+          ))}
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <Button variant="ghost" onClick={onClose}>Close</Button>
+            <Button variant="primary" onClick={() => setReplan((n) => n + 1)} disabled={busy}>
+              Try again
+            </Button>
+          </div>
+        </>
       ) : (
         <>
           <dl className="trade-quote">
@@ -213,8 +307,13 @@ export default function LiveSwapModal({
                 {Number(ethers.formatUnits(plan.quote.amountOut, tokenOut.decimals)).toFixed(6)}{" "}
                 {tokenOut.symbol}
                 <span className="quote-sub">
-                  best of {plan.quote.alternatives} fee tier
-                  {plan.quote.alternatives === 1 ? "" : "s"} · routed at {plan.quote.fee / 10000}%
+                  best of {plan.quote.alternatives} route
+                  {plan.quote.alternatives === 1 ? "" : "s"} ·{" "}
+                  {plan.quote.via
+                    ? `through ${plan.quote.via} at ${plan.quote.fees
+                        .map((f) => f / 10000 + "%")
+                        .join(" then ")}`
+                    : `direct at ${plan.quote.fee / 10000}%`}
                 </span>
               </dd>
             </div>
@@ -254,6 +353,24 @@ export default function LiveSwapModal({
               ))}
             </div>
           </Field>
+
+          {(resolveWarnings || []).map((w, i) => (
+            <div className="against-note" key={`rw${i}`}>
+              <TriangleAlert size={15} />
+              <span>{w}</span>
+            </div>
+          ))}
+
+          <TokenProvenanceNotice
+            token={token}
+            chain={chain}
+            checked={addressChecked}
+            disabled={busy}
+            onChange={(v) => {
+              setAddressChecked(v);
+              if (v) acknowledgeToken(chain?.chainId, token?.address);
+            }}
+          />
 
           <GasNotice plan={plan.gas} chain={chain} />
 
@@ -297,7 +414,11 @@ export default function LiveSwapModal({
               </Field>
               <div className="row" style={{ justifyContent: "flex-end" }}>
                 <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-                <Button variant="primary" onClick={doApprove} disabled={busy || !password || blocked}>
+                <Button
+                  variant="primary"
+                  onClick={doApprove}
+                  disabled={busy || !password || blocked || addressBlocking}
+                >
                   {busy ? step || "Approving…" : `Approve ${tokenIn.symbol}`}
                 </Button>
               </div>
@@ -317,7 +438,7 @@ export default function LiveSwapModal({
                 <Button
                   variant="primary"
                   onClick={doSwap}
-                  disabled={busy || !password || blocked || impactBlocking}
+                  disabled={busy || !password || blocked || impactBlocking || addressBlocking}
                 >
                   {busy ? step || "Signing…" : `Sign and ${side === "buy" ? "buy" : "sell"}`}
                 </Button>
@@ -326,6 +447,7 @@ export default function LiveSwapModal({
           )}
         </>
       )}
+      </section>
     </Modal>
   );
 }

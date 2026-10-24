@@ -11,7 +11,10 @@ I built LedgerWatch because that gap is a software problem rather than a discipl
 
 ### What it does
 
-Two agents share one dashboard.
+Two agents share one workspace: a sidebar of sections on the left, the list you are working through in
+the middle, and whatever you pick from it open in full on the right. On a phone the same thing
+becomes a list first, with each item opening as its own screen and the four sections in a bar along
+the bottom.
 
 **Receivables** keeps track of who owes you and when it was due. It drafts the reminder, sends it
 over WhatsApp or email with your bank details already in it, and stops chasing the moment an invoice
@@ -37,8 +40,10 @@ This runs on real networks: Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Cha
 Bitcoin, with their test networks alongside. Invoices can be paid in USDC or USDT to a per-invoice
 address and settle by themselves. Market Watch can trade for real through Uniswap from the user's
 own wallet, in paper mode by default and in live mode only when the user opts in, with a per-trade
-and a daily cap. Keys are created and kept in the browser; the server relays signed transactions
-and never sees a key.
+and a daily cap. Be precise about those caps: the daily figure they are measured against is
+computed on the server, but the ceilings themselves are still applied in the browser, so they are a
+guard against a mistyped amount and not a control an attacker cannot step around. Keys are created
+and kept in the browser; the server relays signed transactions and never sees a key.
 
 It has not had an outside security review, and that is stated plainly in `docs/SECURITY.md` along
 with everything else that is still open. Anyone using it with real money should read that first.
@@ -49,7 +54,8 @@ There is a user guide at [useledgerwatch.co/docs](https://useledgerwatch.co/docs
 through every page and every feature with pictures of the real interface, a
 [privacy policy](https://useledgerwatch.co/privacy) and [terms](https://useledgerwatch.co/terms)
 written in plain words, and a [contact page](https://useledgerwatch.co/contact) that reaches me
-directly. The guide is also one tap away inside the app, from the book icon in the top bar.
+directly. The guide is also one tap away inside the app, from the book icon at the foot of the sidebar, or
+in the top bar on a phone.
 
 The rule I kept coming back to while building it: the agent prepares, the person approves. It is
 fully automatic in how it thinks and deliberately manual where it matters. When software touches
@@ -58,7 +64,7 @@ money, the last decision should belong to a human being.
 ### Built with
 
 Node, Express and MongoDB on the server. React and Vite on the client, with ethers for the
-blockchain work. Claude handles the writing and the conversation, and every one of those paths has a
+blockchain work. An AI model handles the writing and the conversation, and every one of those paths has a
 plain template behind it so the app carries on working when the AI is unavailable.
 
 ### License

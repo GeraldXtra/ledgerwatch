@@ -5,22 +5,12 @@ import { getKeystoreJson, getStoredAddress, hasWallet, isBackedUp } from "../wal
 import { getSecurityQuestions, saveSecurityQuestions } from "../wallet/walletApi";
 import RevealSecretModal from "../wallet/RevealSecretModal";
 
-/**
- * WALLET BACKUP AND RECOVERY.
- *
- * Without this screen the wallet is a trap. The encrypted keystore lives in one
- * browser's localStorage; clear site data, switch machine or lose the laptop and
- * the funds are gone — not stolen, just unreachable, with the owner never having
- * been given the one thing that could have restored them.
- *
- * Everything here decrypts in the browser through the single `unlockWallet`
- * path. No secret material is sent anywhere.
- */
 export default function WalletBackupSection() {
-  const [reveal, setReveal] = useState(null); // "phrase" | "key" | null
+  const [reveal, setReveal] = useState(null);
   const [walletPresent] = useState(() => hasWallet());
   const [address] = useState(() => getStoredAddress());
   const [backedUp, setBackedUp] = useState(() => isBackedUp());
+  const [downloadError, setDownloadError] = useState("");
 
   if (!walletPresent) {
     return (
@@ -39,18 +29,31 @@ export default function WalletBackupSection() {
   }
 
   function downloadKeystore() {
+    setDownloadError("");
     const json = getKeystoreJson();
-    if (!json) return;
-    // Built and revoked in the same tick — no secret is left addressable.
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `ledgerwatch-keystore-${(address || "wallet").slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    if (!json) {
+      setDownloadError(
+        "There is no encrypted wallet in this browser for this account, so there is nothing to download."
+      );
+      return;
+    }
+    try {
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ledgerwatch-keystore-${(address || "wallet").slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (err) {
+      setDownloadError(
+        `The keystore file could not be produced: ${
+          err?.message || "your browser refused the download"
+        }. Your recovery phrase is the backup that matters most, so reveal and write that down.`
+      );
+    }
   }
 
   return (
@@ -113,6 +116,8 @@ export default function WalletBackupSection() {
         </button>
       </div>
 
+      {downloadError && <p className="error-text">{downloadError}</p>}
+
       <p className="settings-note">
         <ShieldCheck size={15} />
         Revealing happens entirely in this browser. Your phrase and key are never sent to
@@ -135,12 +140,6 @@ export default function WalletBackupSection() {
   );
 }
 
-/**
- * OPTIONAL extra verification. Deliberately framed as an ADDITION, never a
- * recovery route: this wallet is non-custodial, so a forgotten password cannot
- * be reset by anyone, and pretending otherwise would be the cruellest possible
- * bug to ship.
- */
 function SecurityQuestions() {
   const [state, setState] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -153,11 +152,50 @@ function SecurityQuestions() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const [loadError, setLoadError] = useState("");
+  const [reload, setReload] = useState(0);
+
   useEffect(() => {
+    let live = true;
     getSecurityQuestions()
-      .then(setState)
-      .catch(() => setState({ enabled: false, questions: [], presets: [] }));
-  }, []);
+      .then((d) => {
+        if (!live) return;
+        setState(d);
+        setLoadError("");
+      })
+      .catch((err) => {
+        if (!live) return;
+        setState(null);
+        setLoadError(
+          err?.response?.data?.error || err.message || "the server did not answer"
+        );
+      });
+    return () => {
+      live = false;
+    };
+  }, [reload]);
+
+  if (loadError) {
+    return (
+      <div className="stack-sm security-questions">
+        <div className="row">
+          <span className="icon-tile"><ShieldQuestion size={16} /></span>
+          <div>
+            <div className="backup-option-title">Extra verification before revealing</div>
+            <div className="muted small">
+              Whether this is on could not be checked: {loadError}. This says nothing about your
+              settings, which are unchanged.
+            </div>
+          </div>
+        </div>
+        <div>
+          <Button size="sm" onClick={() => setReload((n) => n + 1)}>
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (!state) return null;
   const presets = state.presets || [];

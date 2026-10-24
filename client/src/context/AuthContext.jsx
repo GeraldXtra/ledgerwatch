@@ -5,6 +5,7 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [authUnreachable, setAuthUnreachable] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const logout = useCallback(() => {
@@ -12,7 +13,6 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
-  // Rehydrate on load: if a token exists, fetch the current user.
   useEffect(() => {
     let active = true;
     async function rehydrate() {
@@ -23,8 +23,16 @@ export function AuthProvider({ children }) {
       try {
         const { data } = await http.get("/api/auth/me");
         if (active) setUser(data.user);
-      } catch {
-        if (active) logout();
+      } catch (err) {
+        const status = err?.response?.status;
+        if (active) {
+          if (status === 401) {
+            logout();
+          } else {
+            setAuthUnreachable(true);
+            console.error("[auth] could not load the account:", err?.message || err);
+          }
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -35,7 +43,6 @@ export function AuthProvider({ children }) {
     };
   }, [logout]);
 
-  // React to a 401 broadcast from the axios interceptor.
   useEffect(() => {
     const onUnauthorized = () => setUser(null);
     window.addEventListener("ledgerwatch:unauthorized", onUnauthorized);
@@ -50,18 +57,11 @@ export function AuthProvider({ children }) {
     return data.user;
   }, []);
 
-  /**
-   * Registering no longer starts a session. The server creates the account
-   * unverified and emails a code, so this returns the "confirm your email" state
-   * for the form to act on. Signing somebody in here would make the verification
-   * step decorative.
-   */
   const register = useCallback(async (payload) => {
     const { data } = await http.post("/api/auth/register", payload);
     return data;
   }, []);
 
-  /** Confirming the code IS the moment the session begins. */
   const verifyEmail = useCallback(async (email, code) => {
     const { data } = await http.post("/api/auth/verify-email", { email, code });
     setToken(data.token);
@@ -74,7 +74,6 @@ export function AuthProvider({ children }) {
     return data;
   }, []);
 
-  // ---- password reset: three calls, and none of them starts a session ----
   const forgotPassword = useCallback(async (email, turnstileToken) => {
     const { data } = await http.post("/api/auth/forgot-password", { email, turnstileToken });
     return data;
@@ -90,12 +89,6 @@ export function AuthProvider({ children }) {
     return data;
   }, []);
 
-  /**
-   * Sign in with Google ends with a token in the URL fragment. This turns it
-   * into a session by storing it and loading the account behind it. If that
-   * load fails the token is discarded rather than left in storage pointing at
-   * nothing.
-   */
   const loginWithToken = useCallback(async (token) => {
     setToken(token);
     try {
@@ -114,9 +107,17 @@ export function AuthProvider({ children }) {
     return data.user;
   }, []);
 
-  // Push a user returned by any OTHER endpoint (avatar upload/removal) into
-  // context, so the sidebar and topbar update without a refetch.
   const applyUser = useCallback((next) => setUser(next), []);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const { data } = await http.get("/api/auth/me");
+      setUser(data.user);
+      return data.user;
+    } catch {
+      return null;
+    }
+  }, []);
 
   const value = {
     user,
@@ -132,6 +133,8 @@ export function AuthProvider({ children }) {
     logout,
     updateProfile,
     applyUser,
+    refreshUser,
+    authUnreachable,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

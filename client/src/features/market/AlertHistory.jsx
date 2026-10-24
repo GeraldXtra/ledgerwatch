@@ -8,15 +8,12 @@ function when(value) {
   return d.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-/**
- * Past alerts (approved + dismissed) with their outcome — depth beyond the
- * pending list. `alerts` from GET /api/alerts/history.
- */
 export default function AlertHistory({ alerts }) {
   return (
     <Card
       eyebrow="History"
       title="Alert history"
+      count={alerts.length}
       subtitle="Every alert the agent has raised, and what you decided."
     >
       {alerts.length === 0 ? (
@@ -32,8 +29,6 @@ export default function AlertHistory({ alerts }) {
               <div className="row space-between">
                 <div className="row">
                   <span className="coin-chip">{a.symbol}</span>
-                  {/* Agent recommendation vs what the user actually did. When
-                      they differ the user overrode the agent, which is worth showing. */}
                   <span className="muted caption">agent</span>
                   <StatusPill status={a.suggestion} />
                   {a.userAction && (

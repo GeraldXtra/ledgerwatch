@@ -16,16 +16,6 @@ const TOPICS = [
   { id: "other", label: "Something else" },
 ];
 
-/**
- * THE CONTACT PAGE
- *
- * A form that reaches the person who built this. Public, because the person
- * most in need of it is often the one who cannot sign in. Signed in users get
- * their name and email filled in.
- *
- * The hidden `website` field is a honeypot: no person sees it, a bot fills it,
- * and the server quietly discards anything that arrives with it set.
- */
 export default function ContactPage() {
   const { user } = useAuth();
   const [form, setForm] = useState({
@@ -162,10 +152,6 @@ export default function ContactPage() {
                 />
               </Field>
 
-              {/* The honeypot. Hidden from people, visible to scripts. Named so
-                  that no browser autofill rule matches it: a field called
-                  "website" can be filled by an address autofill, which would
-                  make a real person's message vanish behind a success screen. */}
               <div className="contact-hp" aria-hidden="true">
                 <label htmlFor="contact-extra">Leave this empty</label>
                 <input

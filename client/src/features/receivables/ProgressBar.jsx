@@ -1,7 +1,3 @@
-/**
- * Paid-vs-outstanding progress bar. `paid` and `total` in the same currency.
- * Full (paid>=total) renders green (paid); partial renders the gold accent.
- */
 export default function ProgressBar({ paid, total, showLabel = false, size = "md" }) {
   const t = Number(total) || 0;
   const p = Math.max(0, Math.min(t, Number(paid) || 0));

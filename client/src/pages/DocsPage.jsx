@@ -1,18 +1,10 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, List } from "lucide-react";
 import PublicShell from "../components/PublicShell";
-import { Blocks } from "../docs/Blocks";
+import { Blocks, slugify } from "../docs/Blocks";
 import { GUIDE, GROUPS } from "../docs/guide";
 
-/**
- * THE USER GUIDE
- *
- * Public, so somebody deciding whether to sign up can read how the product
- * works before they do, and reachable from the Help icon inside the app. A
- * sidebar of every page grouped by section, a readable column, and previous
- * and next links at the foot. On a phone the sidebar becomes a select.
- */
 export default function DocsPage() {
   const { slug } = useParams();
   const { hash } = useLocation();
@@ -20,6 +12,11 @@ export default function DocsPage() {
   const wanted = slug || GUIDE[0].slug;
   const index = GUIDE.findIndex((p) => p.slug === wanted);
   const page = index >= 0 ? GUIDE[index] : null;
+  const [contentsOpen, setContentsOpen] = useState(false);
+
+  useEffect(() => {
+    setContentsOpen(false);
+  }, [wanted]);
 
   const grouped = useMemo(
     () => GROUPS.map((g) => ({ ...g, pages: GUIDE.filter((p) => p.group === g.id) })),
@@ -29,14 +26,6 @@ export default function DocsPage() {
   useEffect(() => {
     if (!page) return;
     document.title = `${page.title} · LedgerWatch guide`;
-    // A link such as /docs/settings#payout-details lands on that heading.
-    // The router does not scroll to a hash by itself, and headings carry ids
-    // made from their text, so this does it. Anything else starts at the top.
-    //
-    // Pictures above the heading load lazily and have no reserved height, so
-    // a single scroll lands correctly and is then pushed down as they arrive.
-    // The scroll is repeated for a moment, and stops the instant the reader
-    // scrolls for themselves.
     const target = hash ? document.getElementById(hash.slice(1)) : null;
     if (!target) {
       window.scrollTo(0, 0);
@@ -74,7 +63,39 @@ export default function DocsPage() {
   return (
     <PublicShell wide>
       <div className="docs">
-        <aside className="docs-side" aria-label="Guide sections">
+        <div className="docs-side-wrap">
+        <button
+          type="button"
+          className="btn btn-sm docs-toggle"
+          aria-expanded={contentsOpen}
+          aria-controls="docs-side"
+          onClick={() => setContentsOpen((o) => !o)}
+        >
+          <List size={15} aria-hidden="true" /> Contents
+        </button>
+        <aside
+          className={contentsOpen ? "docs-side show" : "docs-side"}
+          id="docs-side"
+          aria-label="Guide sections"
+        >
+          <span className="select-wrap docs-mobile-select">
+          <select
+            className="select"
+            aria-label="Go to a guide page"
+            value={page.slug}
+            onChange={(e) => navigate(e.target.value === GUIDE[0].slug ? "/docs" : `/docs/${e.target.value}`)}
+          >
+            {grouped.map((g) => (
+              <optgroup key={g.id} label={g.label}>
+                {g.pages.map((p) => (
+                  <option key={p.slug} value={p.slug}>
+                    {p.title}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          </span>
           {grouped.map((g) => (
             <div className="docs-side-group" key={g.id}>
               <h2 className="docs-side-title">{g.label}</h2>
@@ -91,25 +112,9 @@ export default function DocsPage() {
             </div>
           ))}
         </aside>
+        </div>
 
         <article className="docs-body">
-          <select
-            className="select docs-mobile-select"
-            aria-label="Go to a guide page"
-            value={page.slug}
-            onChange={(e) => navigate(e.target.value === GUIDE[0].slug ? "/docs" : `/docs/${e.target.value}`)}
-          >
-            {grouped.map((g) => (
-              <optgroup key={g.id} label={g.label}>
-                {g.pages.map((p) => (
-                  <option key={p.slug} value={p.slug}>
-                    {p.title}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-
           <p className="docs-crumb">
             <Link to="/docs">Guide</Link> / {group ? group.label : ""}
           </p>
@@ -135,6 +140,17 @@ export default function DocsPage() {
             )}
           </div>
         </article>
+
+        <nav className="docs-toc">
+          <p>On this page</p>
+          {page.blocks
+            .filter((b) => b.type === "h2")
+            .map((h) => (
+              <a key={h.text} href={`#${slugify(h.text)}`}>
+                {h.text}
+              </a>
+            ))}
+        </nav>
       </div>
     </PublicShell>
   );

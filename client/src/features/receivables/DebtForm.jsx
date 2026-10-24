@@ -1,18 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import http from "../../api/http";
-import { Button, Field, Input } from "../../components/ui";
+import { Button, Field, Input, PageHeader } from "../../components/ui";
 import ReliabilityBadge from "./ReliabilityBadge";
 import { compactNgn } from "./format";
 
-/** Group the integer part with thousand separators while preserving what the
- *  user is mid-way through typing (including a trailing decimal point). */
 function groupDigits(raw) {
   const s = String(raw ?? "");
   if (!s) return "";
   const [intPart, ...rest] = s.split(".");
   const grouped = intPart ? Number(intPart).toLocaleString("en-NG") : "";
   return rest.length ? `${grouped}.${rest.join("")}` : grouped;
+}
+
+function sanitizeAmount(value) {
+  const digitsAndDots = String(value ?? "").replace(/[^\d.]/g, "");
+  const firstDot = digitsAndDots.indexOf(".");
+  if (firstDot === -1) return digitsAndDots;
+  return (
+    digitsAndDots.slice(0, firstDot + 1) +
+    digitsAndDots.slice(firstDot + 1).replace(/\./g, "")
+  );
 }
 
 const EMPTY = {
@@ -34,11 +42,6 @@ function toDateInput(value) {
   return d.toISOString().slice(0, 10);
 }
 
-/**
- * Add/edit debt form (rendered inside a Modal by the parent). When `initial`
- * is provided the form is in edit mode. onSubmit(payload) returns a promise;
- * onCancel closes the modal.
- */
 export default function DebtForm({ initial, onSubmit, onCancel }) {
   const editing = Boolean(initial);
   const [form, setForm] = useState(
@@ -56,13 +59,11 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [known, setKnown] = useState(null); // matched existing debtor (reliability warning)
+  const [known, setKnown] = useState(null);
   const lookupRef = useRef(null);
 
   const update = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  // Debounced lookup: when the phone matches an existing debtor, surface their
-  // reliability so the owner sees the risk before recording a new debt.
   useEffect(() => {
     if (editing) return;
     clearTimeout(lookupRef.current);
@@ -115,18 +116,19 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
   }
 
   return (
-    <div className="stack">
-      <div>
-        <h3 className="section-title">{editing ? "Edit debt" : "Record a debt"}</h3>
-        <p className="muted small" style={{ margin: "4px 0 0" }}>
-          {editing
+    <>
+      <PageHeader
+        title={editing ? "Edit debt" : "Record a debt"}
+        support={
+          editing
             ? "Update the details of this receivable."
-            : "Track a credit sale. LedgerWatch drafts the reminders for you."}
-        </p>
-      </div>
+            : "Track a credit sale. LedgerWatch drafts the reminders for you."
+        }
+      />
 
-      <form onSubmit={submit} className="stack">
-        <div className="grid2">
+      <form onSubmit={submit} className="pv-form">
+        <section className="card stack">
+        <div className="grid2 debt-form-grid">
           <Field label="Debtor name">
             <Input value={form.debtorName} onChange={update("debtorName")} required autoFocus />
           </Field>
@@ -142,17 +144,13 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
             />
           </Field>
           <Field label="Amount (₦)">
-            {/* Text rather than number so thousand separators can be shown while
-                typing, because enterprise invoices run to nine figures and an unbroken
-                run of digits is unreadable. The raw numeric string is kept in
-                state; only the display is grouped. */}
             <Input
               type="text"
               inputMode="numeric"
               autoComplete="off"
               value={groupDigits(form.amount)}
               onChange={(e) =>
-                setForm((f) => ({ ...f, amount: e.target.value.replace(/[^\d.]/g, "") }))
+                setForm((f) => ({ ...f, amount: sanitizeAmount(e.target.value) }))
               }
               placeholder="0"
               required
@@ -203,8 +201,9 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
         )}
 
         {error && <p className="error-text">{error}</p>}
+        </section>
 
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+        <div className="pv-foot">
           <Button variant="ghost" onClick={onCancel} disabled={busy}>
             Cancel
           </Button>
@@ -213,6 +212,6 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
           </Button>
         </div>
       </form>
-    </div>
+    </>
   );
 }

@@ -1,4 +1,4 @@
-import { ArrowDownLeft, ArrowUpRight, ExternalLink } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, ExternalLink, RefreshCw } from "lucide-react";
 import { Button, EmptyState } from "../../components/ui";
 
 function shorten(addr) {
@@ -11,25 +11,28 @@ function when(value) {
   return isNaN(d.getTime()) ? "" : d.toLocaleString();
 }
 
-/**
- * Locally-recorded transaction history.
- *
- * EVERY ROW NAMES ITS OWN CHAIN, and its explorer link is resolved from that
- * row's `chainId` rather than from whichever network happens to be selected.
- * The link previously came from the selected chain, which matched only because
- * the list is filtered per chain today — the first view showing more than one
- * network would have sent every link to the wrong explorer.
- *
- * Naming the chain is also the point: a row reading "−80 USDC · confirmed" with
- * no network is exactly what let a same-chain self-transfer look like a
- * completed cross-chain move.
- */
-export default function TxHistory({ txs, chain, chains, onReceive }) {
-  // Registry lookup, so no explorer URL is hardcoded here. Falls back to the
-  // active chain for rows written before chainId was recorded.
+export default function TxHistory({ txs, chain, chains, error, onRetry, onReceive }) {
   const chainFor = (tx) =>
     (chains || []).find((c) => c.chainId === tx.chainId) ||
     (chain && chain.chainId === tx.chainId ? chain : null);
+  if (error && (!txs || txs.length === 0)) {
+    return (
+      <div className="stack-sm">
+        <p className="error-text" style={{ margin: 0 }}>
+          Your transaction history could not be loaded: {error}. This says nothing about your
+          balance or about transfers you have made; only this list is missing.
+        </p>
+        {onRetry && (
+          <div>
+            <Button size="sm" onClick={onRetry}>
+              <RefreshCw size={14} /> Try again
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (!txs || txs.length === 0) {
     return (
       <EmptyState
@@ -52,9 +55,6 @@ export default function TxHistory({ txs, chain, chains, onReceive }) {
       {txs.map((tx) => {
         const outgoing = tx.direction !== "in";
         const txChain = chainFor(tx);
-        // A transfer to yourself on one network. Called out because it looks
-        // like a successful move and is in fact a round trip that only cost a
-        // fee — the single most confusing row this history can contain.
         const selfSend =
           tx.from && tx.to && tx.from.toLowerCase() === tx.to.toLowerCase();
         return (

@@ -3,22 +3,6 @@ import { ethers } from "ethers";
 import { Check, ExternalLink, EyeOff, RotateCcw, ShieldAlert, Sparkles } from "lucide-react";
 import TokenLogo from "../../components/TokenLogo";
 
-/**
- * TOKENS THAT ARRIVED UNINVITED.
- *
- * The inbound scan reads every ERC-20 transfer addressed to this wallet, so a
- * token nobody imported can still be noticed. This is where the wallet says
- * so and asks what to do. It recommends; it never decides. On a real network
- * most unsolicited tokens are spam or bait, and a wallet that added them by
- * itself would be doing the attacker's work, so:
- *
- *   - nothing here is added without a click,
- *   - the contract address is always shown, with an explorer link,
- *   - a symbol that copies a verified token on this network is called out,
- *   - a contract that could not be read cannot be added at all, because its
- *     balance could not be shown with correct decimals.
- */
-
 function shorten(a) {
   return a ? `${a.slice(0, 6)}...${a.slice(-4)}` : "";
 }
@@ -58,11 +42,8 @@ export default function NewTokensCard({
   const fresh = (tokens || []).filter((t) => t.status === "new");
   const ignored = (tokens || []).filter((t) => t.status === "ignored");
 
-  // Nothing to say and nothing went wrong: take no space at all.
   if (fresh.length === 0 && ignored.length === 0 && !syncFailed) return null;
 
-  // A failed scan with nothing else to show still speaks, in one line. "No
-  // new tokens" and "could not look" are different facts.
   if (fresh.length === 0 && ignored.length === 0) {
     return (
       <div className="mm-found" role="region" aria-label="New tokens">
@@ -115,7 +96,7 @@ export default function NewTokensCard({
           const symbol = t.symbol || "Unknown token";
           return (
             <li key={t.address} className={t.status === "ignored" ? "mm-found-row dim" : "mm-found-row"}>
-              <TokenLogo symbol={t.symbol || "?"} unknown={unreadable} />
+              <TokenLogo symbol={t.address || "?"} unknown={unreadable} />
               <span className="mm-found-main">
                 <span className="mm-found-name">
                   {symbol}

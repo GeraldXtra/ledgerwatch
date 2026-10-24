@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  Coins,
   ExternalLink,
   KeyRound,
   ShieldCheck,
@@ -9,28 +8,25 @@ import {
   Wallet,
   X,
 } from "lucide-react";
-import { Button, Field, Input, Modal, Select, SkeletonLines } from "../../components/ui";
+import { Button, Field, Input, Modal, PageHeader, Select, SkeletonLines } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { hasWallet, unlockWallet } from "../wallet/keystore";
 import { canDerive, deriveAddressFromWallet } from "../wallet/derivation";
-import { allocateIndex, createPaymentAddress, fetchChains, fetchQuote } from "./cryptoApi";
+import {
+  allocateIndex,
+  createPaymentAddress,
+  fetchChains,
+  fetchQuote,
+  revokePaymentAddress,
+} from "./cryptoApi";
 import { agoLabel, ngn, usdc } from "./format";
 
-/**
- * Issue a stablecoin payment address for one invoice.
- *
- * ORDER MATTERS: the password is validated BEFORE an index is allocated.
- * Allocating permanently consumes a derivation index — the counter only ever
- * moves forward and an index is never reused — so allocating first would burn
- * one on every mistyped password. The gap would be harmless but pointless.
- *
- * The address is derived HERE, in the browser, from the decrypted keystore. Only
- * the public address and its index are ever sent to the server.
- */
 export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
   const { user } = useAuth();
-  const [chains, setChains] = useState(null); // null = still loading
+  const [chains, setChains] = useState(null);
+  const [chainsError, setChainsError] = useState("");
   const [chainId, setChainId] = useState(null);
+  const [tokenSymbol, setTokenSymbol] = useState(null);
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState("");
   const [password, setPassword] = useState("");
@@ -38,9 +34,6 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
   const [error, setError] = useState("");
   const [cannotDerive, setCannotDerive] = useState(false);
 
-  // Checked synchronously: whether a keystore exists at all. Whether it can
-  // DERIVE cannot be known until it is decrypted, so that check happens on
-  // submit — see `cannotDerive`.
   const walletPresent = hasWallet();
 
   useEffect(() => {
@@ -48,12 +41,8 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
     fetchChains()
       .then((list) => {
         if (!active) return;
-        // Only chains with a configured stablecoin can accept an invoice payment.
-        const usable = list.filter((c) => (c.tokens || []).length > 0);
+        const usable = list.filter((c) => (c.stables || []).length > 0);
         setChains(usable);
-        // The account's chosen default from Settings, then Base Sepolia (the app
-        // default and cheapest to test on), then whatever is enabled. Hardcoding
-        // a chain here would quietly ignore the preference the user just set.
         const preferredId = user?.crypto?.defaultChainId || 84532;
         const preferred =
           usable.find((c) => c.chainId === preferredId) ||
@@ -61,20 +50,35 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
           usable[0];
         if (preferred) setChainId(preferred.chainId);
       })
-      .catch(() => setChains([]));
+      .catch((err) => {
+        if (!active) return;
+        setChainsError(
+          err?.response?.data?.error ||
+            "The list of networks could not be loaded, so no address can be issued right now. This is a connection problem, not a setting. Close this and try again."
+        );
+      });
     return () => {
       active = false;
     };
   }, [user?.crypto?.defaultChainId]);
 
-  // Re-quote whenever the chain changes. This reserves nothing, so switching
-  // networks to compare is free.
+  const chain = useMemo(
+    () => (chains || []).find((c) => c.chainId === chainId) || null,
+    [chains, chainId]
+  );
+
+  const tokens = useMemo(() => (chain && chain.stables) || [], [chain]);
+
+  useEffect(() => {
+    setTokenSymbol(tokens.length ? tokens[0].symbol : null);
+  }, [tokens]);
+
   useEffect(() => {
     if (!chainId || !walletPresent) return;
     let active = true;
     setQuote(null);
     setQuoteError("");
-    fetchQuote({ debtId: debt._id, chainId })
+    fetchQuote({ debtId: debt._id, chainId, tokenSymbol })
       .then((q) => {
         if (active) setQuote(q);
       })
@@ -84,12 +88,7 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
     return () => {
       active = false;
     };
-  }, [chainId, debt._id, walletPresent]);
-
-  const chain = useMemo(
-    () => (chains || []).find((c) => c.chainId === chainId) || null,
-    [chains, chainId]
-  );
+  }, [chainId, tokenSymbol, debt._id, walletPresent]);
 
   async function issue(e) {
     e.preventDefault();
@@ -97,18 +96,8 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
     if (!chain) return setError("Choose a network first.");
     if (!password) return setError("Enter your wallet password.");
 
-    // 1. Prove the password works AND that this wallet can derive at all, before
-    //    anything irreversible happens. One unlock, reused below: scrypt is
-    //    deliberately slow, so unlocking twice would double the wait.
-    //
-    //    The unlock gets its OWN try/catch so "that password did not work" is
-    //    said only when the unlock is what failed. Pattern matching over every
-    //    error in one block risks blaming the password for an unrelated failure,
-    //    which is the worst mistake this particular screen could make.
     let master;
     try {
-      // The progress callback matters here: scrypt runs for seconds, and a button
-      // that just says "working" for that long reads as a hang.
       setBusy("Unlocking your wallet");
       master = await unlockWallet(password, (pct) => {
         const done = Math.round((Number(pct) || 0) * 100);
@@ -132,56 +121,56 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
     }
 
     try {
-      // 2. Reserve an index atomically. From here on the index is spent.
       setBusy("Reserving an address");
       const alloc = await allocateIndex(chain.chainId);
 
-      // 3. Derive in the browser. The key exists only inside this call.
       const address = deriveAddressFromWallet(master, alloc.derivationIndex);
 
-      // 4. Send the PUBLIC address up to be recorded against the invoice.
       setBusy("Saving the address");
       const saved = await createPaymentAddress({
         debtId: debt._id,
         chainId: chain.chainId,
         address,
         derivationIndex: alloc.derivationIndex,
+        tokenSymbol: tokenSymbol || undefined,
       });
 
-      /**
-       * 5. THE ADDRESS THE SERVER RECORDED MUST BE THE ONE THIS WALLET DERIVED
-       *    (LW-013). It is about to be shown to a payer and printed in every
-       *    reminder. If any layer between here and the database changed a
-       *    character, money sent to it would be unreachable by anyone, so it
-       *    is compared before it is ever displayed, and the mismatch is said.
-       */
       const stored = saved && saved.paymentAddress;
       if (
         !stored ||
         String(stored.address).toLowerCase() !== address.toLowerCase() ||
         Number(stored.derivationIndex) !== alloc.derivationIndex
       ) {
+        setBusy("Revoking the mismatched address");
+        let revoked = false;
+        if (stored && stored._id) {
+          try {
+            await revokePaymentAddress(stored._id);
+            revoked = true;
+          } catch {
+          }
+        }
         throw new Error(
-          "The address that was saved does not match the one this wallet derived. Nothing has been shown to the payer. Revoke it and try again."
+          revoked
+            ? "The address that was saved does not match the one this wallet derived, so it has been revoked and will not be shown to the payer or attached to any reminder. Try again."
+            : "The address that was saved does not match the one this wallet derived, and it could NOT be revoked automatically. It may still be attached to reminders for this invoice. Open the crypto section on this invoice and revoke it by hand before sending anything to your client."
         );
       }
 
       setPassword("");
       onCreated(saved);
     } catch (err) {
-      // The wallet is already open by this point, so nothing here is ever a
-      // password problem. Report what actually went wrong.
       const msg = err?.response?.data?.error || err.message || "";
       setError(msg || "Could not create the payment address.");
       setBusy("");
     }
   }
 
-  // ---- No wallet at all ----
   if (!walletPresent) {
     return (
-      <Modal label="Crypto payment" onClose={onClose}>
+      <Modal label="Crypto payment" view="crypto" onClose={onClose}>
         <Head onClose={onClose} title="Crypto payment" />
+        <section className="card">
         <div className="crypto-blocked">
           <span className="icon-tile neutral">
             <Wallet size={16} />
@@ -194,7 +183,8 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
             </p>
           </div>
         </div>
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+        </section>
+        <div className="pv-foot">
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
@@ -206,11 +196,11 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
     );
   }
 
-  // ---- Wallet present but mathematically unable to derive ----
   if (cannotDerive) {
     return (
-      <Modal label="Crypto payment" onClose={onClose}>
+      <Modal label="Crypto payment" view="crypto" onClose={onClose}>
         <Head onClose={onClose} title="Crypto payment" />
+        <section className="card">
         <div className="crypto-blocked">
           <span className="icon-tile neutral">
             <KeyRound size={16} />
@@ -228,7 +218,8 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
             </p>
           </div>
         </div>
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+        </section>
+        <div className="pv-foot">
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
@@ -243,27 +234,30 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
   const noChains = chains && chains.length === 0;
   const nothingOwed = quote && quote.balanceNgn <= 0;
   const alreadyActive = quote && quote.hasActiveAddress;
-  const blocked = Boolean(noChains || nothingOwed || alreadyActive || quoteError);
+  const blocked = Boolean(noChains || chainsError || nothingOwed || alreadyActive || quoteError);
 
   return (
-    <Modal label="Crypto payment" onClose={onClose}>
-      <Head onClose={onClose} title={`Crypto payment for ${debt.debtorName}`} />
+    <Modal label="Crypto payment" view="crypto" onClose={onClose}>
+      <Head
+        onClose={onClose}
+        title={`Crypto payment for ${debt.debtorName}`}
+        support={
+          <>
+            This invoice gets an address of its own, so anything arriving at it is matched to this
+            debt automatically. The address is derived from your wallet inside this browser and only
+            the public address is stored.
+          </>
+        }
+      />
 
-      <div className="row wrap">
-        {/* The network badge that stood here is gone at the owner's request.
-            The chain is named in the quote itself and in the payer's message. */}
-        {quote && quote.rateStale && (
+      {quote && quote.rateStale && (
+        <div className="row wrap">
           <span className="pill warn">Rate is a fallback, not live</span>
-        )}
-      </div>
+        </div>
+      )}
 
-      <p className="muted small" style={{ margin: 0 }}>
-        This invoice gets an address of its own, so anything arriving at it is matched to this
-        debt automatically. The address is derived from your wallet inside this browser and only
-        the public address is stored.
-      </p>
-
-      <form className="stack" onSubmit={issue}>
+      <form className="pv-form" onSubmit={issue}>
+        <section className="card stack">
         <Field label="Network">
           <Select
             value={chainId || ""}
@@ -278,6 +272,28 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
           </Select>
         </Field>
 
+        {tokens.length > 1 && (
+          <Field label="Token the payer sends">
+            <Select
+              value={tokenSymbol || ""}
+              onChange={(e) => setTokenSymbol(e.target.value)}
+              disabled={Boolean(busy)}
+            >
+              {tokens.map((t) => (
+                <option key={t.symbol} value={t.symbol}>
+                  {t.symbol} · {t.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+
+        {chainsError && (
+          <p className="error-text" style={{ margin: 0 }}>
+            {chainsError}
+          </p>
+        )}
+
         {noChains && (
           <p className="error-text" style={{ margin: 0 }}>
             No network with a configured stablecoin is enabled, so an address cannot be issued.
@@ -290,7 +306,7 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
           </p>
         )}
 
-        {!quote && !quoteError && !noChains ? (
+        {!quote && !quoteError && !noChains && !chainsError ? (
           <SkeletonLines count={3} />
         ) : quote ? (
           <>
@@ -306,8 +322,10 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
               <div>
                 <dt>Rate used</dt>
                 <dd className="num">
-                  {ngn(quote.ngnPerUsd)} per USDC
-                  <span className="quote-sub">{agoLabel(quote.rateTimestamp)}</span>
+                  {ngn(quote.ngnPerUsd)} per {(quote.token && quote.token.symbol) || "USDC"}
+                  <span className="quote-sub">
+                    {quote.rateStale ? "fallback rate, not live" : agoLabel(quote.rateTimestamp)}
+                  </span>
                 </dd>
               </div>
               <div>
@@ -328,10 +346,10 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
             </dl>
 
             <p className="muted small" style={{ margin: 0 }}>
-              The USDC figure is rounded up to the cent, so a payer who sends exactly this
-              amount always clears the invoice in full. It is locked to the rate above when you
-              create the address, so a later move in the rate cannot leave this debtor still
-              owing money.
+              The {(quote.token && quote.token.symbol) || "stablecoin"} figure is rounded up to
+              the cent, so a payer who sends exactly this amount always clears the invoice in
+              full. It is locked to the rate above when you create the address, so a later move
+              in the rate cannot leave this debtor still owing money.
             </p>
           </>
         ) : null}
@@ -373,7 +391,9 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
           </div>
         )}
 
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+        </section>
+
+        <div className="pv-foot">
           <Button variant="ghost" onClick={onClose} disabled={Boolean(busy)}>
             Cancel
           </Button>
@@ -386,15 +406,16 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
   );
 }
 
-function Head({ title, onClose }) {
+function Head({ title, support, onClose }) {
   return (
-    <div className="row space-between">
-      <h3 className="section-title row">
-        <Coins size={17} /> {title}
-      </h3>
-      <Button variant="ghost" icon title="Close" onClick={onClose}>
-        <X size={15} />
-      </Button>
-    </div>
+    <PageHeader
+      title={title}
+      support={support}
+      action={
+        <Button variant="ghost" icon title="Close" onClick={onClose}>
+          <X size={15} />
+        </Button>
+      }
+    />
   );
 }

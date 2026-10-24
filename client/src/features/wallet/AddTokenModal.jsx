@@ -1,17 +1,9 @@
 import { useState } from "react";
 import { ethers } from "ethers";
 import { Check, Search, ShieldAlert, TriangleAlert, X } from "lucide-react";
-import { Button, Field, Input, Modal } from "../../components/ui";
+import { Button, Field, Input, Modal, PageHeader } from "../../components/ui";
 import { getProvider, ERC20_ABI } from "./provider";
 
-/**
- * Add any ERC-20 by contract address.
- *
- * DECIMALS ARE READ FROM THE CONTRACT, NEVER GUESSED. Assuming 6 because a token
- * is called USDC would misread BNB Chain's USDC — which uses 18 — by a factor of
- * 10^12. The same reasoning applies to the symbol: what the contract says is what
- * is shown, because anyone can deploy a contract calling itself anything.
- */
 export default function AddTokenModal({ chain, address, existing = [], onClose, onAdd }) {
   const [input, setInput] = useState("");
   const [found, setFound] = useState(null);
@@ -35,8 +27,6 @@ export default function AddTokenModal({ chain, address, existing = [], onClose, 
     try {
       const provider = getProvider(chain.chainId);
 
-      // Nothing deployed here at all is the most common paste error — a wallet
-      // address, or the right token on the wrong network.
       const code = await provider.getCode(addr);
       if (!code || code === "0x") {
         setError(
@@ -52,7 +42,6 @@ export default function AddTokenModal({ chain, address, existing = [], onClose, 
       try {
         balance = await c.balanceOf(address);
       } catch {
-        /* balance is a nicety; the token can still be added */
       }
 
       setFound({
@@ -73,14 +62,17 @@ export default function AddTokenModal({ chain, address, existing = [], onClose, 
   }
 
   return (
-    <Modal label="Add a token" onClose={onClose}>
-      <div className="row space-between">
-        <h3 className="section-title">Add a token on {chain.name}</h3>
-        <Button variant="ghost" icon title="Close" onClick={onClose}>
-          <X size={15} />
-        </Button>
-      </div>
+    <Modal label="Add a token" view="token" onClose={onClose}>
+      <PageHeader
+        title={<>Add a token on {chain.name}</>}
+        action={
+          <Button variant="ghost" icon title="Close" onClick={onClose}>
+            <X size={15} />
+          </Button>
+        }
+      />
 
+      <section className="card stack">
       <form className="stack" onSubmit={lookup}>
         <Field label="Token contract address">
           <Input
@@ -143,15 +135,19 @@ export default function AddTokenModal({ chain, address, existing = [], onClose, 
             </span>
           </div>
 
-          <div className="row" style={{ justifyContent: "flex-end" }}>
-            <Button variant="ghost" onClick={() => setFound(null)}>
-              Back
-            </Button>
-            <Button variant="primary" onClick={() => onAdd({ ...found, chainId: chain.chainId })}>
-              <Check size={14} /> Add {found.symbol}
-            </Button>
-          </div>
         </>
+      )}
+      </section>
+
+      {found && (
+        <div className="pv-foot">
+          <Button variant="ghost" onClick={() => setFound(null)}>
+            Back
+          </Button>
+          <Button variant="primary" onClick={() => onAdd({ ...found, chainId: chain.chainId })}>
+            <Check size={14} /> Add {found.symbol}
+          </Button>
+        </div>
       )}
     </Modal>
   );

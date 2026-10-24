@@ -1,6 +1,5 @@
 const { runAllPasses, getStatus } = require("../services/automation");
 
-// POST /api/automation/run  (manual trigger — runs BOTH passes for the caller's data)
 async function run(req, res) {
   try {
     const result = await runAllPasses({ userId: req.user._id });
@@ -11,7 +10,6 @@ async function run(req, res) {
   }
 }
 
-// GET /api/automation/status
 function status(req, res) {
   return res.json(getStatus());
 }

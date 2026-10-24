@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ShieldCheck, X } from "lucide-react";
-import { Button, Field, Input, Segmented } from "../../components/ui";
+import { Button, Field, Input, Segmented, PageHeader } from "../../components/ui";
 import { Modal } from "../../components/ui";
 import {
   importFromMnemonic,
@@ -9,13 +9,12 @@ import {
   encryptAndStore,
 } from "./keystore";
 import { saveAddress } from "./walletApi";
+import { assessWalletPassword } from "./passwordStrength";
+import { useAuth } from "../../context/AuthContext";
 
-/**
- * Import an existing wallet from a recovery phrase or a private key, then encrypt it
- * with a password and store only the ciphertext (same guarantee as create).
- */
 export default function ImportWalletModal({ onClose, onDone }) {
-  const [mode, setMode] = useState("phrase"); // phrase | key | keystore
+  const { user } = useAuth();
+  const [mode, setMode] = useState("phrase");
   const [secret, setSecret] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -34,14 +33,9 @@ export default function ImportWalletModal({ onClose, onDone }) {
       );
     }
     if (!password) return setError("Enter the password.");
-    /**
-     * A keystore already HAS a password — the one it was encrypted with. Asking
-     * the user to invent a new one and confirm it would be nonsense, and getting
-     * it wrong would produce a file they cannot open. So the confirm step, and
-     * the minimum length, apply only when a NEW encryption password is being set.
-     */
     if (mode !== "keystore") {
-      if (password.length < 8) return setError("Use at least 8 characters.");
+      const verdict = assessWalletPassword(password, { email: user?.email, name: user?.name });
+      if (!verdict.ok) return setError(verdict.reason);
       if (password !== confirm) return setError("Passwords do not match.");
     }
 
@@ -50,9 +44,6 @@ export default function ImportWalletModal({ onClose, onDone }) {
       let wallet;
       let address;
       if (mode === "keystore") {
-        // Decrypting here also PROVES the password is right before anything is
-        // stored — an imported keystore that cannot be opened is worse than a
-        // failed import, because it looks like a working wallet.
         ({ wallet, address } = await importFromKeystore(secret, password, (p) =>
           setProgress(Math.round(p * 100))
         ));
@@ -79,7 +70,6 @@ export default function ImportWalletModal({ onClose, onDone }) {
     }
   }
 
-  /** Read an uploaded .json keystore into the same field a paste would fill. */
   function onFile(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -90,20 +80,22 @@ export default function ImportWalletModal({ onClose, onDone }) {
   }
 
   return (
-    <Modal label="Import wallet" onClose={onClose}>
-      <div className="row space-between">
-        <h3 className="section-title">Import a wallet</h3>
-        <Button variant="ghost" icon title="Close" onClick={onClose}>
-          <X size={15} />
-        </Button>
-      </div>
+    <Modal label="Import wallet" view="import" crumb="Import a wallet" onClose={onClose}>
+      <PageHeader
+        title="Import a wallet"
+        action={
+          <Button variant="ghost" icon title="Close" onClick={onClose}>
+            <X size={15} />
+          </Button>
+        }
+      />
 
       <div className="wallet-guarantee">
         <ShieldCheck size={16} />
         <span>Your key is encrypted in your browser. Only the encrypted keystore is stored here.</span>
       </div>
 
-      <form className="stack" onSubmit={submit}>
+      <form className="card stack" onSubmit={submit}>
         <Segmented
           value={mode}
           onChange={setMode}
@@ -113,6 +105,15 @@ export default function ImportWalletModal({ onClose, onDone }) {
             { id: "keystore", label: "Keystore file" },
           ]}
         />
+
+        {mode === "key" && (
+          <p className="inline-warn">
+            A private key is one account and carries no seed, so a wallet
+            imported this way <strong>cannot issue invoice payment addresses and cannot hold
+            Bitcoin</strong>. Both are derived from the recovery phrase. If you have the phrase,
+            import that instead and everything works.
+          </p>
+        )}
 
         {mode === "keystore" && (
           <div className="stack-sm">
@@ -150,9 +151,6 @@ export default function ImportWalletModal({ onClose, onDone }) {
             style={{ resize: "vertical", fontFamily: "inherit" }}
           />
         </Field>
-        {/* A keystore brings its own password, so there is nothing to confirm —
-            asking would invite the user to "set" a password the file does not
-            have and then wonder why it will not open. */}
         <div className={mode === "keystore" ? "" : "grid2"}>
           <Field label={mode === "keystore" ? "Keystore password" : "Password"}>
             <Input

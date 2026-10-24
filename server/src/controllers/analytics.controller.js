@@ -1,6 +1,5 @@
 const { analytics } = require("../services/receivables.service");
 
-// GET /api/receivables/analytics
 async function get(req, res) {
   try {
     const data = await analytics(req.user._id);

@@ -45,11 +45,24 @@ export default function NotificationsSection() {
   });
 
   const [push, setPush] = useState(null);
+  const [pushError, setPushError] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
 
-  const refresh = () => getPushState().then(setPush);
+  const refresh = () =>
+    getPushState()
+      .then((state) => {
+        setPush(state);
+        setPushError("");
+      })
+      .catch((err) => {
+        setPush(null);
+        setPushError(
+          err?.response?.data?.error || err.message || "the browser or server did not answer"
+        );
+      });
+
   useEffect(() => {
     refresh();
   }, []);
@@ -57,11 +70,18 @@ export default function NotificationsSection() {
   const toggleSend = (k) => (e) => setAutoSend((a) => ({ ...a, [k]: e.target.checked }));
 
   async function savePrefs(next) {
+    const previous = prefs;
     setPrefs(next);
     try {
       await updateProfile({ notifyPrefs: next });
-    } catch {
-      toast("Could not save that preference.", { type: "error" });
+    } catch (err) {
+      setPrefs(previous);
+      toast(
+        `That preference was not saved: ${
+          err?.response?.data?.error || err.message || "the server did not answer"
+        }. It is unchanged.`,
+        { type: "error" }
+      );
     }
   }
 
@@ -84,9 +104,6 @@ export default function NotificationsSection() {
     setMsg("");
     try {
       const res = await enablePush();
-      // Every branch says something specific. This used to have no catch at all,
-      // so a throw anywhere in enablePush left the button silently doing nothing
-      // and made a broken pipeline look like an unresponsive click.
       setMsg(
         res.ok
           ? "Notifications enabled on this device. Send a test below to confirm."
@@ -116,7 +133,15 @@ export default function NotificationsSection() {
     setBusy(true);
     setMsg("");
     try {
-      await disablePush();
+      const off = await disablePush();
+      if (off && off.ok === false) {
+        toast(
+          "Notifications could not be switched off: " +
+            (off.detail || off.reason || "the server did not confirm it") +
+            ". This device may still receive them.",
+          { type: "error", duration: 10000 }
+        );
+      }
       setMsg("Notifications turned off on this device.");
     } finally {
       setBusy(false);
@@ -146,13 +171,9 @@ export default function NotificationsSection() {
         </p>
       </div>
 
-      {/* ---- Device notifications ---- */}
       <div className="settings-section">
         <div className="overline">On this device</div>
 
-        {/* The permission value, stated plainly. Without it "nothing happens when
-            I press enable" is indistinguishable from "the browser blocked this
-            months ago", and the API cannot re-prompt once denied. */}
         {push && push.supported && (
           <div className="row space-between perm-row">
             <span className="muted small">Browser permission</span>
@@ -186,7 +207,19 @@ export default function NotificationsSection() {
           </div>
         )}
 
-        {push && !push.supported ? (
+        {pushError ? (
+          <div className="stack-sm" style={{ marginTop: 8 }}>
+            <p className="error-text" style={{ margin: 0 }}>
+              Whether notifications are on for this device could not be checked: {pushError}. Your
+              settings are unchanged, and in-app alerts still work.
+            </p>
+            <div>
+              <Button size="sm" disabled={busy} onClick={refresh}>
+                Try again
+              </Button>
+            </div>
+          </div>
+        ) : push && !push.supported ? (
           <p className="muted small" style={{ marginTop: 8 }}>
             {push.reason ||
               "This browser does not support push notifications. In-app alerts still work everywhere."}
@@ -252,7 +285,6 @@ export default function NotificationsSection() {
         </p>
       </div>
 
-      {/* ---- Automatic reminder sending (unchanged behaviour) ---- */}
       <form className="settings-section stack" onSubmit={saveSending}>
         <div>
           <div className="overline">Automatic reminders</div>
@@ -298,9 +330,6 @@ export default function NotificationsSection() {
           </span>
         </label>
 
-        {/* Said plainly, because a reminder silently sitting in a spam folder
-            looks identical to one that was never sent, and the user would
-            reasonably blame the app rather than their DNS. */}
         {autoSend.enabled && autoSend.email && (
           <p className="muted small settings-note">
             <strong>About spam folders.</strong> Reminders sent from a personal Gmail address

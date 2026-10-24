@@ -5,7 +5,6 @@ const {
   debtorKey,
 } = require("../services/receivables.service");
 
-// GET /api/debtors  (grouped debtor summaries with reliability score)
 async function list(req, res) {
   try {
     const debtors = await debtorGroups(req.user._id);
@@ -16,16 +15,13 @@ async function list(req, res) {
   }
 }
 
-// GET /api/debtors/lookup?phone=  (for the Add-Debt inline reliability warning)
 async function lookup(req, res) {
   try {
-    // Coerced: `?phone[]=x` arrives as an array and `.trim` is not a function.
     const phone = String(req.query.phone || "").trim().slice(0, 40);
     const name = String(req.query.name || "").trim().slice(0, 120);
     if (!phone && !name) return res.json({ debtor: null });
 
     const groups = await debtorGroups(req.user._id);
-    // Match by normalized phone via a synthetic debt, else by name.
     const key = debtorKey({ debtorPhone: phone, debtorName: name });
     const match = groups.find((g) => g.key === key) || null;
     return res.json({ debtor: match });
@@ -35,10 +31,13 @@ async function lookup(req, res) {
   }
 }
 
-// GET /api/debtors/:key  (full profile: debts + timeline)
+function paramKey(req) {
+  return String(req.params.key || "");
+}
+
 async function profile(req, res) {
   try {
-    const key = decodeURIComponent(req.params.key);
+    const key = paramKey(req);
     const data = await debtorProfile(req.user._id, key);
     if (!data) return res.status(404).json({ error: "Debtor not found" });
     return res.json(data);
@@ -48,10 +47,9 @@ async function profile(req, res) {
   }
 }
 
-// GET /api/debtors/:key/statement  (all debts + payments for one debtor)
 async function statement(req, res) {
   try {
-    const key = decodeURIComponent(req.params.key);
+    const key = paramKey(req);
     const data = await debtorProfile(req.user._id, key);
     if (!data) return res.status(404).json({ error: "Debtor not found" });
 

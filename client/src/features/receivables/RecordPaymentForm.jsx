@@ -2,10 +2,6 @@ import { useState } from "react";
 import { Button, Field, Input, Select } from "../../components/ui";
 import { ngn } from "./format";
 
-/**
- * Record a payment against a debt. Prefills the amount with the outstanding
- * balance. onSubmit({ amount, method, note, paidAt }) should POST the payment.
- */
 export default function RecordPaymentForm({ balance, currency, onSubmit, onCancel }) {
   const [amount, setAmount] = useState(balance ? String(balance) : "");
   const [method, setMethod] = useState("transfer");

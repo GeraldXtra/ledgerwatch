@@ -1,12 +1,3 @@
-/**
- * The public Contact form.
- *
- * Anyone can post to it, so it is tested the way it will be used: with junk,
- * with a bot's honeypot fill, with a pasted wallet secret, and with a real
- * message from a signed in account. Email is unconfigured here, so the row
- * must be stored and must say the owner was not told.
- */
-
 process.env.TURNSTILE_SECRET_KEY = "";
 process.env.SMTP_HOST = "";
 process.env.SMTP_USER = "";
@@ -92,7 +83,6 @@ describe("contact form", () => {
     const phrase = "abandon ability able about above absent absorb abstract absurd abuse access accident";
     expect(containsSecret(`here is my key ${key} please fix`)).toBe("a private key");
     expect(containsSecret(`my phrase is\n${phrase}\nthanks`)).toBe("a recovery phrase");
-    // An ordinary sentence of short words is not a phrase.
     expect(containsSecret("i sent the money to the wrong address and it did not arrive at all")).toBeNull();
 
     for (const message of [`please help ${key}`, `${phrase}`]) {

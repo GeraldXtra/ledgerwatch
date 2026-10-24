@@ -12,33 +12,32 @@ const {
   quoteForInvoice,
   stablecoinsFor,
 } = require("../services/paymentAddress.service");
+const { tokenBalance, TOLERANCE } = require("../services/paymentWatch.service");
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const HASH_RE = /^0x[0-9a-fA-F]{64}$/;
+const OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
 
-/**
- * GET /api/payment-addresses/quote?debtId=&chainId=
- *
- * What issuing an address WOULD ask for, without reserving anything. The
- * confirmation screen needs the balance, USDC amount, rate and rate age up
- * front; using /allocate for that would consume a derivation index every time a
- * dialog was opened and abandoned.
- */
+function readDebtId(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") return false;
+  return OBJECT_ID_RE.test(value) ? value : false;
+}
+
 async function quote(req, res) {
   try {
     requireCryptoEnabled(req.user);
     const chainId = Number(req.query.chainId);
+    const debtId = readDebtId(req.query.debtId);
+    if (debtId === false || debtId === null) {
+      return res.status(400).json({ error: "A valid invoice id is required to quote an address" });
+    }
     const result = await quoteForInvoice({
       userId: req.user._id,
-      debtId: req.query.debtId,
+      debtId,
       chainId,
-      // Optional. Absent means the chain's first stablecoin, so the existing
-      // client keeps working without change.
       tokenSymbol: req.query.tokenSymbol,
     });
-    // Every stablecoin this chain can actually accept, so the UI can offer the
-    // real choice rather than a hardcoded one. Testnets list USDC alone because
-    // no verified USDT exists there — that is honest, not a gap.
     return res.json({ ...result, availableTokens: stablecoinsFor(chainId) });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
@@ -47,18 +46,8 @@ async function quote(req, res) {
   }
 }
 
-/**
- * POST /api/payment-addresses/allocate  { chainId }
- *
- * Step 1 of a two-step issue. Reserves the next derivation index atomically and
- * returns it plus the chain/token context. The client then derives the address
- * for that index IN THE BROWSER and posts it back to /issue. The server never
- * sees a key or a seed at any point.
- */
 async function allocate(req, res) {
   try {
-    // Checked BEFORE an index is reserved: allocation permanently consumes one,
-    // so a disabled account must be turned away before it burns anything.
     requireCryptoEnabled(req.user);
 
     const chainId = Number(req.body && req.body.chainId);
@@ -82,7 +71,6 @@ async function allocate(req, res) {
         testnet: chain.testnet,
       },
       token,
-      // The user's own depth if they set one, otherwise the per-chain default.
       confirmations: confirmationsFor(chain.chainId, req.user),
       rate: { ngnPerToken: rate.rate, fetchedAt: rate.fetchedAt, stale: rate.stale },
     });
@@ -93,10 +81,6 @@ async function allocate(req, res) {
   }
 }
 
-/**
- * POST /api/payment-addresses  { debtId, chainId, address, derivationIndex }
- * Step 2: record the browser-derived address against the invoice.
- */
 async function create(req, res) {
   try {
     requireCryptoEnabled(req.user);
@@ -114,8 +98,6 @@ async function create(req, res) {
       chainId: Number(chainId),
       address,
       derivationIndex,
-      // Which stablecoin the payer will send. Validated against the chain's
-      // verified list in the service, which rejects anything else by name.
       tokenSymbol,
     });
 
@@ -126,9 +108,6 @@ async function create(req, res) {
     });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
-    // A duplicate key means one of the unique guards caught something that must
-    // never happen. Surface it loudly rather than letting two invoices share an
-    // address, and name which guard fired — they mean different things.
     if (err.code === 11000) {
       const onAddress = /address/.test(err.message || "") && !/derivationIndex/.test(err.message || "");
       return res.status(409).json({
@@ -142,17 +121,45 @@ async function create(req, res) {
   }
 }
 
-// GET /api/payment-addresses?debtId=  -> addresses for an invoice (or all).
+function unsweptAt(pa) {
+  const decimals = pa.tokenDecimals || 6;
+  const seen = (pa.observed || [])
+    .filter((o) => o.status === "confirmed")
+    .reduce((sum, o) => sum + Number(o.value || 0) / 10 ** decimals, 0);
+  const swept = (pa.sweeps || []).reduce((sum, s) => sum + (Number(s.amountUsdc) || 0), 0);
+  return seen - swept > 1 / 10 ** decimals ? seen - swept : 0;
+}
+
+const PAGE_SIZE = 100;
+const HOLDING_SCAN = 500;
+
 async function list(req, res) {
   try {
     const query = { userId: req.user._id };
-    if (req.query.debtId) query.debtId = req.query.debtId;
-    const addresses = await PaymentAddress.find(query).sort({ createdAt: -1 }).limit(100);
+    const debtId = readDebtId(req.query.debtId);
+    if (debtId === false) return res.status(400).json({ error: "That is not a valid invoice id" });
+    if (debtId) query.debtId = debtId;
 
-    // Attach the debtor name as a SEPARATE field rather than populating `debtId`.
-    // The sweep list needs to say which client an address belongs to, and
-    // populating would turn debtId from an id into an object for every existing
-    // caller.
+    const page = await PaymentAddress.find(query).sort({ createdAt: -1 }).limit(PAGE_SIZE);
+    const total = await PaymentAddress.countDocuments(query);
+
+    let addresses = page;
+    let holdingBeyondPage = 0;
+    if (total > page.length) {
+      const seen = new Set(page.map((a) => String(a._id)));
+      const older = await PaymentAddress.find({
+        ...query,
+        _id: { $nin: page.map((a) => a._id) },
+        "observed.0": { $exists: true },
+      })
+        .sort({ createdAt: -1 })
+        .limit(HOLDING_SCAN);
+
+      const holding = older.filter((pa) => !seen.has(String(pa._id)) && unsweptAt(pa) > 0);
+      holdingBeyondPage = holding.length;
+      addresses = [...page, ...holding];
+    }
+
     const debts = await Debt.find({
       _id: { $in: addresses.map((a) => a.debtId) },
       userId: req.user._id,
@@ -164,19 +171,12 @@ async function list(req, res) {
       debtorName: nameById.get(String(a.debtId)) || null,
     }));
 
-    /**
-     * The CURRENT rate alongside each address's SNAPSHOT rate.
-     *
-     * The snapshot is what settles the invoice — a payer who sends exactly what
-     * they were quoted clears it however the naira has moved since. But the owner
-     * needs to see the divergence, because a snapshot taken days ago may now be
-     * worth materially more or less in naira than the invoice says. Showing only
-     * one number hides that; showing both makes it a decision rather than a
-     * surprise.
-     */
     const live = await getNgnRate();
     return res.json({
       addresses: rows,
+      total,
+      truncated: rows.length < total,
+      holdingBeyondPage,
       chains: listChains(),
       currentRate: {
         ngnPerUsd: live.rate,
@@ -190,7 +190,6 @@ async function list(req, res) {
   }
 }
 
-// PATCH /api/payment-addresses/:id/revoke -> stop watching early.
 async function revoke(req, res) {
   try {
     const record = await PaymentAddress.findOne({ _id: req.params.id, userId: req.user._id });
@@ -207,14 +206,6 @@ async function revoke(req, res) {
   }
 }
 
-/**
- * POST /api/payment-addresses/:id/sweeps
- * { txHash, destination, amountUsdc, gasFundedTxHash }
- *
- * Records a sweep the user has already signed and broadcast in their browser.
- * The server never signs and never holds a key, so this is bookkeeping: the
- * transaction is already on chain by the time this is called.
- */
 async function recordSweep(req, res) {
   try {
     const { txHash, destination, amountUsdc, gasFundedTxHash } = req.body || {};
@@ -235,7 +226,6 @@ async function recordSweep(req, res) {
     const record = await PaymentAddress.findOne({ _id: req.params.id, userId: req.user._id });
     if (!record) return res.status(404).json({ error: "Payment address not found" });
 
-    // Idempotent: a retry after a dropped response must not append twice.
     if (!record.sweeps.some((s) => s.txHash === txHash)) {
       record.sweeps.push({
         txHash,
@@ -245,19 +235,46 @@ async function recordSweep(req, res) {
       });
     }
 
-    /**
-     * `swept` is set NARROWLY, and only for an address that is finished
-     * collecting. An address that is still `active` is still expected to receive
-     * a top up, and flipping it here would stop the watcher and silently lose
-     * that payment. Sweeping moves what has arrived; it does not close an
-     * invoice. The sweeps array records the movement either way.
-     */
+    let sweptNow = false;
+    let residual = null;
+    let balanceChecked = false;
     if (["paid", "expired", "revoked"].includes(record.status)) {
-      record.status = "swept";
+      const chain = getChain(record.chainId);
+      if (chain && record.tokenContract) {
+        const onChain = await tokenBalance(
+          chain,
+          record.tokenContract,
+          record.address,
+          record.tokenDecimals
+        );
+        if (onChain != null) {
+          balanceChecked = true;
+          residual = onChain;
+          if (onChain <= TOLERANCE) {
+            record.status = "swept";
+            sweptNow = true;
+          }
+        }
+      }
     }
 
     await record.save();
-    return res.status(201).json({ paymentAddress: record });
+
+    if (!sweptNow && ["paid", "expired", "revoked"].includes(record.status)) {
+      console.warn(
+        `[payment-address] sweep ${txHash} recorded on ${record.address} but it was NOT marked swept: ` +
+          (balanceChecked
+            ? `the chain still reports ${residual} ${record.tokenSymbol} there.`
+            : "its balance could not be read, so it stays watched.")
+      );
+    }
+
+    return res.status(201).json({
+      paymentAddress: record,
+      swept: sweptNow,
+      balanceChecked,
+      remainingOnChain: residual,
+    });
   } catch (err) {
     console.error("record sweep error:", err.message);
     return res.status(500).json({ error: "Failed to record the sweep" });

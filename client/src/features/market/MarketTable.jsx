@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, LineChart } from "lucide-react";
-import { Card, EmptyState } from "../../components/ui";
+import { EmptyState, PageHeader } from "../../components/ui";
 import { pct } from "./format";
 import AnimatedPrice from "./AnimatedPrice";
 import Sparkline from "./Sparkline";
@@ -13,12 +13,7 @@ const SORTS = {
     (a.price_change_percentage_24h || 0) - (b.price_change_percentage_24h || 0),
 };
 
-/**
- * Live watched-coin table: logo, name/symbol, live (animated) price, 24h change,
- * inline 7d sparkline. Sortable by name / price / 24h change. Clicking a row opens
- * the coin detail modal. `rows` = [{ ...market, watchCount }].
- */
-export default function MarketTable({ rows, onSelect, live }) {
+export default function MarketTable({ rows, onSelect, live, action }) {
   const [sort, setSort] = useState("change");
   const [dir, setDir] = useState("desc");
 
@@ -47,12 +42,19 @@ export default function MarketTable({ rows, onSelect, live }) {
     ) : null;
 
   return (
-    <Card
+    <>
+    <PageHeader
       eyebrow="Market"
       title="Watchlist"
-      subtitle="Live prices for the coins you follow. Click a coin for its chart and details."
-      action={live && <LiveIndicator lastFetchedAt={live.lastFetchedAt} stale={live.stale} />}
-    >
+      support="Live prices for the coins you follow. Click a coin for its chart and details."
+      action={
+        <>
+          {live && <LiveIndicator lastFetchedAt={live.lastFetchedAt} stale={live.stale} />}
+          {action}
+        </>
+      }
+    />
+    <section className="card card-flush">
       {rows.length === 0 ? (
         <EmptyState
           icon={<LineChart size={20} />}
@@ -100,7 +102,7 @@ export default function MarketTable({ rows, onSelect, live }) {
                       }
                     }}
                   >
-                    <td data-label="Coin">
+                    <td data-label="Coin" className="cell-title">
                       <div className="cell-lead">
                         {m.image ? (
                           <img className="coin-logo" src={m.image} alt="" width={24} height={24} />
@@ -108,7 +110,7 @@ export default function MarketTable({ rows, onSelect, live }) {
                           <span className="coin-chip">{m.symbol}</span>
                         )}
                         <div>
-                          <div className="lead-name">{m.symbol}</div>
+                          <div className="lead-link">{m.symbol}</div>
                           <div className="lead-sub">
                             {m.name}
                             {m.watchCount > 1 ? ` · ${m.watchCount} watches` : ""}
@@ -117,9 +119,6 @@ export default function MarketTable({ rows, onSelect, live }) {
                       </div>
                     </td>
                     <td data-label="Price" align="right" className="ta-right num">
-                      {/* An unreadable price says so. It used to be dropped from
-                          the table entirely, which read as "you follow no coins"
-                          rather than "the feed is down". */}
                       {m.priceUnavailable ? (
                         <span className="muted small" title="The price feed did not answer for this coin. Your watch is still active.">
                           Unavailable
@@ -141,6 +140,7 @@ export default function MarketTable({ rows, onSelect, live }) {
           </table>
         </div>
       )}
-    </Card>
+    </section>
+    </>
   );
 }

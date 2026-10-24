@@ -1,70 +1,79 @@
 import { ethers } from "ethers";
 
-/**
- * GAS PREFLIGHT — one implementation, used by every path that can start a
- * transaction: send, sweep, approve and swap.
- *
- * The point is to answer "can this actually be paid for?" BEFORE the confirm
- * step, rather than letting the user type their password and then meet
- * "insufficient funds for amount + gas" from deep inside ethers. A wallet that
- * knows the answer up front can say exactly how much is missing and, on a
- * testnet, link straight to the faucet that fixes it.
- */
-
-// An ERC-20 transfer costs ~45k gas to an address that already holds a balance,
-// ~65k to a fresh one. Used only when the node refuses to estimate at all, and
-// always reported as a fallback rather than presented as a real estimate.
 export const ERC20_TRANSFER_GAS_FALLBACK = 100000n;
 
-// A plain native transfer is exactly this, always.
 export const NATIVE_TRANSFER_GAS = 21000n;
 
-/**
- * Estimate gas for a transaction, degrading honestly when a node will not.
- *
- * Some nodes refuse to estimate FROM an address holding no native token, which
- * is precisely the case that matters most here. So the estimate is retried from
- * a funded address — the call shape is identical, so the number transfers — and
- * only then falls back to a constant.
- *
- * @returns {{gasLimit: bigint, source: string}} `source` is shown in the UI
- *   whenever it is not a true estimate.
- */
+export function revertReasonOf(err) {
+  if (!err) return null;
+  const code = err.code || err?.info?.error?.code;
+  const message = String(err.shortMessage || err.reason || err.message || "");
+  if (code === "INSUFFICIENT_FUNDS" || /insufficient funds/i.test(message)) return null;
+
+  const reverted =
+    code === "CALL_EXCEPTION" ||
+    Boolean(err.reason) ||
+    /execution reverted|revert|exceeds balance|transfer amount exceeds|paused|blacklist/i.test(
+      message
+    );
+  if (!reverted) return null;
+
+  return err.reason || message || "the network rejected it without saying why";
+}
+
 export async function estimateGasWithFallback({ provider, tx, from, fallbackFrom, fallback }) {
   try {
     const limit = await provider.estimateGas({ ...tx, from });
-    return { gasLimit: limit, source: "estimated" };
-  } catch {
+    return { gasLimit: limit, source: "estimated", reverted: false, revertReason: null };
+  } catch (err) {
+    const reason = revertReasonOf(err);
+    if (reason) {
+      return {
+        gasLimit: fallback || ERC20_TRANSFER_GAS_FALLBACK,
+        source: `not an estimate: ${revertSentence(reason)}`,
+        reverted: true,
+        revertReason: reason,
+      };
+    }
     if (fallbackFrom && fallbackFrom !== from) {
       try {
         const limit = await provider.estimateGas({ ...tx, from: fallbackFrom });
-        return { gasLimit: limit, source: "estimated from your main wallet" };
-      } catch {
-        /* fall through */
+        return {
+          gasLimit: limit,
+          source: "estimated from your main wallet",
+          reverted: false,
+          revertReason: null,
+        };
+      } catch (secondErr) {
+        const secondReason = revertReasonOf(secondErr);
+        if (secondReason) {
+          return {
+            gasLimit: fallback || ERC20_TRANSFER_GAS_FALLBACK,
+            source: `not an estimate: ${revertSentence(secondReason)}`,
+            reverted: true,
+            revertReason: secondReason,
+          };
+        }
       }
     }
     return {
       gasLimit: fallback || ERC20_TRANSFER_GAS_FALLBACK,
       source: "a typical transaction cost, because this network would not estimate",
+      reverted: false,
+      revertReason: null,
     };
   }
 }
 
-/** The fee-per-gas this chain is currently charging. */
+function revertSentence(reason) {
+  return `the network says this transaction would fail (${reason})`;
+}
+
 export async function currentGasPrice(provider) {
   const fee = await provider.getFeeData();
   return fee.maxFeePerGas || fee.gasPrice || 0n;
 }
 
-/**
- * Can `from` afford this transaction?
- *
- * @param {bigint} [valueWei] native token being SENT (not gas). For a native
- *   transfer this must be included, or the check passes and the send still
- *   fails: the balance has to cover the amount AND the fee together.
- * @returns {Promise<{ok:boolean, gasLimit:bigint, gasPrice:bigint, feeWei:bigint,
- *   balanceWei:bigint, neededWei:bigint, shortfallWei:bigint, gasSource:string}>}
- */
 export async function preflightGas({
   provider,
   from,
@@ -73,7 +82,7 @@ export async function preflightGas({
   fallbackFrom,
   fallbackGas,
 }) {
-  const [{ gasLimit, source }, gasPrice, balanceWei] = await Promise.all([
+  const [{ gasLimit, source, reverted, revertReason }, gasPrice, balanceWei] = await Promise.all([
     estimateGasWithFallback({ provider, tx, from, fallbackFrom, fallback: fallbackGas }),
     currentGasPrice(provider),
     provider.getBalance(from),
@@ -84,7 +93,9 @@ export async function preflightGas({
   const shortfallWei = neededWei > balanceWei ? neededWei - balanceWei : 0n;
 
   return {
-    ok: shortfallWei === 0n,
+    ok: shortfallWei === 0n && !reverted,
+    reverted: Boolean(reverted),
+    revertReason: revertReason || null,
     gasLimit,
     gasPrice,
     feeWei,
@@ -95,22 +106,14 @@ export async function preflightGas({
   };
 }
 
-/** Trim a wei amount to a readable number of decimals without losing meaning. */
 export function formatNative(wei, decimals = 6) {
   const s = ethers.formatEther(wei ?? 0n);
   const n = Number(s);
   if (n === 0) return "0";
-  // Never round a tiny shortfall down to "0.000000" — that reads as "nothing
-  // needed" when something IS needed.
   if (n < 10 ** -decimals) return `<${(10 ** -decimals).toFixed(decimals)}`;
   return n.toFixed(decimals).replace(/\.?0+$/, "");
 }
 
-/**
- * The sentence shown when a transaction cannot be paid for. States the exact
- * shortfall, because "insufficient funds" without a number leaves the user
- * guessing how much to get.
- */
 export function shortfallMessage(plan, chain) {
   const symbol = (chain && chain.nativeSymbol) || "ETH";
   return (

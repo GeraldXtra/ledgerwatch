@@ -2,10 +2,6 @@ import { useState } from "react";
 import { Button, Field, Input, useToast } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 
-/**
- * Bank details shown inside every payment reminder. Moved here from the old
- * dashboard modal — same fields, same PATCH /api/auth/me call.
- */
 export default function PayoutSection() {
   const { user, updateProfile } = useAuth();
   const toast = useToast();
