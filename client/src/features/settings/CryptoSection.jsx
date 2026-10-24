@@ -39,7 +39,7 @@ export default function CryptoSection() {
   const c = user.crypto || {};
   const [form, setForm] = useState({
     enabled: c.enabled !== false,
-    defaultChainId: c.defaultChainId || 84532,
+    defaultChainId: c.defaultChainId,
     expiryHours: c.expiryHours || 72,
     sweepDestination: c.sweepDestination || "",
     notifyOnDetected: c.notifyOnDetected !== false,

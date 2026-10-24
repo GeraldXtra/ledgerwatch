@@ -12,8 +12,10 @@ const {
   clearResetState,
 } = require("../services/passwordReset.service");
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const SALT_ROUNDS = 10;
+const SALT_ROUNDS = 12;
+const { isPlainAddress } = require("../utils/email");
+const { accountLocked, noteFailedLogin, clearFailedLogins, passwordProblem } = require("../middleware/security");
+const { NOTIFY_PREF_KEYS } = require("../utils/notifyPrefs");
 const MAX_NAME_LENGTH = 80;
 const DUMMY_HASH = bcrypt.hashSync("not-a-password", SALT_ROUNDS);
 
@@ -27,12 +29,14 @@ async function register(req, res) {
     if (!name || !email || !password) {
       return res.status(400).json({ error: "name, email and password are required" });
     }
-    if (!EMAIL_REGEX.test(email)) {
+    if (typeof name !== "string" || typeof email !== "string" || typeof password !== "string") {
+      return res.status(400).json({ error: "name, email and password must be text" });
+    }
+    if (!isPlainAddress(email)) {
       return res.status(400).json({ error: "Invalid email format" });
     }
-    if (String(password).length < 8) {
-      return res.status(400).json({ error: "Password must be at least 8 characters" });
-    }
+    const weak = passwordProblem(password, { email, name });
+    if (weak) return res.status(400).json({ error: weak });
     if (String(name).trim().length > MAX_NAME_LENGTH) {
       return res.status(400).json({ error: `Name must be ${MAX_NAME_LENGTH} characters or fewer` });
     }
@@ -46,11 +50,18 @@ async function register(req, res) {
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
+    const cleanBank = {};
+    if (bankDetails && typeof bankDetails === "object") {
+      for (const key of ["bankName", "accountName", "accountNumber"]) {
+        if (typeof bankDetails[key] === "string") cleanBank[key] = bankDetails[key].trim().slice(0, 120);
+      }
+    }
+
     const user = await User.create({
-      name,
+      name: name.trim(),
       email: normalizedEmail,
       passwordHash,
-      bankDetails: bankDetails || {},
+      bankDetails: cleanBank,
       emailVerified: false,
     });
 
@@ -93,12 +104,32 @@ async function login(req, res) {
     if (!human.ok) return res.status(400).json({ error: human.error, turnstile: true });
 
     const normalizedEmail = String(email).toLowerCase().trim();
+    const lockedFor = accountLocked(normalizedEmail);
+    if (lockedFor) {
+      res.setHeader("Retry-After", String(lockedFor));
+      return res.status(429).json({
+        error:
+          "Too many wrong passwords for this account. Wait fifteen minutes, or reset your password from the sign in page.",
+        retryAfter: lockedFor,
+        code: "account_locked",
+      });
+    }
+
     const user = await User.findOne({ email: normalizedEmail });
 
     const hash = user ? user.passwordHash : DUMMY_HASH;
-    const match = await bcrypt.compare(String(password), hash);
+    const match = await bcrypt.compare(String(password).slice(0, 256), hash);
     if (!user || !match) {
+      noteFailedLogin(normalizedEmail);
       return res.status(401).json({ error: "Invalid email or password" });
+    }
+    clearFailedLogins(normalizedEmail);
+
+    if (bcrypt.getRounds(user.passwordHash) < SALT_ROUNDS) {
+      const stronger = await bcrypt.hash(String(password), SALT_ROUNDS);
+      await User.updateOne({ _id: user._id, passwordHash: user.passwordHash }, { $set: { passwordHash: stronger } }).catch(
+        (err) => console.error("login rehash failed:", err.message)
+      );
     }
 
     const neverIssued = !user.emailVerification || !user.emailVerification.lastSentAt;
@@ -171,9 +202,8 @@ async function resetPassword(req, res) {
     if (!email || !code || !newPassword) {
       return res.status(400).json({ error: "email, code and newPassword are required" });
     }
-    if (String(newPassword).length < 8) {
-      return res.status(400).json({ error: "Password must be at least 8 characters" });
-    }
+    const weak = passwordProblem(newPassword, { email: String(email) });
+    if (weak) return res.status(400).json({ error: weak });
 
     const user = await User.findOne({ email: String(email).toLowerCase().trim() });
     if (!user) return res.status(400).json({ error: "That code is not correct." });
@@ -199,6 +229,7 @@ async function resetPassword(req, res) {
     user.tokenVersion = (user.tokenVersion || 0) + 1;
     clearResetState(user);
     await user.save();
+    clearFailedLogins(user.email);
 
     return res.status(200).json({
       ok: true,
@@ -239,11 +270,9 @@ async function updateMe(req, res) {
       }
     }
     if (notifyPrefs && typeof notifyPrefs === "object") {
-      updates.notifyPrefs = {
-        marketAlerts: notifyPrefs.marketAlerts !== false,
-        remindersDue: notifyPrefs.remindersDue !== false,
-        txUpdates: notifyPrefs.txUpdates !== false,
-      };
+      for (const key of NOTIFY_PREF_KEYS) {
+        if (key in notifyPrefs) updates[`notifyPrefs.${key}`] = notifyPrefs[key] !== false;
+      }
     }
     if (autoSend && typeof autoSend === "object") {
       updates.autoSend = {

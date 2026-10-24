@@ -16,6 +16,7 @@ import http from "../../api/http";
 import { Button, Card, Field, Input, PageHeader, SkeletonLines } from "../../components/ui";
 import { DetailPane } from "../../components/ui/Modal";
 import TokenLogo from "../../components/TokenLogo";
+import { ensureChainAddressRegistered } from "./chainAddresses";
 import { unlockWallet } from "./keystore";
 import {
   deriveBitcoinAccount,
@@ -104,6 +105,10 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
   const [bump, setBump] = useState(null);
 
   const isMainnet = network === "mainnet";
+
+  useEffect(() => {
+    if (address) ensureChainAddressRegistered("bitcoin", network, address);
+  }, [address, network]);
 
   useEffect(() => {
     setAddress(readCachedBitcoinAddress(userId, network, evmAddress));

@@ -9,8 +9,12 @@ const { verifyEmail } = require("./services/notify.service");
 const { turnstileStatus } = require("./services/turnstile.service");
 const { cgStatus } = require("./services/coingecko.service");
 const { normalizeCryptoSettings } = require("./services/cryptoSettings.service");
+const { parseQuery, rejectUnsafeInput, securityHeaders } = require("./middleware/security");
+const { rateLimit } = require("./middleware/rateLimit");
 
 const app = express();
+app.disable("x-powered-by");
+app.set("query parser", parseQuery);
 
 {
   const secret = String(process.env.JWT_SECRET || "");
@@ -26,17 +30,7 @@ const app = express();
 
 app.set("trust proxy", 1);
 
-app.use((req, res, next) => {
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Referrer-Policy", "no-referrer");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
-  res.setHeader("Cross-Origin-Resource-Policy", "same-site");
-  if (process.env.NODE_ENV === "production") {
-    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-  }
-  next();
-});
+app.use(securityHeaders);
 
 const allowedOrigins = [
   ...(process.env.CLIENT_URL || "")
@@ -59,6 +53,15 @@ app.use(
 
 app.use("/api/auth/me/avatar", express.json({ limit: "3mb" }));
 app.use(express.json({ limit: "100kb" }));
+app.use(rejectUnsafeInput);
+
+const apiLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 600,
+  name: "api",
+  message: "This network is sending requests too quickly. Please wait a minute.",
+});
+app.use("/api", (req, res, next) => (req.path === "/health" ? next() : apiLimit(req, res, next)));
 
 app.get("/api/health", (req, res) => {
   const mongoose = require("mongoose");
@@ -106,8 +109,14 @@ app.use("/api/portfolio", require("./routes/portfolio.routes"));
 app.use("/api/push", require("./routes/push.routes"));
 app.use("/api/wallet", require("./routes/wallet.routes"));
 app.use("/api/trading", require("./routes/trading.routes"));
+app.use("/api/profits", require("./routes/profits.routes"));
 app.use("/api/payment-addresses", require("./routes/paymentAddresses.routes"));
 app.use("/api/bitcoin", require("./routes/bitcoin.routes"));
+app.use("/api/utxo", require("./routes/bitcoin.routes"));
+app.use("/api/tron", require("./routes/tron.routes"));
+app.use("/api/solana", require("./routes/solana.routes"));
+app.use("/api/ton", require("./routes/ton.routes"));
+app.use("/api/ramp", require("./routes/ramp.routes"));
 app.use("/api/contact", require("./routes/contact.routes"));
 
 app.use((req, res) => {

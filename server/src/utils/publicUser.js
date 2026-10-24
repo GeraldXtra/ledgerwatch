@@ -1,3 +1,5 @@
+const { notifyPrefsOf } = require("./notifyPrefs");
+
 function publicUser(user) {
   if (!user) return null;
   const u = typeof user.toObject === "function" ? user.toObject() : user;
@@ -10,8 +12,9 @@ function publicUser(user) {
     walletAddress: u.walletAddress || null,
     avatarUrl: u.avatarUrl || null,
     companyName: u.companyName || "",
-    notifyPrefs: u.notifyPrefs || { marketAlerts: true, remindersDue: true, txUpdates: true },
+    notifyPrefs: notifyPrefsOf(u.notifyPrefs),
     crypto: cryptoSettings(u.crypto),
+    tradingLimits: u.tradingLimits || {},
     authProvider: u.authProvider === "google" ? "google" : "password",
     tradingMode: u.tradingMode || "paper",
     customTokens: u.customTokens || [],
@@ -24,7 +27,7 @@ function cryptoSettings(crypto) {
   const overrides = c.confirmationOverrides;
   return {
     enabled: c.enabled !== false,
-    defaultChainId: c.defaultChainId || 84532,
+    defaultChainId: c.defaultChainId || (process.env.ENABLE_MAINNET === "true" ? 8453 : 84532),
     expiryHours: c.expiryHours || 72,
     sweepDestination: c.sweepDestination || null,
     notifyOnDetected: c.notifyOnDetected !== false,

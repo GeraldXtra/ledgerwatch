@@ -101,6 +101,7 @@ async function sendToChain(chain, body, { timeoutMs = DEFAULT_TIMEOUT_MS } = {})
   const methods = methodsOf(body);
   const isBroadcast = methods.includes("eth_sendRawTransaction");
   const attempts = [];
+  let ambiguous = false;
 
   for (let i = 0; i < endpoints.length; i++) {
     const url = endpoints[i];
@@ -115,7 +116,16 @@ async function sendToChain(chain, body, { timeoutMs = DEFAULT_TIMEOUT_MS } = {})
             `Further fallthroughs on this chain are not logged for ten minutes.`
         );
       }
-      return { ok: true, status: r.status, text: r.text, host, attempt: i + 1, total: endpoints.length, attempts };
+      return {
+        ok: true,
+        status: r.status,
+        text: r.text,
+        host,
+        attempt: i + 1,
+        total: endpoints.length,
+        attempts,
+        ambiguous: false,
+      };
     }
 
     const reason = r.code ? `${r.code}${r.detail ? ` (${r.detail})` : ""}` : `HTTP ${r.status}`;
@@ -132,11 +142,21 @@ async function sendToChain(chain, body, { timeoutMs = DEFAULT_TIMEOUT_MS } = {})
         `[rpc] ${chain.name}: ${host} failed a BROADCAST ambiguously (${reason}). ` +
           `Not retrying elsewhere — the transaction may already be in the mempool.`
       );
+      ambiguous = true;
       break;
     }
   }
 
-  return { ok: false, status: 0, text: null, host: null, attempt: endpoints.length, total: endpoints.length, attempts };
+  return {
+    ok: false,
+    status: 0,
+    text: null,
+    host: null,
+    attempt: endpoints.length,
+    total: endpoints.length,
+    attempts,
+    ambiguous,
+  };
 }
 
 async function rpcCall(chain, method, params, opts = {}) {

@@ -1,5 +1,5 @@
 const PaymentAddress = require("../models/PaymentAddress");
-const { notifyUser } = require("./push.service");
+const { notifyActivity } = require("./activity.service");
 const { paidForDebt } = require("./receivables.service");
 
 const EMAIL_DEBOUNCE_MS = Number(process.env.SETTLEMENT_EMAIL_DEBOUNCE_MS || 20000);
@@ -53,19 +53,42 @@ async function onInvoiceSettled({
       ? `${totalUsdc.toFixed(2)} ${pa.tokenSymbol} confirmed on ${chain ? chain.name : "chain"}.`
       : `${Number(creditNgn).toLocaleString("en-NG")} naira recorded.`;
 
-  await notifyUser(
-    debt.userId,
-    {
-      title: fullyPaid
-        ? `Invoice settled — ${debt.debtorName}`
-        : `Part payment received — ${debt.debtorName}`,
-      body: received + (isLate ? " This arrived after the payment address had expired." : ""),
-      tag: `pay-${debt._id}`,
-      type: "payment",
-      url: "/app/receivables",
+  const naira = `₦${Number(creditNgn || 0).toLocaleString("en-NG", { maximumFractionDigits: 2 })}`;
+  const leftNaira = `₦${Number(remainingNgn || 0).toLocaleString("en-NG", { maximumFractionDigits: 2 })}`;
+  const isCryptoPayment = method === "crypto" && totalUsdc != null && pa;
+  const explorer =
+    isCryptoPayment && chain && chain.explorer && payment && /^0x[0-9a-fA-F]{64}$/.test(String(payment.txHash || ""))
+      ? `${chain.explorer}/tx/${payment.txHash}`
+      : null;
+  await notifyActivity(debt.userId, {
+    category: "moneyIn",
+    tag: `pay-${debt._id}`,
+    url: "/app/receivables",
+    symbol: isCryptoPayment ? pa.tokenSymbol : null,
+    title: fullyPaid ? `Invoice settled: ${debt.debtorName}` : `Part payment received: ${debt.debtorName}`,
+    body: received + (isLate ? " This arrived after the payment address had expired." : ""),
+    email: {
+      subject: fullyPaid
+        ? `${debt.debtorName} has paid in full`
+        : `${debt.debtorName} paid ${naira}`,
+      intro: fullyPaid
+        ? `${debt.debtorName} has settled their invoice. Nothing more is owed on it.`
+        : `${debt.debtorName} has made a part payment. ${leftNaira} is still owed on this invoice.`,
+      tone: "pos",
+      hero: {
+        label: "Payment received",
+        value: isCryptoPayment ? `${Number(totalUsdc).toFixed(2)} ${pa.tokenSymbol}` : naira,
+        sub: isCryptoPayment ? `${naira} on ${chain ? chain.name : "chain"}` : method === "bank" ? "Bank transfer" : "Recorded payment",
+      },
+      rows: [
+        { label: "Debtor", value: debt.debtorName },
+        { label: "Invoice total", value: `₦${Number(debt.amount || 0).toLocaleString("en-NG", { maximumFractionDigits: 2 })}` },
+        { label: "Still owed", value: leftNaira },
+        { label: "Late payment", value: isLate ? "Yes, after the address had expired" : undefined },
+        explorer ? { label: "Transaction", value: `${payment.txHash.slice(0, 10)}…${payment.txHash.slice(-6)}`, href: explorer, mono: true } : null,
+      ],
     },
-    "txUpdates"
-  ).catch(() => {});
+  }).catch(() => {});
 
   try {
     if (!debt.debtorEmail) return { emailed: false, reason: "no debtor email on file" };

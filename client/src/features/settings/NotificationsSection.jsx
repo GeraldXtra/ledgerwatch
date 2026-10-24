@@ -11,6 +11,26 @@ import {
 
 const CATEGORIES = [
   {
+    key: "moneyIn",
+    title: "Money received",
+    body: "When money reaches your wallet, an invoice is paid or part paid, or a payment is detected.",
+  },
+  {
+    key: "trades",
+    title: "Trades",
+    body: "When a live trade confirms or fails, and when a paper trade is filled.",
+  },
+  {
+    key: "profit",
+    title: "Profit",
+    body: "When the profit agent records a profit and when it is moved to your profit balance.",
+  },
+  {
+    key: "txUpdates",
+    title: "Transaction updates",
+    body: "When a transfer, approval or sweep confirms or fails.",
+  },
+  {
     key: "marketAlerts",
     title: "Market alerts",
     body: "When a watch condition hits and the agent has a recommendation for you.",
@@ -20,12 +40,9 @@ const CATEGORIES = [
     title: "Reminders due",
     body: "When an invoice reminder is ready to send to a client.",
   },
-  {
-    key: "txUpdates",
-    title: "Transaction updates",
-    body: "When a wallet transaction confirms or fails.",
-  },
 ];
+
+const PREF_KEYS = [...CATEGORIES.map((c) => c.key), "emailActivity"];
 
 export default function NotificationsSection() {
   const { user, updateProfile } = useAuth();
@@ -38,11 +55,9 @@ export default function NotificationsSection() {
     email: Boolean(as.email),
   });
   const np = user.notifyPrefs || {};
-  const [prefs, setPrefs] = useState({
-    marketAlerts: np.marketAlerts !== false,
-    remindersDue: np.remindersDue !== false,
-    txUpdates: np.txUpdates !== false,
-  });
+  const [prefs, setPrefs] = useState(() =>
+    Object.fromEntries(PREF_KEYS.map((k) => [k, np[k] !== false]))
+  );
 
   const [push, setPush] = useState(null);
   const [pushError, setPushError] = useState("");
@@ -154,7 +169,7 @@ export default function NotificationsSection() {
     setMsg("");
     try {
       await sendTestNotification();
-      setMsg("Test sent. Switch to another window. It appears when this tab is not focused.");
+      setMsg("Test sent. It appears in your notification area in a few seconds.");
     } catch (err) {
       setMsg(err?.response?.data?.error || "Could not send a test notification.");
     } finally {
@@ -231,9 +246,9 @@ export default function NotificationsSection() {
         ) : (
           <>
             <p className="muted small" style={{ margin: "4px 0 12px" }}>
-              Get alerts in your operating system's notification area even when this tab is in
-              the background. While this tab is focused you will get an in-app toast instead, so
-              you are never notified twice.
+              Get alerts in your operating system's notification area, even when this tab is in
+              the background or closed. Enable them on each device you use; every enabled device
+              receives them.
             </p>
             <div className="row wrap">
               {push && push.subscribed ? (
@@ -260,24 +275,39 @@ export default function NotificationsSection() {
           </p>
         )}
 
-        {push && push.subscribed && (
-          <div style={{ marginTop: 16 }}>
-            <div className="overline">Notify me about</div>
-            {CATEGORIES.map((c) => (
-              <label key={c.key} className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={prefs[c.key]}
-                  onChange={(e) => savePrefs({ ...prefs, [c.key]: e.target.checked })}
-                />
-                <span>
-                  <span className="toggle-title">{c.title}</span>
-                  <span className="muted small">{c.body}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-        )}
+        <div style={{ marginTop: 16 }}>
+          <div className="overline">Notify me about</div>
+          <p className="muted small" style={{ margin: "4px 0 8px" }}>
+            These choices apply to notifications on every device and to activity emails.
+          </p>
+          {CATEGORIES.map((c) => (
+            <label key={c.key} className="toggle-row">
+              <input
+                type="checkbox"
+                checked={prefs[c.key]}
+                onChange={(e) => savePrefs({ ...prefs, [c.key]: e.target.checked })}
+              />
+              <span>
+                <span className="toggle-title">{c.title}</span>
+                <span className="muted small">{c.body}</span>
+              </span>
+            </label>
+          ))}
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={prefs.emailActivity}
+              onChange={(e) => savePrefs({ ...prefs, emailActivity: e.target.checked })}
+            />
+            <span>
+              <span className="toggle-title">Email me about activity</span>
+              <span className="muted small">
+                A receipt by email for money received, trades, transfers, sweeps and profit, sent
+                to {user.email}.
+              </span>
+            </span>
+          </label>
+        </div>
 
         <p className="settings-note">
           Desktop notifications need the browser running. It can be minimised, but not fully

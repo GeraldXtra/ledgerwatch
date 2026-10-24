@@ -199,6 +199,14 @@ export default function SweepModal({ addresses, chains, mainAddress, destination
                             </span>
                           </>
                         )}
+                        {row?.unconfirmed && (
+                          <>
+                            {" · "}
+                            <span className="error-text">
+                              sent, but the network did not confirm it arrived — check this hash before sweeping again
+                            </span>
+                          </>
+                        )}
                         {p.needsGasFunding && !row && (
                           <>
                             {" · "}

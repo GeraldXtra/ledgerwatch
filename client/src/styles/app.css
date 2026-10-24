@@ -1680,6 +1680,11 @@
   background: var(--line-strong);
 }
 
+.alloc-seg.profit,
+.alloc-dot.profit {
+  background: var(--money);
+}
+
 .alloc-legend {
   display: flex;
   flex-wrap: wrap;
@@ -2175,6 +2180,11 @@ button.coin-result:focus-visible {
 
 .quick-chips {
   gap: 6px;
+}
+
+.chip .coin-logo {
+  width: 16px;
+  height: 16px;
 }
 
 .watch-edit .row .input,

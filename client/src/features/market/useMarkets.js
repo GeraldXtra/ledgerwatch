@@ -5,6 +5,7 @@ const POLL_MS = 10000;
 
 export default function useMarkets(coinIds) {
   const [markets, setMarkets] = useState({});
+  const [logos, setLogos] = useState({});
   const [stale, setStale] = useState(false);
   const [updatedAt, setUpdatedAt] = useState(null);
   const [lastFetchedAt, setLastFetchedAt] = useState(null);
@@ -26,6 +27,7 @@ export default function useMarkets(coinIds) {
       const map = {};
       for (const m of data.markets || []) map[m.id] = m;
       setMarkets(map);
+      setLogos((prev) => ({ ...prev, ...(data.logos || {}) }));
       setStale(Boolean(data.stale));
       setUpdatedAt(data.updatedAt || null);
       setLastFetchedAt(Date.now());
@@ -73,5 +75,5 @@ export default function useMarkets(coinIds) {
     };
   }, [idsKey, fetchNow]);
 
-  return { markets, stale, updatedAt, lastFetchedAt, refresh: fetchNow };
+  return { markets, logos, stale, updatedAt, lastFetchedAt, refresh: fetchNow };
 }

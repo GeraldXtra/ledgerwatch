@@ -46,7 +46,7 @@ async function optionalUserId(req) {
   const header = String((req.headers && req.headers.authorization) || "");
   if (!header.startsWith("Bearer ")) return null;
   try {
-    const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET);
+    const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET, { algorithms: ["HS256"] });
     if (!payload || !payload.id) return null;
 
     const User = require("../models/User");

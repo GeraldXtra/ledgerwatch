@@ -54,6 +54,7 @@ export default function LiveSwapModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [impactAccepted, setImpactAccepted] = useState(false);
+  const [safetyAccepted, setSafetyAccepted] = useState(false);
   const [done, setDone] = useState(null);
   const [replan, setReplan] = useState(0);
 
@@ -66,6 +67,7 @@ export default function LiveSwapModal({
     setPlan(null);
     setPlanError("");
     setImpactAccepted(false);
+    setSafetyAccepted(false);
     if (spentToday == null) return undefined;
     (async () => {
       try {
@@ -73,6 +75,7 @@ export default function LiveSwapModal({
         const p = await planSwap({
           chain,
           address,
+          side,
           tokenIn,
           tokenOut,
           amountIn,
@@ -94,23 +97,35 @@ export default function LiveSwapModal({
 
   const explorerTx = (h) => (chain.explorer ? `${chain.explorer}/tx/${h}` : null);
 
-  async function doApprove() {
+  async function doApprove({ reset = false } = {}) {
     setBusy(true);
     setError("");
     try {
-      await approveRouter({ plan, password, onStep: setStep });
+      const approval = await approveRouter({ plan, password, reset, onStep: setStep });
       setPassword("");
+      if (!approval.recorded) {
+        toast(
+          (reset
+            ? "The allowance reset went through, but it could not be saved to your history. Transaction "
+            : "The approval went through, but it could not be saved to your history. Transaction ") +
+            String(approval.hash).slice(0, 10) + "…",
+          { type: "error", duration: 12000 }
+        );
+      }
       const amountIn = toUnits(amountDisplay, tokenIn.decimals);
       const next = await planSwap({
-        chain, address, tokenIn, tokenOut, amountIn,
+        chain, address, side, tokenIn, tokenOut, amountIn,
         amountInDisplay: Number(amountDisplay), slippagePct: slippage,
         limitOverrides, spentToday,
       });
       setPlan(next);
       setImpactAccepted(false);
+      setSafetyAccepted(false);
     } catch (err) {
       setError(
-        `${friendly(err)} Your approval may already be confirmed on chain; close and reopen this trade to continue without paying for it again.`
+        reset
+          ? `${friendly(err)} The reset may already be confirmed on chain; close and reopen this trade to check before paying for it again.`
+          : `${friendly(err)} Your approval may already be confirmed on chain; close and reopen this trade to continue without paying for it again.`
       );
     } finally {
       setBusy(false);
@@ -155,14 +170,6 @@ export default function LiveSwapModal({
         }
       }
 
-      if (res && res.recorded === false) {
-        toast(
-          "The trade went through, but it could not be saved to your history. It will not " +
-            "count towards today's spending limit. Transaction " + String(res.txHash).slice(0, 10) + "…",
-          { type: "error", duration: 14000 }
-        );
-      }
-
       if (alertId) {
         try {
           await http.post(`/api/alerts/${alertId}/executed`, {
@@ -201,6 +208,9 @@ export default function LiveSwapModal({
   const blocked = plan && !plan.ok;
   const impactBlocking = plan?.needsExtraConfirm && !impactAccepted;
   const addressBlocking = needsAcknowledgement(token) && !addressChecked;
+  const safetyBlocking = plan?.needsSafetyAck && !safetyAccepted;
+  const soldBack =
+    plan?.safety?.checked && plan.safety.ok && plan.safety.soldBack != null ? plan.safety : null;
 
   return (
     <Modal
@@ -234,18 +244,30 @@ export default function LiveSwapModal({
 
       {done ? (
         <>
-          <div className="crypto-notice">
-            <span className="icon-tile pos">
-              <ShieldCheck size={16} />
-            </span>
-            <div className="grow">
-              <div className="card-title">Trade submitted</div>
-              <p className="muted small" style={{ margin: "4px 0 0" }}>
-                {amountDisplay} {tokenIn.symbol} for about {Number(done.amountOut).toFixed(6)}{" "}
-                {tokenOut.symbol}. It appears in your wallet history and confirms in a few seconds.
-              </p>
+          {done.broadcast === "unknown" ? (
+            <div className="against-note" role="alert">
+              <TriangleAlert size={15} />
+              <span>
+                This swap was signed and sent, but the network did not confirm that it received it
+                ({done.broadcastReason}). It is saved in your history as pending and counts towards
+                today&apos;s limit until the chain reports it. Check it on the explorer before you
+                trade again, so it is not bought twice.
+              </span>
             </div>
-          </div>
+          ) : (
+            <div className="crypto-notice">
+              <span className="icon-tile pos">
+                <ShieldCheck size={16} />
+              </span>
+              <div className="grow">
+                <div className="card-title">Trade submitted</div>
+                <p className="muted small" style={{ margin: "4px 0 0" }}>
+                  {amountDisplay} {tokenIn.symbol} for about {Number(done.amountOut).toFixed(6)}{" "}
+                  {tokenOut.symbol}. It appears in your wallet history and confirms in a few seconds.
+                </p>
+              </div>
+            </div>
+          )}
           {explorerTx(done.txHash) && (
             <a className="tx-hash-link" href={explorerTx(done.txHash)} target="_blank" rel="noopener noreferrer">
               View on the explorer <ExternalLink size={12} />
@@ -342,6 +364,18 @@ export default function LiveSwapModal({
                 </dd>
               </div>
             )}
+            {soldBack && (
+              <div>
+                <dt>Selling it straight back</dt>
+                <dd className="num">
+                  ≈ {Number(ethers.formatUnits(soldBack.soldBack, tokenIn.decimals)).toFixed(6)}{" "}
+                  {tokenIn.symbol}
+                  <span className="quote-sub">
+                    for the minimum received, in a simulation run before signing
+                  </span>
+                </dd>
+              </div>
+            )}
           </dl>
 
           <Field label="Slippage tolerance">
@@ -402,6 +436,33 @@ export default function LiveSwapModal({
             </label>
           )}
 
+          {plan.needsSafetyAck && (
+            <>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={safetyAccepted}
+                  disabled={busy}
+                  onChange={(e) => setSafetyAccepted(e.target.checked)}
+                />
+                <span>
+                  <span className="toggle-title">
+                    I accept that {tokenOut.symbol} could not be checked for being sold again
+                  </span>
+                  <span className="muted small">
+                    Asked for this trade only. Tokens on the hand-checked list for this network do not
+                    need it.
+                  </span>
+                </span>
+              </label>
+              <div className="row" style={{ justifyContent: "flex-end" }}>
+                <Button variant="ghost" onClick={() => setReplan((n) => n + 1)} disabled={busy}>
+                  Check again
+                </Button>
+              </div>
+            </>
+          )}
+
           {plan.needsApproval ? (
             <>
               <p className="settings-note">
@@ -414,13 +475,23 @@ export default function LiveSwapModal({
               </Field>
               <div className="row" style={{ justifyContent: "flex-end" }}>
                 <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-                <Button
-                  variant="primary"
-                  onClick={doApprove}
-                  disabled={busy || !password || blocked || addressBlocking}
-                >
-                  {busy ? step || "Approving…" : `Approve ${tokenIn.symbol}`}
-                </Button>
+                {plan.needsAllowanceReset ? (
+                  <Button
+                    variant="primary"
+                    onClick={() => doApprove({ reset: true })}
+                    disabled={busy || !password || addressBlocking}
+                  >
+                    {busy ? step || "Resetting…" : `Reset the ${tokenIn.symbol} allowance to zero`}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    onClick={() => doApprove()}
+                    disabled={busy || !password || blocked || addressBlocking || safetyBlocking}
+                  >
+                    {busy ? step || "Approving…" : `Approve ${tokenIn.symbol}`}
+                  </Button>
+                )}
               </div>
             </>
           ) : (
@@ -438,7 +509,7 @@ export default function LiveSwapModal({
                 <Button
                   variant="primary"
                   onClick={doSwap}
-                  disabled={busy || !password || blocked || impactBlocking || addressBlocking}
+                  disabled={busy || !password || blocked || impactBlocking || addressBlocking || safetyBlocking}
                 >
                   {busy ? step || "Signing…" : `Sign and ${side === "buy" ? "buy" : "sell"}`}
                 </Button>

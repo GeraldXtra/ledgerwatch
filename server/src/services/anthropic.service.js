@@ -172,6 +172,38 @@ async function explainAlert({
   }
 }
 
+async function explainProfit({ mode, symbol, qty, avgCost, price, profitUsd, profitPct, totalProfitUsd, cashSymbol, partial }) {
+  const anthropic = getClient();
+  if (!anthropic) return null;
+
+  const prompt = [
+    `You are LedgerWatch's profit agent. Write ONE or TWO plain sentences telling a trader about a profit they just realised.`,
+    `Mode: ${mode === "live" ? "live trade with real money" : "paper trade with simulated money"}.`,
+    `Sold ${qty} ${symbol} at ${price} USD each, bought at an average of ${avgCost} USD each.`,
+    `Profit: ${profitUsd.toFixed(2)} USD (${profitPct.toFixed(2)}%).`,
+    partial ? "Only part of what was sold had a recorded purchase price; the profit covers that part." : "",
+    totalProfitUsd != null ? `Total profit recorded so far in this mode: ${totalProfitUsd.toFixed(2)} USD.` : "",
+    mode === "live"
+      ? `The profit, ${profitUsd.toFixed(2)} ${cashSymbol}, is ready to move to their profit wallet once they confirm it.`
+      : "The profit has been moved from trading cash to their paper profit balance.",
+    "Use plain words. No advice to buy or sell. No emojis. No dashes. Return ONLY the text.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  try {
+    const response = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 160,
+      messages: [{ role: "user", content: prompt }],
+    });
+    return extractText(response);
+  } catch (err) {
+    console.error("explainProfit AI error:", err.message);
+    return null;
+  }
+}
+
 async function marketChat(message, context) {
   const anthropic = getClient();
   if (!anthropic) return null;
@@ -238,6 +270,7 @@ module.exports = {
   draftReminder,
   answerReceivablesQuery,
   explainAlert,
+  explainProfit,
   marketChat,
   MODEL,
 };

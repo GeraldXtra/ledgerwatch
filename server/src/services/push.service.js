@@ -39,12 +39,12 @@ function signActionToken(userId, act, ref) {
   return jwt.sign(
     { sub: String(userId), act, ref: String(ref), kind: "push_action" },
     process.env.JWT_SECRET,
-    { expiresIn: "15m" }
+    { expiresIn: "15m", algorithm: "HS256" }
   );
 }
 
 function verifyActionToken(token) {
-  const decoded = jwt.verify(token, process.env.JWT_SECRET);
+  const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ["HS256"] });
   if (decoded.kind !== "push_action") throw new Error("Not a push action token");
   return decoded;
 }
@@ -63,7 +63,9 @@ async function wantsCategory(userId, category) {
   }
 }
 
-async function notifyUser(userId, payload, category) {
+const DEFAULT_PUSH_TTL = 24 * 60 * 60;
+
+async function notifyUser(userId, payload, category, opts = {}) {
   const wp = getWebPush();
   if (!wp) return { sent: 0, skipped: true };
 
@@ -85,13 +87,18 @@ async function notifyUser(userId, payload, category) {
   }
 
   const body = JSON.stringify(payload);
+  const options = {
+    TTL: Number.isFinite(opts.ttl) ? opts.ttl : DEFAULT_PUSH_TTL,
+    urgency: opts.urgency || "high",
+  };
+  if (payload && payload.tag) options.topic = String(payload.tag).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32) || undefined;
   let sent = 0;
   let pruned = 0;
 
   await Promise.all(
     subs.map(async (sub) => {
       try {
-        await wp.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, body);
+        await wp.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, body, options);
         sent++;
       } catch (err) {
         if (err.statusCode === 404 || err.statusCode === 410) {

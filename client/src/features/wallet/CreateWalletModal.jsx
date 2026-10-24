@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, Eye, EyeOff, ShieldCheck, X } from "lucide-react";
 import { Button, Field, Input, Modal, PageHeader } from "../../components/ui";
-import { createWallet, encryptAndStore } from "./keystore";
+import { encryptAndStore } from "./keystore";
+import { createWallet } from "./walletKeys";
 import { saveAddress } from "./walletApi";
 import { assessWalletPassword, MIN_WALLET_PASSWORD } from "./passwordStrength";
 import { useAuth } from "../../context/AuthContext";

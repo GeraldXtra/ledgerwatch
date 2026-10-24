@@ -6,7 +6,7 @@ const { getChain } = require("../config/chains");
 const { GRACE_DAYS, GRACE_SCAN_MINUTES, blockTimeFor } = require("../config/derivation");
 const { confirmationsFor } = require("./cryptoSettings.service");
 const { recomputeDebtStatus, paidForDebt } = require("./receivables.service");
-const { notifyUser } = require("./push.service");
+const { notifyActivity } = require("./activity.service");
 const { rpcCall, rpcCallTyped } = require("./rpc.service");
 const { onInvoiceSettled } = require("./settlement.service");
 const { resyncActivePaymentAddress } = require("./paymentAddress.service");
@@ -224,18 +224,28 @@ async function settleIfDue(pa, chain) {
         `on ${chain.name}: invoice ${pa.debtId} no longer exists. Recorded as unattributed ` +
         `against the address; the funds are still there and can be swept.`
     );
-    await notifyUser(
-      pa.userId,
-      {
-        title: "Money arrived on a deleted invoice",
-        body:
-          `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} reached a payment address whose ` +
-          `invoice no longer exists. It is safe in your derived address and can be swept.`,
-        type: "tx",
+    await notifyActivity(pa.userId, {
+      category: "moneyIn",
+      tag: `orphan-${pa._id}`,
+      url: "/app/receivables",
+      symbol: pa.tokenSymbol,
+      title: "Money arrived on a deleted invoice",
+      body:
+        `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} reached a payment address whose ` +
+        `invoice no longer exists. It is safe in your derived address and can be swept.`,
+      email: {
+        subject: `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} arrived on a deleted invoice`,
+        intro:
+          "Money reached a payment address whose invoice has since been deleted. Nothing was lost: " +
+          "it is held at that address, which only your wallet can move, and you can sweep it to your wallet.",
+        tone: "info",
+        hero: { label: "Received", value: `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol}`, sub: `on ${chain.name}` },
+        rows: [
+          { label: "Payment address", value: pa.address, mono: true },
+          { label: "Network", value: chain.name },
+        ],
       },
-      "txUpdates"
-    ).catch(() => {
-    });
+    }).catch(() => {});
     return { outcome: "ORPHANED_INVOICE", unattributedUsdc: unsettledUsdc };
   }
 
@@ -256,19 +266,30 @@ async function settleIfDue(pa, chain) {
         `swept from this address like any other balance.`
     );
 
-    await notifyUser(
-      pa.userId,
-      {
-        title: "Money arrived on a settled invoice",
-        body:
-          `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} reached the address for ` +
-          `${debt.debtorName}, which is already paid in full. It is safe in your ` +
-          `derived address and can be swept.`,
-        type: "tx",
+    await notifyActivity(pa.userId, {
+      category: "moneyIn",
+      tag: `unattributed-${pa._id}`,
+      url: "/app/receivables",
+      symbol: pa.tokenSymbol,
+      title: "Money arrived on a settled invoice",
+      body:
+        `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} reached the address for ` +
+        `${debt.debtorName}, which is already paid in full. It is safe in your ` +
+        `derived address and can be swept.`,
+      email: {
+        subject: `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} arrived for ${debt.debtorName}`,
+        intro:
+          `${debt.debtorName} has already paid this invoice in full, and more money has arrived at its ` +
+          "payment address. It is recorded and safe there, and you can sweep it to your wallet.",
+        tone: "info",
+        hero: { label: "Received", value: `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol}`, sub: `on ${chain.name}` },
+        rows: [
+          { label: "Debtor", value: debt.debtorName },
+          { label: "Payment address", value: pa.address, mono: true },
+          { label: "Network", value: chain.name },
+        ],
       },
-      "txUpdates"
-    ).catch(() => {
-    });
+    }).catch(() => {});
 
     return { outcome: "UNATTRIBUTED", unattributedUsdc: unsettledUsdc };
   }
@@ -582,18 +603,15 @@ async function scanForeignTokens(pa, chain, windows) {
         `on ${chain.name}. Recorded on the invoice; they cannot settle it, and the sweep ` +
         "moves only the quoted token, so recovering them needs the owner."
     );
-    await notifyUser(
-      pa.userId,
-      {
-        title: "The wrong token arrived on an invoice",
-        body:
-          "Someone sent a token this invoice does not accept. It is safe at the invoice " +
-          "address and is shown on the invoice, but it cannot settle it.",
-        type: "tx",
-      },
-      "txUpdates"
-    ).catch(() => {
-    });
+    await notifyActivity(pa.userId, {
+      category: "moneyIn",
+      tag: `foreign-${pa._id}`,
+      url: "/app/receivables",
+      title: "The wrong token arrived on an invoice",
+      body:
+        "Someone sent a token this invoice does not accept. It is safe at the invoice " +
+        "address and is shown on the invoice, but it cannot settle it.",
+    }).catch(() => {});
   }
 }
 
@@ -689,19 +707,16 @@ async function runPaymentWatchPass({ userId } = {}) {
       if (res.found > 0) {
         const owner = await User.findById(pa.userId).select("crypto");
         if (!owner || owner.crypto?.notifyOnDetected !== false) {
-          await notifyUser(
-            pa.userId,
-            {
-              title: res.late ? "Late payment detected" : "Payment detected",
-              body: res.late
-                ? `${pa.tokenSymbol} arrived on ${chain.name} after this address expired. Waiting for confirmations.`
-                : `${pa.tokenSymbol} arrived on ${chain.name}. Waiting for confirmations.`,
-              tag: `detect-${pa._id}`,
-              type: "payment",
-              url: "/app/receivables",
-            },
-            "txUpdates"
-          ).catch(() => {});
+          await notifyActivity(pa.userId, {
+            category: "moneyIn",
+            tag: `detect-${pa._id}`,
+            url: "/app/receivables",
+            symbol: pa.tokenSymbol,
+            title: res.late ? "Late payment detected" : "Payment detected",
+            body: res.late
+              ? `${pa.tokenSymbol} arrived on ${chain.name} after this address expired. Waiting for confirmations.`
+              : `${pa.tokenSymbol} arrived on ${chain.name}. Waiting for confirmations.`,
+          }).catch(() => {});
         }
       }
 

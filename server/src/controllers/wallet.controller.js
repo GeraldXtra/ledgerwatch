@@ -1,8 +1,11 @@
 const User = require("../models/User");
+const mongoose = require("mongoose");
 const WalletTx = require("../models/WalletTx");
+const ProfitRecord = require("../models/ProfitRecord");
 const { listChains, getChain } = require("../config/chains");
-const { sendToChain, rpcCallTyped } = require("../services/rpc.service");
+const rpcService = require("../services/rpc.service");
 const { sanitizeText } = require("../services/walletHistory.service");
+const { limitsFor } = require("../config/tradingLimits");
 
 const ALLOWED_METHODS = new Set([
   "eth_chainId",
@@ -10,6 +13,7 @@ const ALLOWED_METHODS = new Set([
   "eth_blockNumber",
   "eth_getBalance",
   "eth_call",
+  "eth_simulateV1",
   "eth_estimateGas",
   "eth_gasPrice",
   "eth_maxPriorityFeePerGas",
@@ -25,16 +29,32 @@ const ALLOWED_METHODS = new Set([
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
+function defaultChainId() {
+  const mainnet = process.env.ENABLE_MAINNET === "true";
+  const preferred = mainnet ? 8453 : 84532;
+  if (getChain(preferred)) return preferred;
+  const list = listChains();
+  const first = list.find((c) => (mainnet ? !c.testnet : c.testnet)) || list[0];
+  return first ? first.chainId : null;
+}
+
 async function chains(req, res) {
   return res.json({
     chains: listChains(),
     enableMainnet: process.env.ENABLE_MAINNET === "true",
+    defaultChainId: defaultChainId(),
   });
 }
 
 const MAX_BATCH = 24;
 
+function isBroadcastBody(body) {
+  const items = Array.isArray(body) ? body : [body];
+  return items.some((item) => item && item.method === "eth_sendRawTransaction");
+}
+
 async function rpc(req, res) {
+  const broadcast = isBroadcastBody(req.body);
   try {
     const chain = getChain(req.params.chainId);
     if (!chain) return res.status(400).json({ error: "Unknown or disabled chain" });
@@ -55,7 +75,7 @@ async function rpc(req, res) {
       }
     }
 
-    const upstream = await sendToChain(chain, body);
+    const upstream = await rpcService.sendToChain(chain, body);
 
     if (!upstream.ok) {
       const detail = upstream.attempts.map((a) => `${a.host} -> ${a.reason}`).join(" | ");
@@ -70,6 +90,7 @@ async function rpc(req, res) {
         reason: first.reason || "unknown",
         code: first.code || null,
         endpointsTried: upstream.total,
+        ...(broadcast ? { broadcast: upstream.ambiguous ? "unknown" : "not_sent" } : {}),
       });
     }
 
@@ -78,7 +99,11 @@ async function rpc(req, res) {
     return res.send(upstream.text);
   } catch (err) {
     console.error("wallet rpc proxy error:", err.message, err.cause ? `cause=${err.cause.code || err.cause.message}` : "");
-    return res.status(502).json({ error: "RPC upstream failed", reason: err.message });
+    return res.status(502).json({
+      error: "RPC upstream failed",
+      reason: err.message,
+      ...(broadcast ? { broadcast: "unknown" } : {}),
+    });
   }
 }
 
@@ -137,7 +162,7 @@ async function recordTx(req, res) {
     const {
       chainId, hash, from, to, value, symbol, tokenAddress, direction,
       kind, tokenOut, tokenOutSymbol, amountOut, minAmountOut, feeTier,
-      priceImpactPct, side, alertId, route,
+      priceImpactPct, side, alertId, route, profitId,
     } = req.body || {};
     if (!getChain(chainId)) return res.status(400).json({ error: "Unknown or disabled chain" });
     if (!HASH_RE.test(hash || "")) return res.status(400).json({ error: "Invalid tx hash" });
@@ -160,7 +185,41 @@ async function recordTx(req, res) {
       return res.status(400).json({ error: "Invalid token symbol" });
     }
 
+    const existing = await WalletTx.findOne({ hash, userId: req.user._id });
+    if (existing) return res.status(200).json({ tx: existing });
+
+    let profitRow = null;
+    if (profitId != null) {
+      if (!mongoose.isValidObjectId(profitId)) return res.status(400).json({ error: "Invalid profit record" });
+      profitRow = await ProfitRecord.findOne({ _id: profitId, userId: req.user._id, mode: "live" }).lean();
+      if (!profitRow || !["pending", "moving"].includes(profitRow.status)) {
+        return res.status(409).json({ error: "That profit has already been moved or set aside.", code: "profit_closed" });
+      }
+      const sameToken = String(tokenAddress || "").toLowerCase() === String(profitRow.cashAddress || "");
+      const withinProfit = Number(value) > 0 && Number(value) <= Number(profitRow.profitAmount) + 1e-12;
+      if (kind === "swap" || kind === "approval" || direction === "in" || Number(chainId) !== profitRow.chainId || !sameToken || !withinProfit) {
+        return res.status(400).json({
+          error: `A profit move must send at most ${profitRow.profitAmount} ${profitRow.cashSymbol} on the chain where the profit was made.`,
+          code: "profit_mismatch",
+        });
+      }
+    }
+
+    if (kind === "swap") {
+      const verdict = await checkSwapLimits({
+        user: req.user,
+        chain: getChain(chainId),
+        side,
+        symbol,
+        value,
+        tokenOutSymbol,
+        amountOut,
+      });
+      if (!verdict.ok) return res.status(409).json({ error: verdict.error, code: verdict.code });
+    }
+
     const tx = await WalletTx.create({
+      profitId: profitRow ? profitRow._id : null,
       userId: req.user._id,
       chainId: Number(chainId),
       hash,
@@ -182,6 +241,11 @@ async function recordTx(req, res) {
       side: ["buy", "sell"].includes(side) ? side : null,
       alertId: alertId || null,
     });
+    if (profitRow) {
+      await require("../services/profit.service")
+        .markMoving(req.user._id, profitRow._id, { txId: tx._id, txHash: tx.hash, profitAddress: to })
+        .catch((err) => console.error("wallet recordTx profit link:", err.message));
+    }
     return res.status(201).json({ tx });
   } catch (err) {
     if (err.code === 11000) {
@@ -191,6 +255,41 @@ async function recordTx(req, res) {
     }
     console.error("wallet recordTx error:", err.message);
     return res.status(500).json({ error: "Failed to record transaction" });
+  }
+}
+
+function announceLater(tx) {
+  if (!tx || !["confirmed", "failed"].includes(tx.status)) return;
+  require("../services/walletActivity.service")
+    .announceWalletTx(tx._id)
+    .catch((err) => console.error("[wallet] announce failed:", err.message));
+}
+
+const MAX_CHAIN_ADDRESSES = 30;
+
+async function listChainAddresses(req, res) {
+  const user = await User.findById(req.user._id).select("chainAddresses").lean();
+  return res.json({
+    addresses: ((user && user.chainAddresses) || []).map(({ chain, network, address, addedAt }) => ({ chain, network, address, addedAt })),
+  });
+}
+
+async function setChainAddress(req, res) {
+  try {
+    const { chain, network, address } = req.body || {};
+    const { validateChainAddress } = require("../config/chainAddresses");
+    const v = validateChainAddress(chain, network, address);
+    if (!v.ok) return res.status(400).json({ error: v.reason });
+    await User.updateOne({ _id: req.user._id }, { $pull: { chainAddresses: { chain: v.chain, network: v.network } } });
+    const r = await User.updateOne(
+      { _id: req.user._id, [`chainAddresses.${MAX_CHAIN_ADDRESSES - 1}`]: { $exists: false } },
+      { $push: { chainAddresses: { chain: v.chain, network: v.network, address: v.address, addedAt: new Date() } } }
+    );
+    if (!r.modifiedCount) return res.status(409).json({ error: "Too many addresses are registered on this account." });
+    return res.status(201).json({ ok: true, chain: v.chain, network: v.network, address: v.address });
+  } catch (err) {
+    console.error("wallet setChainAddress error:", err.message);
+    return res.status(500).json({ error: "Failed to save that address" });
   }
 }
 
@@ -208,38 +307,50 @@ async function updateTxStatus(req, res) {
       const chain = getChain(tx.chainId);
       if (!chain) return res.status(400).json({ error: "Unknown or disabled chain" });
 
-      const read = await rpcCallTyped(chain, "eth_getTransactionReceipt", [tx.hash]);
-      if (!read.ok) {
-        console.warn(`[wallet] could not verify swap ${tx.hash} on ${chain.name}: ${read.reason}`);
+      const unverified = (reason) => {
+        console.warn(`[wallet] could not verify swap ${tx.hash} on ${chain.name}: ${reason}`);
         return res.status(503).json({
           error:
             `${chain.name} could not be reached to confirm that this swap failed, so nothing was ` +
             `changed. It still counts towards your daily limit until the chain says otherwise.`,
           code: "unverified",
         });
-      }
+      };
+
+      const read = await rpcService.rpcCallTyped(chain, "eth_getTransactionReceipt", [tx.hash]);
+      if (!read.ok) return unverified(read.reason);
       const receipt = read.result;
       if (receipt && receipt.status === "0x1") {
         tx.status = "confirmed";
         await tx.save();
+        announceLater(tx);
         return res.status(409).json({
           tx,
           error: "That swap succeeded on chain, so it has been recorded as confirmed.",
         });
       }
       if (!receipt) {
-        return res.status(409).json({
-          tx,
-          error:
-            "That swap has not been mined yet, so it cannot be recorded as failed. It still " +
-            "counts towards your daily limit until the chain reports it.",
-          code: "not_mined",
-        });
+        const seen = await rpcService.rpcCallTyped(chain, "eth_getTransactionByHash", [tx.hash]);
+        if (!seen.ok) return unverified(seen.reason);
+        if (seen.result) {
+          return res.status(409).json({
+            tx,
+            error:
+              "That swap has not been mined yet, so it cannot be recorded as failed. It still " +
+              "counts towards your daily limit until the chain reports it.",
+            code: "not_mined",
+          });
+        }
+        tx.status = "failed";
+        await tx.save();
+        announceLater(tx);
+        return res.json({ tx, notOnChain: true });
       }
     }
 
     tx.status = status;
     await tx.save();
+    announceLater(tx);
     return res.json({ tx });
   } catch (err) {
     console.error("wallet updateTxStatus error:", err.message);
@@ -249,29 +360,73 @@ async function updateTxStatus(req, res) {
 
 const CASH_RE = /^(USDC|USDT|USD₮0|USDT0|USDt)$/i;
 
+function swapCashValue({ side, symbol, value, tokenOutSymbol, amountOut }) {
+  if (side === "buy" && CASH_RE.test(symbol || "")) return Number(value) || 0;
+  if (side === "sell" && CASH_RE.test(tokenOutSymbol || "")) return Number(amountOut) || 0;
+  return null;
+}
+
+async function spentInLast24h(userId) {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const rows = await WalletTx.find({
+    userId,
+    kind: "swap",
+    status: { $ne: "failed" },
+    createdAt: { $gte: since },
+  })
+    .select("side symbol value tokenOutSymbol amountOut")
+    .lean();
+
+  let spent = 0;
+  let unpriced = 0;
+  for (const t of rows) {
+    const cash = swapCashValue(t);
+    if (cash == null) unpriced += 1;
+    else spent += cash;
+  }
+  return { spent, unpriced, swaps: rows.length };
+}
+
+async function checkSwapLimits({ user, chain, side, symbol, value, tokenOutSymbol, amountOut }) {
+  const cash = swapCashValue({ side, symbol, value, tokenOutSymbol, amountOut });
+  if (cash == null) {
+    return {
+      ok: false,
+      code: "unpriced_swap",
+      error:
+        "This swap could not be valued in dollars, so it cannot be checked against your daily live " +
+        "trading limit. It was not recorded and should not be sent.",
+    };
+  }
+  const limits = limitsFor(chain, user && user.tradingLimits);
+  if (cash > limits.perTrade) {
+    return {
+      ok: false,
+      code: "trade_limit",
+      error: `This swap is worth about $${cash.toFixed(2)}, above your $${limits.perTrade} limit for one live trade.`,
+    };
+  }
+  const { spent } = await spentInLast24h(user._id);
+  if (spent + cash > limits.perDay) {
+    const left = Math.max(0, limits.perDay - spent);
+    return {
+      ok: false,
+      code: "daily_limit",
+      error:
+        `This swap would take your live trading in the last 24 hours to $${(spent + cash).toFixed(2)}, ` +
+        `above your $${limits.perDay} daily limit. $${left.toFixed(2)} is left today.`,
+    };
+  }
+  return { ok: true, cash, spent, limits };
+}
+
 async function spend24h(req, res) {
   try {
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const rows = await WalletTx.find({
-      userId: req.user._id,
-      kind: "swap",
-      status: { $ne: "failed" },
-      createdAt: { $gte: since },
-    })
-      .select("side symbol value tokenOutSymbol amountOut")
-      .lean();
-
-    let spent = 0;
-    let unpriced = 0;
-    for (const t of rows) {
-      if (t.side === "buy" && CASH_RE.test(t.symbol || "")) spent += Number(t.value) || 0;
-      else if (t.side === "sell" && CASH_RE.test(t.tokenOutSymbol || "")) spent += Number(t.amountOut) || 0;
-      else unpriced += 1;
-    }
+    const { spent, unpriced, swaps } = await spentInLast24h(req.user._id);
     return res.json({
       spent24h: Number(spent.toFixed(2)),
       currency: "USD",
-      swaps: rows.length,
+      swaps,
       unpricedSwaps: unpriced,
       complete: unpriced === 0,
     });
@@ -392,6 +547,9 @@ async function discoveredAct(req, res) {
 
 module.exports = {
   ALLOWED_METHODS,
+  defaultChainId,
+  checkSwapLimits,
+  spentInLast24h,
   spend24h,
   chains,
   rpc,
@@ -400,6 +558,8 @@ module.exports = {
   listTxs,
   recordTx,
   updateTxStatus,
+  listChainAddresses,
+  setChainAddress,
   discovered,
   discoveredAct,
 };

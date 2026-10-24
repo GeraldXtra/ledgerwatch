@@ -1,5 +1,14 @@
-import { ethers } from "ethers";
+import { getAddress } from "ethers";
 import { getToken } from "../../api/http";
+
+async function walletClass() {
+  try {
+    const { Wallet } = await import("ethers");
+    return Wallet;
+  } catch {
+    throw new Error("The wallet code could not be loaded. Reload the page and try again.");
+  }
+}
 
 const BASE_KEY = "ledgerwatch.wallet.keystore";
 
@@ -41,7 +50,7 @@ function addressFromKeystore(json) {
   if (!json) return null;
   try {
     const parsed = JSON.parse(json);
-    return parsed.address ? ethers.getAddress("0x" + parsed.address.replace(/^0x/, "")) : null;
+    return parsed.address ? getAddress("0x" + parsed.address.replace(/^0x/, "")) : null;
   } catch {
     return null;
   }
@@ -80,27 +89,6 @@ export function discardLegacyWallet() {
   localStorage.removeItem(LEGACY_KEY);
 }
 
-export function createWallet() {
-  const wallet = ethers.Wallet.createRandom();
-  return {
-    wallet,
-    address: wallet.address,
-    mnemonic: wallet.mnemonic ? wallet.mnemonic.phrase : null,
-    privateKey: wallet.privateKey,
-  };
-}
-
-export function importFromMnemonic(phrase) {
-  const wallet = ethers.Wallet.fromPhrase(phrase.trim());
-  return { wallet, address: wallet.address };
-}
-
-export function importFromPrivateKey(pk) {
-  const key = pk.trim();
-  const wallet = new ethers.Wallet(key.startsWith("0x") ? key : "0x" + key);
-  return { wallet, address: wallet.address };
-}
-
 export async function encryptAndStore(wallet, password, onProgress) {
   const key = activeStorageKey();
   if (!key) throw new Error("You need to be signed in to save a wallet.");
@@ -112,7 +100,8 @@ export async function encryptAndStore(wallet, password, onProgress) {
 export async function unlockWallet(password, onProgress) {
   const json = readKeystore();
   if (!json) throw new Error("No wallet on this device for this account");
-  return ethers.Wallet.fromEncryptedJson(json, password, onProgress);
+  const Wallet = await walletClass();
+  return Wallet.fromEncryptedJson(json, password, onProgress);
 }
 
 export async function revealSecrets(password, onProgress) {
@@ -136,7 +125,8 @@ export async function importFromKeystore(json, password, onProgress) {
   if (!parsed || !parsed.Crypto && !parsed.crypto) {
     throw new Error("That JSON is not an encrypted keystore. It has no Crypto section.");
   }
-  const wallet = await ethers.Wallet.fromEncryptedJson(text, password, onProgress);
+  const Wallet = await walletClass();
+  const wallet = await Wallet.fromEncryptedJson(text, password, onProgress);
   return { wallet, address: wallet.address };
 }
 

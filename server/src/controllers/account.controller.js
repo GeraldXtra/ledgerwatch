@@ -13,7 +13,8 @@ const PushSubscription = require("../models/PushSubscription");
 const publicUser = require("../utils/publicUser");
 const signToken = require("../utils/token");
 
-const SALT_ROUNDS = 10;
+const SALT_ROUNDS = 12;
+const { passwordProblem } = require("../middleware/security");
 
 const DATA_URL_RE = /^data:image\/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=]+)$/;
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
@@ -71,12 +72,11 @@ async function changePassword(req, res) {
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: "Current and new password are required" });
     }
-    if (String(newPassword).length < 8) {
-      return res.status(400).json({ error: "New password must be at least 8 characters" });
-    }
-
     const user = await User.findById(req.user._id);
     if (!user) return res.status(401).json({ error: "User no longer exists" });
+
+    const weak = passwordProblem(newPassword, { email: user.email, name: user.name });
+    if (weak) return res.status(400).json({ error: weak.replace(/^Password/, "New password") });
 
     const match = await bcrypt.compare(String(currentPassword), user.passwordHash);
     if (!match) return res.status(400).json({ error: "Current password is incorrect" });

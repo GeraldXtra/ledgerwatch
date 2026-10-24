@@ -26,10 +26,18 @@ const walletTxSchema = new mongoose.Schema({
   side: { type: String, enum: ["buy", "sell"], default: null },
   alertId: { type: mongoose.Schema.Types.ObjectId, ref: "Alert", default: null },
 
+  amountOutActual: { type: String, default: null },
+  profitId: { type: mongoose.Schema.Types.ObjectId, ref: "ProfitRecord", default: null },
+
+  notifiedAt: { type: Date, default: null },
+  lastCheckedAt: { type: Date, default: null },
+
   createdAt: { type: Date, default: Date.now },
 });
 
 walletTxSchema.index({ userId: 1, chainId: 1, createdAt: -1 });
+
+walletTxSchema.index({ status: 1, lastCheckedAt: 1 });
 
 walletTxSchema.index({ hash: 1, userId: 1 }, { unique: true });
 

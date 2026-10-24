@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { ethers } from "ethers";
-import { Network, ShieldCheck } from "lucide-react";
+import { Network, ShieldCheck, TriangleAlert } from "lucide-react";
 import { Button, Field, Input, Select, useToast } from "../../components/ui";
 import { getProvider, ERC20_ABI } from "./provider";
 import { unlockWallet } from "./keystore";
-import { recordTx, updateTxStatus } from "./walletApi";
+import { fetchTxs, updateTxStatus } from "./walletApi";
+import { sendRecorded, trackConfirmation } from "./broadcast";
 import { NATIVE_TRANSFER_GAS, preflightGas } from "./gas";
+import { counterpartiesFrom, lookalikeOf } from "./addressSafety";
 import GasNotice from "./GasNotice";
 import NetworkScopeNotice from "./NetworkScopeNotice";
+
+const SEND_TRACKING_MS = 30 * 60 * 1000;
 
 export default function SendForm({ address, chain, tokens: tokenList, onSent, onConfirmed }) {
   const toast = useToast();
@@ -20,6 +24,9 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [lookalike, setLookalike] = useState(null);
+  const [lookalikeChecked, setLookalikeChecked] = useState(false);
+  const [historyUnread, setHistoryUnread] = useState(false);
 
   const tokens = tokenList || chain.tokens || [];
   const selectedToken = asset === "native" ? null : tokens.find((t) => t.address === asset);
@@ -61,6 +68,20 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
 
     setBusy(true);
     try {
+      let similar = null;
+      try {
+        similar = lookalikeOf(to, counterpartiesFrom(await fetchTxs(chain.chainId), address));
+        setHistoryUnread(false);
+      } catch {
+        setHistoryUnread(true);
+      }
+      if (similar && (!lookalike || lookalike.to !== to.toLowerCase() || !lookalikeChecked)) {
+        if (!lookalike || lookalike.to !== to.toLowerCase()) setLookalikeChecked(false);
+        setLookalike({ to: to.toLowerCase(), similar });
+        return;
+      }
+      if (!similar) setLookalike(null);
+
       const provider = getProvider(chain.chainId);
 
       const tx = selectedToken
@@ -102,48 +123,48 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
       const signer = unlocked.connect(provider);
 
       const value = ethers.parseUnits(String(amount), decimals);
-      let txResp;
-      if (selectedToken) {
-        const contract = new ethers.Contract(selectedToken.address, ERC20_ABI, signer);
-        txResp = await contract.transfer(to, value);
-      } else {
-        txResp = await signer.sendTransaction({ to, value });
-      }
-
-      const recorded = await recordTx({
-        chainId: chain.chainId,
-        hash: txResp.hash,
-        from: address,
-        to,
-        value: String(amount),
-        symbol,
-        tokenAddress: selectedToken ? selectedToken.address : null,
-        direction: "out",
-      }).catch((err) => {
-        console.error("[send] the transfer is on chain but was not recorded:", err && err.message);
-        return null;
+      const request = selectedToken
+        ? {
+            to: selectedToken.address,
+            data: new ethers.Interface(ERC20_ABI).encodeFunctionData("transfer", [to, value]),
+          }
+        : { to, value };
+      const { hash, row: recorded, sent } = await sendRecorded({
+        signer,
+        provider,
+        request,
+        record: {
+          chainId: chain.chainId,
+          from: address,
+          to,
+          value: String(amount),
+          symbol,
+          tokenAddress: selectedToken ? selectedToken.address : null,
+          direction: "out",
+        },
+        label: "transfer",
       });
 
-      if (recorded && recorded._id) {
-        txResp
-          .wait()
-          .then((receipt) =>
-            updateTxStatus(recorded._id, receipt && receipt.status === 1 ? "confirmed" : "failed")
-          )
-          .then(() => onConfirmed && onConfirmed())
-          .catch(() => {});
-      }
+      trackConfirmation({
+        provider,
+        hash,
+        response: sent.response,
+        timeoutMs: SEND_TRACKING_MS,
+        onSettled: (status) =>
+          updateTxStatus(recorded._id, status).then(() => onConfirmed && onConfirmed()),
+      });
 
-      if (recorded && recorded._id) {
+      if (sent.outcome === "accepted") {
         toast(`Sent ${amount} ${symbol} on ${chain.name}. Track it in history.`, { type: "success" });
       } else {
         toast(
-          `Sent ${amount} ${symbol} on ${chain.name}, but it could not be saved to your ` +
-            `history. It is on the network — check the explorer for ${String(txResp.hash).slice(0, 10)}…`,
-          { type: "error", duration: 14000 }
+          `This transfer was signed and sent, but the network did not confirm that it received it ` +
+            `(${sent.reason}). It is saved in your history as pending. Check ${hash.slice(0, 10)}… on ` +
+            `the explorer before you send again, so it is not sent twice.`,
+          { type: "error", duration: 16000 }
         );
       }
-      onSent(txResp);
+      onSent();
     } catch (err) {
       setError(friendly(err));
       setBusy(false);
@@ -311,6 +332,33 @@ export default function SendForm({ address, chain, tokens: tokenList, onSent, on
         <ShieldCheck size={15} />
         <span>The next step shows a full summary and asks for your password before anything is signed.</span>
       </div>
+
+      {lookalike && to && lookalike.to === to.toLowerCase() && (
+        <div className="against-note">
+          <TriangleAlert size={15} />
+          <span className="stack-sm">
+            <span>
+              This address looks like <code>{lookalike.similar}</code> from your history, but it is a
+              different address. Scammers send tiny amounts from lookalike addresses so that you copy
+              theirs by mistake. Check every character against the address you mean to pay.
+            </span>
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={lookalikeChecked}
+                onChange={(e) => setLookalikeChecked(e.target.checked)}
+              />
+              <span>I have checked every character, and this is the address I mean to pay.</span>
+            </label>
+          </span>
+        </div>
+      )}
+
+      {historyUnread && (
+        <p className="muted small" style={{ margin: 0 }}>
+          Your history could not be read, so this address was not compared with the ones you have used before.
+        </p>
+      )}
 
       {error && <p className="error-text">{error}</p>}
 

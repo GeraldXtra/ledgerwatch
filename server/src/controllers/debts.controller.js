@@ -11,6 +11,8 @@ const { attachTotals, withDerived, recomputeDebtStatus, paidForDebt } = require(
 const { resyncActivePaymentAddress } = require("../services/paymentAddress.service");
 const { onInvoiceSettled } = require("../services/settlement.service");
 
+const { isPlainAddress } = require("../utils/email");
+
 const TEXT_LIMITS = { debtorName: 120, debtorPhone: 40, debtorEmail: 254, note: 2000 };
 
 function cleanText(body) {
@@ -48,7 +50,7 @@ function validateDebtFields(body, { partial = false } = {}) {
     }
   }
   if (has("debtorEmail")) {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(body.debtorEmail).trim())) {
+    if (!isPlainAddress(String(body.debtorEmail))) {
       errors.push("debtorEmail is not a valid email address");
     }
   }

@@ -1,4 +1,4 @@
-const { getChart, searchCoins } = require("../services/coingecko.service");
+const { getChart, searchCoins, getTopCoins } = require("../services/coingecko.service");
 
 const ALLOWED_DAYS = new Set(["1", "7", "30", "90"]);
 const COIN_ID_RE = /^[a-z0-9-]{1,64}$/;
@@ -34,4 +34,15 @@ async function chart(req, res) {
   }
 }
 
-module.exports = { search, chart };
+async function top(req, res) {
+  try {
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 30));
+    const { coins, stale, fallback } = await getTopCoins(limit);
+    return res.json({ coins, stale: Boolean(stale), fallback: Boolean(fallback) });
+  } catch (err) {
+    console.error("top coins error:", err.message);
+    return res.status(500).json({ error: "Failed to load popular coins" });
+  }
+}
+
+module.exports = { search, chart, top };

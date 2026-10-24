@@ -25,6 +25,7 @@ const chartCache = new Map();
 const searchCache = new Map();
 
 const MAX_MARKETS_ENTRIES = 2000;
+const MARKETS_PAGE = 250;
 const MAX_CHART_ENTRIES = 500;
 const MAX_SEARCH_ENTRIES = 500;
 const MAX_PLATFORMS_ENTRIES = 2000;
@@ -192,6 +193,77 @@ async function cgGet(path, params) {
   }
 }
 
+const LOGO_HOSTS = new Set(["coin-images.coingecko.com", "assets.coingecko.com"]);
+const LOGO_REWRITE_MS = 6 * 60 * 60 * 1000;
+const logoWrittenAt = new Map();
+const logoSeenAt = new Map();
+
+function safeLogoUrl(raw) {
+  if (typeof raw !== "string" || !raw) return null;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "https:" || !LOGO_HOSTS.has(u.hostname)) return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+function coinLogoModel() {
+  return require("../models/CoinLogo");
+}
+
+async function rememberLogos(rows, { onlyIfMissing = false } = {}) {
+  const now = Date.now();
+  const ops = [];
+  for (const row of rows || []) {
+    const coinId = row && row.id;
+    const image = safeLogoUrl(row && (row.image || row.large || row.thumb));
+    if (!coinId || !image) continue;
+    const throttle = onlyIfMissing ? logoSeenAt : logoWrittenAt;
+    const last = throttle.get(coinId);
+    if (last && now - last < LOGO_REWRITE_MS) continue;
+    throttle.set(coinId, now);
+    const fields = {
+      symbol: row.symbol ? String(row.symbol).toUpperCase().slice(0, 24) : null,
+      name: row.name ? String(row.name).slice(0, 80) : null,
+      image,
+      updatedAt: new Date(now),
+    };
+    ops.push({
+      updateOne: {
+        filter: { coinId },
+        update: onlyIfMissing ? { $setOnInsert: { coinId, ...fields } } : { $set: fields, $setOnInsert: { coinId } },
+        upsert: true,
+      },
+    });
+  }
+  if (!ops.length) return 0;
+  try {
+    await coinLogoModel().bulkWrite(ops, { ordered: false });
+    return ops.length;
+  } catch (err) {
+    const throttle = onlyIfMissing ? logoSeenAt : logoWrittenAt;
+    for (const op of ops) throttle.delete(op.updateOne.filter.coinId);
+    logError("logos-store", err);
+    return 0;
+  }
+}
+
+async function getStoredLogos(coinIds) {
+  const ids = [...new Set((coinIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+  try {
+    const rows = await coinLogoModel().find({ coinId: { $in: ids } }).select("coinId image").lean();
+    const out = {};
+    for (const r of rows) if (r && r.image) out[r.coinId] = r.image;
+    return out;
+  } catch (err) {
+    logError("logos-read", err);
+    return {};
+  }
+}
+
 function trimMarket(row) {
   return {
     id: row.id,
@@ -223,14 +295,17 @@ async function getMarketsMap(coinIds) {
     return !e || now - e.ts > marketsTtl();
   });
 
-  if (stale.length > 0) {
-    const key = "markets:" + [...stale].sort().join(",");
+  for (let i = 0; i < stale.length; i += MARKETS_PAGE) {
+    const chunk = stale.slice(i, i + MARKETS_PAGE);
+    const key = "markets:" + [...chunk].sort().join(",");
     await singleFlight(key, async () => {
       try {
-        console.log(`CoinGecko GET markets [${stale.join(",")}]`);
+        console.log(`CoinGecko GET markets [${chunk.join(",")}]`);
         const data = await cgGet("/coins/markets", {
           vs_currency: "usd",
-          ids: stale.join(","),
+          ids: chunk.join(","),
+          per_page: MARKETS_PAGE,
+          page: 1,
           sparkline: true,
           price_change_percentage: "24h,7d",
         });
@@ -238,6 +313,7 @@ async function getMarketsMap(coinIds) {
         for (const row of data || []) {
           if (row && row.id) cacheSet(marketsCache, row.id, { data: trimMarket(row), ts }, MAX_MARKETS_ENTRIES);
         }
+        rememberLogos(data).catch(() => {});
       } catch (err) {
         logError("markets", err);
       }
@@ -275,13 +351,115 @@ async function getPrice(coinId) {
   return prices[coinId] || null;
 }
 
+async function logosFor(coinIds, markets) {
+  const logos = {};
+  for (const [id, m] of Object.entries(markets || {})) {
+    const url = safeLogoUrl(m && m.image);
+    if (url) logos[id] = url;
+  }
+  const missing = (coinIds || []).filter((id) => !logos[id]);
+  if (missing.length) Object.assign(logos, await getStoredLogos(missing));
+  return logos;
+}
+
 async function getLogosMap(coinIds) {
   const { markets, stale, updatedAt } = await getMarketsMap(coinIds);
-  const logos = {};
-  for (const [id, m] of Object.entries(markets)) {
-    if (m && typeof m.image === "string" && m.image) logos[id] = m.image;
+  const logos = await logosFor(coinIds, markets);
+  const complete = (coinIds || []).every((id) => logos[id]);
+  return { logos, stale: stale && !complete, updatedAt };
+}
+
+const TOP_TTL = 30 * 60 * 1000;
+const TOP_FALLBACK = [
+  ["bitcoin", "BTC", "Bitcoin"],
+  ["ethereum", "ETH", "Ethereum"],
+  ["tether", "USDT", "Tether"],
+  ["binancecoin", "BNB", "BNB"],
+  ["solana", "SOL", "Solana"],
+  ["ripple", "XRP", "XRP"],
+  ["usd-coin", "USDC", "USDC"],
+  ["dogecoin", "DOGE", "Dogecoin"],
+  ["cardano", "ADA", "Cardano"],
+  ["tron", "TRX", "TRON"],
+  ["the-open-network", "TON", "Toncoin"],
+  ["avalanche-2", "AVAX", "Avalanche"],
+  ["chainlink", "LINK", "Chainlink"],
+  ["polkadot", "DOT", "Polkadot"],
+  ["litecoin", "LTC", "Litecoin"],
+  ["shiba-inu", "SHIB", "Shiba Inu"],
+  ["bitcoin-cash", "BCH", "Bitcoin Cash"],
+  ["uniswap", "UNI", "Uniswap"],
+  ["near", "NEAR", "NEAR Protocol"],
+  ["stellar", "XLM", "Stellar"],
+  ["aptos", "APT", "Aptos"],
+  ["sui", "SUI", "Sui"],
+  ["pepe", "PEPE", "Pepe"],
+  ["arbitrum", "ARB", "Arbitrum"],
+  ["optimism", "OP", "Optimism"],
+  ["matic-network", "POL", "Polygon"],
+  ["cosmos", "ATOM", "Cosmos Hub"],
+  ["filecoin", "FIL", "Filecoin"],
+  ["internet-computer", "ICP", "Internet Computer"],
+  ["aave", "AAVE", "Aave"],
+];
+let topCache = null;
+
+async function getTopCoins(limit = 30) {
+  const n = Math.max(1, Math.min(100, Number(limit) || 30));
+  const now = Date.now();
+  if (!topCache || now - topCache.ts > TOP_TTL * ttlFactor()) {
+    await singleFlight("top", async () => {
+      try {
+        console.log(`CoinGecko GET top coins (${n})`);
+        const data = await cgGet("/coins/markets", {
+          vs_currency: "usd",
+          order: "market_cap_desc",
+          per_page: 100,
+          page: 1,
+          sparkline: false,
+        });
+        const ts = Date.now();
+        const rows = (data || []).filter((r) => r && r.id);
+        for (const row of rows) {
+          const cached = marketsCache.get(row.id);
+          if (!cached || cached.ts < ts - marketsTtl()) {
+            cacheSet(marketsCache, row.id, { data: trimMarket(row), ts }, MAX_MARKETS_ENTRIES);
+          }
+        }
+        rememberLogos(rows).catch(() => {});
+        topCache = {
+          ts,
+          coins: rows.map((r) => ({
+            id: r.id,
+            symbol: String(r.symbol || "").toUpperCase(),
+            name: r.name,
+            image: safeLogoUrl(r.image),
+            current_price: r.current_price,
+          })),
+        };
+      } catch (err) {
+        logError("top", err);
+      }
+    });
   }
-  return { logos, stale, updatedAt };
+
+  if (topCache && topCache.coins.length) {
+    return { coins: topCache.coins.slice(0, n), stale: now - topCache.ts > TOP_TTL * ttlFactor() };
+  }
+
+  const picks = TOP_FALLBACK.slice(0, n);
+  const logos = await getStoredLogos(picks.map(([id]) => id));
+  const coins = picks.map(([id, symbol, name]) => {
+    const m = marketsCache.get(id);
+    return {
+      id,
+      symbol,
+      name,
+      image: (m && safeLogoUrl(m.data.image)) || logos[id] || null,
+      current_price: m ? m.data.current_price : null,
+    };
+  });
+  return { coins, stale: true, fallback: true };
 }
 
 async function getChart(coinId, days) {
@@ -327,8 +505,9 @@ async function searchCoins(q) {
       try {
         console.log(`CoinGecko GET search "${key}"`);
         const data = await cgGet("/search", { query: key });
-        const coins = (data && Array.isArray(data.coins) ? data.coins : [])
-          .slice(0, 15)
+        const found = (data && Array.isArray(data.coins) ? data.coins : []).slice(0, 15);
+        rememberLogos(found, { onlyIfMissing: true }).catch(() => {});
+        const coins = found
           .map((c) => ({
             id: c.id,
             symbol: (c.symbol || "").toUpperCase(),
@@ -485,11 +664,32 @@ async function getNgnPrice(coinId = "usd-coin") {
   };
 }
 
+function _resetForTests() {
+  marketsCache.clear();
+  chartCache.clear();
+  searchCache.clear();
+  coinPlatformsCache.clear();
+  ngnCache.clear();
+  logoWrittenAt.clear();
+  logoSeenAt.clear();
+  topCache = null;
+  platformsCache = null;
+  blockedUntil = 0;
+  backoffMs = 0;
+  lastUpstream = null;
+}
+
 module.exports = {
+  _resetForTests,
   getMarketsMap,
   getPrices,
   getPrice,
   getLogosMap,
+  logosFor,
+  getStoredLogos,
+  rememberLogos,
+  getTopCoins,
+  safeLogoUrl,
   getChart,
   searchCoins,
   getAssetPlatforms,

@@ -18,6 +18,7 @@ const portfolioSchema = new mongoose.Schema({
     required: true,
   },
   cashBalance: { type: Number, default: 1000000 },
+  profitBalance: { type: Number, default: 0 },
   holdings: { type: [holdingSchema], default: [] },
   createdAt: { type: Date, default: Date.now },
 });

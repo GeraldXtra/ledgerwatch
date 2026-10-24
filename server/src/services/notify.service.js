@@ -333,6 +333,13 @@ async function sendEmail(to, subject, html, opts = {}) {
   if (!to) {
     return { ok: false, reason: "no-address", error: "This client has no email address on file." };
   }
+  if (!require("../utils/email").isPlainAddress(to)) {
+    return {
+      ok: false,
+      reason: "invalid-address",
+      error: "That email address contains characters that cannot be sent to safely. Correct it and try again.",
+    };
+  }
 
   const attachments = (opts.attachments || []).filter((a) => {
     const present = a && a.content && a.content.length > 0;
@@ -390,6 +397,7 @@ function getLogoAttachment() {
   if (logoAttachment) return logoAttachment;
 
   const candidates = [
+    require("path").resolve(__dirname, "../assets/email-logo.png"),
     require("path").resolve(__dirname, "../../../client/public/icon-192.png"),
     require("path").resolve(process.cwd(), "../client/public/icon-192.png"),
     require("path").resolve(process.cwd(), "client/public/icon-192.png"),
@@ -419,21 +427,8 @@ function getLogoAttachment() {
   return null;
 }
 
-const FONT = "'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
-const INK = "#0a1428";
-const NAVY = "#16294a";
-const GOLD = "#c0a053";
-const BODY = "#3a4658";
-const MUTED = "#64748b";
-const LINE = "#e1e7f0";
-const WELL = "#f4f7fa";
-
-function esc(s) {
-  return String(s == null ? "" : s).replace(
-    /[<>&"]/g,
-    (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c])
-  );
-}
+const { FONT, INK, BODY, MUTED, LINE, WELL, PAGE, esc, brandHeader } = require("../utils/emailBrand");
+const NAVY = INK;
 
 function money(amount) {
   return Number(amount || 0).toLocaleString("en-NG", { maximumFractionDigits: 2 });
@@ -463,11 +458,6 @@ function buildReminderEmail({
     ? `${money(amount)} naira outstanding to ${supplier}`
     : `A payment reminder from ${supplier}`;
 
-  const logoCell = hasLogo
-    ? `<img src="cid:ledgerwatch-logo" width="36" height="36" alt=""
-            style="display:block;border:0;border-radius:9px" />`
-    : "";
-
   const summary =
     amount || dueDate
       ? `<tr><td style="padding:0 28px 4px">
@@ -477,7 +467,7 @@ function buildReminderEmail({
                ${
                  amount
                    ? `<td style="padding:16px 18px">
-                        <div style="font:600 11px ${FONT};letter-spacing:.08em;text-transform:uppercase;color:${MUTED}">Amount outstanding</div>
+                        <div style="font:600 11px ${FONT};color:${MUTED}">Amount outstanding</div>
                         <div style="font:700 24px ${FONT};color:${INK};padding-top:5px">&#8358;${money(amount)}</div>
                       </td>`
                    : ""
@@ -485,7 +475,7 @@ function buildReminderEmail({
                ${
                  dueDate
                    ? `<td style="padding:16px 18px;text-align:right;vertical-align:middle">
-                        <div style="font:600 11px ${FONT};letter-spacing:.08em;text-transform:uppercase;color:${MUTED}">Due</div>
+                        <div style="font:600 11px ${FONT};color:${MUTED}">Due</div>
                         <div style="font:600 15px ${FONT};color:${INK};padding-top:5px">${esc(dueDate)}</div>
                       </td>`
                    : ""
@@ -534,35 +524,20 @@ function buildReminderEmail({
 <meta name="x-apple-disable-message-reformatting">
 <title>Payment reminder</title>
 </head>
-<body style="margin:0;padding:0;background:#eef2f8;-webkit-text-size-adjust:100%">
+<body style="margin:0;padding:0;background:${PAGE};-webkit-text-size-adjust:100%">
 
-<div style="display:none;font-size:1px;color:#eef2f8;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${esc(preheader)}</div>
+<div style="display:none;font-size:1px;color:${PAGE};line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${esc(preheader)}</div>
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-       style="background:#eef2f8;padding:28px 12px">
+       style="background:${PAGE};padding:28px 12px">
   <tr><td align="center">
 
     <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
            style="width:100%;max-width:600px;background:#ffffff;border:1px solid ${LINE};
-                  border-radius:16px;overflow:hidden">
+                  border-radius:12px;overflow:hidden">
 
-      <!-- brand bar -->
-      <tr><td style="height:4px;background:${GOLD};line-height:4px;font-size:0">&nbsp;</td></tr>
+      ${brandHeader({ hasLogo, subtitle: `Payment reminder from ${businessName || "your supplier"}` })}
 
-      <!-- header: logo + wordmark -->
-      <tr><td style="padding:24px 28px 18px;border-bottom:1px solid ${LINE}">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-          <tr>
-            ${logoCell ? `<td style="padding-right:12px;vertical-align:middle">${logoCell}</td>` : ""}
-            <td style="vertical-align:middle">
-              <div style="font:700 19px ${FONT};color:${INK};letter-spacing:-.2px">Ledger<span style="color:${GOLD}">Watch</span></div>
-              <div style="font:400 12px ${FONT};color:${MUTED};padding-top:2px">Payment reminder from ${supplier}</div>
-            </td>
-          </tr>
-        </table>
-      </td></tr>
-
-      <!-- greeting + letter -->
       <tr><td style="padding:24px 28px 4px">
         ${debtorName ? `<div style="font:600 16px ${FONT};color:${INK};padding-bottom:12px">Hello ${esc(debtorName)},</div>` : ""}
         ${bodyHtml}
@@ -572,7 +547,6 @@ function buildReminderEmail({
       ${bank}
       ${cryptoHtml ? `<tr><td style="padding:16px 28px 4px">${cryptoHtml}</td></tr>` : ""}
 
-      <!-- footer -->
       <tr><td style="padding:22px 28px 24px">
         <div style="border-top:1px solid ${LINE};padding-top:16px;font:400 12px/1.6 ${FONT};color:${MUTED}">
           Reply to this email to arrange payment or raise a query with ${supplier}.<br>

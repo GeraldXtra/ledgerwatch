@@ -43,10 +43,10 @@ export default function CryptoPaymentModal({ debt, onClose, onCreated }) {
         if (!active) return;
         const usable = list.filter((c) => (c.stables || []).length > 0);
         setChains(usable);
-        const preferredId = user?.crypto?.defaultChainId || 84532;
+        const preferredId = user?.crypto?.defaultChainId;
         const preferred =
           usable.find((c) => c.chainId === preferredId) ||
-          usable.find((c) => c.chainId === 84532) ||
+          usable.find((c) => !c.testnet) ||
           usable[0];
         if (preferred) setChainId(preferred.chainId);
       })

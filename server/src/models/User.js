@@ -41,19 +41,40 @@ const userSchema = new mongoose.Schema({
   bankDetails: { type: bankDetailsSchema, default: {} },
   autoSend: { type: autoSendSchema, default: () => ({}) },
   walletAddress: { type: String, default: null },
+  profitAddress: { type: String, default: null },
+  chainAddresses: {
+    type: [
+      new mongoose.Schema(
+        {
+          chain: { type: String, required: true },
+          network: { type: String, required: true },
+          address: { type: String, required: true },
+          addedAt: { type: Date, default: Date.now },
+          lastBalance: { type: String, default: null },
+          lastCheckedAt: { type: Date, default: null },
+        },
+        { _id: false }
+      ),
+    ],
+    default: [],
+  },
   avatarUrl: { type: String, default: null },
   companyName: { type: String, default: "" },
   notifyPrefs: {
     marketAlerts: { type: Boolean, default: true },
     remindersDue: { type: Boolean, default: true },
     txUpdates: { type: Boolean, default: true },
+    moneyIn: { type: Boolean, default: true },
+    trades: { type: Boolean, default: true },
+    profit: { type: Boolean, default: true },
+    emailActivity: { type: Boolean, default: true },
   },
 
   crypto: {
     enabled: { type: Boolean, default: true },
     configuredAt: { type: Date, default: null },
     confirmationOverrides: { type: Map, of: Number, default: undefined },
-    defaultChainId: { type: Number, default: 84532 },
+    defaultChainId: { type: Number, default: () => (process.env.ENABLE_MAINNET === "true" ? 8453 : 84532) },
     expiryHours: { type: Number, default: 72 },
     nextDerivationIndex: { type: Number, default: 0 },
     sweepDestination: { type: String, default: null },

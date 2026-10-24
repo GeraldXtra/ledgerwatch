@@ -17,6 +17,7 @@ const watchSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   coinId: { type: String, required: true },
   symbol: { type: String, required: true },
+  image: { type: String, default: null },
   condition: { type: conditionSchema, required: true },
   baselinePrice: { type: Number, default: null },
   active: { type: Boolean, default: true },
