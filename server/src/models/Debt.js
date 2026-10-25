@@ -14,6 +14,10 @@ const debtSchema = new mongoose.Schema({
   debtorPhone: { type: String },
   debtorEmail: { type: String },
   amount: { type: Number, required: true },
+  amountKobo: { type: Number },
+  invoiceNumber: { type: String },
+  publicToken: { type: String },
+  publicTokenCreatedAt: { type: Date },
   currency: { type: String, default: "NGN" },
   dueDate: { type: Date, required: true },
   note: { type: String },
@@ -32,5 +36,7 @@ debtSchema.index({ userId: 1, status: 1, dueDate: 1 });
 debtSchema.index({ status: 1, dueDate: 1 });
 debtSchema.index({ userId: 1, createdAt: -1 });
 debtSchema.index({ userId: 1, debtorName: 1 });
+debtSchema.index({ userId: 1, invoiceNumber: 1 }, { unique: true, partialFilterExpression: { invoiceNumber: { $type: "string" } } });
+debtSchema.index({ publicToken: 1 }, { unique: true, partialFilterExpression: { publicToken: { $type: "string" } } });
 
 module.exports = mongoose.model("Debt", debtSchema);

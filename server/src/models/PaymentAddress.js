@@ -72,6 +72,7 @@ const paymentAddressSchema = new mongoose.Schema({
 
   receivedUsdc: { type: Number, default: 0 },
   settledNgn: { type: Number, default: 0 },
+  settledKobo: { type: Number },
   overpaidUsdc: { type: Number, default: 0 },
 
   unattributedUsdc: { type: Number, default: 0 },

@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
-const RampOrder = require("../models/RampOrder");
-const User = require("../models/User");
+const { scopedRepo } = require("../repositories/scoped");
+const webhookRepo = require("../repositories/rampWebhook");
 const ramp = require("../services/ramp.service");
 const { notifyActivity } = require("../services/activity.service");
 
@@ -18,12 +18,11 @@ function status(req, res) {
 
 async function session(req, res) {
   try {
-    const mode = String((req.body && req.body.mode) || "").toUpperCase();
-    const cryptoCurrencyCode = req.body && req.body.cryptoCurrencyCode ? String(req.body.cryptoCurrencyCode).toUpperCase() : null;
-    const out = await ramp.createSession({ user: req.user, mode, cryptoCurrencyCode, fiatAmount: req.body && req.body.fiatAmount });
+    const mode = String(req.body.mode || "").toUpperCase();
+    const cryptoCurrencyCode = req.body.cryptoCurrencyCode ? String(req.body.cryptoCurrencyCode).toUpperCase() : null;
+    const out = await ramp.createSession({ user: req.user, mode, cryptoCurrencyCode, fiatAmount: req.body.fiatAmount });
     if (!out.ok) return res.status(STATUS_FOR_KIND[out.kind] || 502).json({ error: out.reason, kind: out.kind });
-    await RampOrder.create({
-      userId: req.user._id,
+    await scopedRepo(req.user._id).rampOrders.create({
       partnerOrderId: out.partnerOrderId,
       mode: out.mode,
       cryptoCurrency: out.cryptoCurrencyCode,
@@ -37,7 +36,7 @@ async function session(req, res) {
 }
 
 async function orders(req, res) {
-  const list = await RampOrder.find({ userId: req.user._id, outcome: { $ne: "started" } })
+  const list = await scopedRepo(req.user._id).rampOrders.find({ outcome: { $ne: "started" } })
     .sort({ updatedAt: -1 })
     .limit(30)
     .select("-matchedBy -notifiedOutcome")
@@ -48,21 +47,17 @@ async function orders(req, res) {
 async function ownerOf(data) {
   const ref = clean(data.partnerOrderId);
   if (ref) {
-    const order = await RampOrder.findOne({ partnerOrderId: ref }).lean();
+    const order = await webhookRepo.orderByPartnerId(ref);
     if (order && order.userId) return { userId: order.userId, matchedBy: "partnerOrderId", partnerOrderId: ref };
   }
   const customer = clean(data.partnerCustomerId);
-  if (customer && mongoose.isValidObjectId(customer) && (await User.exists({ _id: customer }))) {
+  if (customer && (await webhookRepo.accountExists(customer))) {
     return { userId: new mongoose.Types.ObjectId(customer), matchedBy: "partnerCustomerId" };
   }
   const wallet = clean(data.walletAddress);
   if (wallet) {
     const evm = /^0x[0-9a-fA-F]{40}$/.test(wallet);
-    const user = await User.findOne(
-      evm ? { walletAddress: new RegExp(`^${wallet}$`, "i") } : { "chainAddresses.address": wallet }
-    )
-      .select("_id")
-      .lean();
+    const user = await webhookRepo.accountByWallet(wallet, evm);
     if (user) return { userId: user._id, matchedBy: "walletAddress" };
   }
   return { userId: null, matchedBy: null };
@@ -113,7 +108,7 @@ function announce(order) {
 
 async function webhook(req, res) {
   try {
-    const claims = await ramp.verifyWebhookFresh(req.body && req.body.data);
+    const claims = await ramp.verifyWebhookFresh(req.body.data);
     if (!claims) {
       console.warn(`[ramp] refused a webhook that did not verify, from ${req.ip}`);
       return res.status(401).json({ error: "Signature not valid" });
@@ -148,10 +143,10 @@ async function webhook(req, res) {
     }
 
     let order = owner.partnerOrderId
-      ? await RampOrder.findOneAndUpdate({ partnerOrderId: owner.partnerOrderId }, { $set: set }, { new: true })
+      ? await webhookRepo.updateByPartnerId(owner.partnerOrderId, set)
       : null;
     if (!order) {
-      order = await RampOrder.findOneAndUpdate({ providerOrderId }, { $set: set, $setOnInsert: { createdAt: new Date() } }, { new: true, upsert: true });
+      order = await webhookRepo.upsertByProviderId(providerOrderId, set);
     }
 
     if (!order.userId) {
@@ -159,11 +154,7 @@ async function webhook(req, res) {
       return res.json({ ok: true, matched: false });
     }
     if (["completed", "failed", "on-hold"].includes(outcome)) {
-      const claimed = await RampOrder.findOneAndUpdate(
-        { _id: order._id, notifiedOutcome: { $ne: outcome } },
-        { $set: { notifiedOutcome: outcome } },
-        { new: true }
-      ).lean();
+      const claimed = await webhookRepo.claimNotice(order._id, outcome);
       if (claimed) announce(claimed).catch((err) => console.error("[ramp] notice failed:", err.message));
     }
     return res.json({ ok: true, matched: true });

@@ -1,6 +1,6 @@
 const bcrypt = require("bcryptjs");
-const User = require("../models/User");
-const Portfolio = require("../models/Portfolio");
+const accounts = require("../repositories/accounts");
+const { scopedRepo } = require("../repositories/scoped");
 const signToken = require("../utils/token");
 const publicUser = require("../utils/publicUser");
 const { buildCryptoUpdate } = require("../services/cryptoSettings.service");
@@ -16,12 +16,13 @@ const SALT_ROUNDS = 12;
 const { isPlainAddress } = require("../utils/email");
 const { accountLocked, noteFailedLogin, clearFailedLogins, passwordProblem } = require("../middleware/security");
 const { NOTIFY_PREF_KEYS } = require("../utils/notifyPrefs");
+const tf = require("../services/twoFactor.service");
 const MAX_NAME_LENGTH = 80;
 const DUMMY_HASH = bcrypt.hashSync("not-a-password", SALT_ROUNDS);
 
 async function register(req, res) {
   try {
-    const { name, email, password, bankDetails, turnstileToken } = req.body || {};
+    const { name, email, password, bankDetails, turnstileToken } = req.body;
 
     const human = await verifyTurnstile(turnstileToken, req.ip);
     if (!human.ok) return res.status(400).json({ error: human.error, turnstile: true });
@@ -43,7 +44,7 @@ async function register(req, res) {
 
     const normalizedEmail = String(email).toLowerCase().trim();
 
-    const existing = await User.findOne({ email: normalizedEmail });
+    const existing = await accounts.findByEmail(normalizedEmail);
     if (existing) {
       return res.status(409).json({ error: "Email already registered" });
     }
@@ -57,7 +58,7 @@ async function register(req, res) {
       }
     }
 
-    const user = await User.create({
+    const user = await accounts.create({
       name: name.trim(),
       email: normalizedEmail,
       passwordHash,
@@ -65,7 +66,7 @@ async function register(req, res) {
       emailVerified: false,
     });
 
-    await Portfolio.create({ userId: user._id });
+    await scopedRepo(user._id).portfolios.create({});
 
     const sent = await issueCode(user);
     if (!sent.ok) {
@@ -94,7 +95,7 @@ async function register(req, res) {
 
 async function login(req, res) {
   try {
-    const { email, password, turnstileToken } = req.body || {};
+    const { email, password, turnstileToken } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ error: "email and password are required" });
@@ -115,7 +116,7 @@ async function login(req, res) {
       });
     }
 
-    const user = await User.findOne({ email: normalizedEmail });
+    const user = await accounts.findByEmail(normalizedEmail);
 
     const hash = user ? user.passwordHash : DUMMY_HASH;
     const match = await bcrypt.compare(String(password).slice(0, 256), hash);
@@ -127,7 +128,7 @@ async function login(req, res) {
 
     if (bcrypt.getRounds(user.passwordHash) < SALT_ROUNDS) {
       const stronger = await bcrypt.hash(String(password), SALT_ROUNDS);
-      await User.updateOne({ _id: user._id, passwordHash: user.passwordHash }, { $set: { passwordHash: stronger } }).catch(
+      await accounts.upgradePasswordHash(user._id, user.passwordHash, stronger).catch(
         (err) => console.error("login rehash failed:", err.message)
       );
     }
@@ -143,6 +144,10 @@ async function login(req, res) {
       });
     }
 
+    if (user.twoFactor && user.twoFactor.enabled) {
+      return res.status(200).json({ twoFactorRequired: true, challenge: tf.issueChallenge(user) });
+    }
+
     const token = signToken(user._id, user.tokenVersion);
     return res.status(200).json({ token, user: publicUser(user) });
   } catch (err) {
@@ -151,9 +156,47 @@ async function login(req, res) {
   }
 }
 
+async function loginSecondFactor(req, res) {
+  try {
+    const claims = tf.readChallenge(req.body.challenge);
+    const signInAgain = { error: "This sign in has expired. Enter your email and password again.", restart: true };
+    if (!claims) return res.status(401).json(signInAgain);
+    const user = await accounts.findById(claims.uid);
+    if (!user || !user.twoFactor || !user.twoFactor.enabled || (Number(user.tokenVersion) || 0) !== claims.v) {
+      return res.status(401).json(signInAgain);
+    }
+    const result = await tf.useSecondFactor(user._id, req.body.code);
+    if (result.notEnabled) return res.status(401).json(signInAgain);
+    if (result.locked) {
+      res.setHeader("Retry-After", String(result.retryAfter));
+      return res.status(429).json({
+        error: `Too many wrong codes. Wait ${Math.ceil(result.retryAfter / 60)} minutes, then sign in again.`,
+        retryAfter: result.retryAfter,
+        restart: true,
+      });
+    }
+    if (!result.ok) {
+      return res.status(400).json({
+        error: result.secretUnreadable
+          ? "Your authenticator code could not be checked on this server. Use one of your backup codes instead."
+          : `That code is not correct. ${result.attemptsLeft} attempt${result.attemptsLeft === 1 ? "" : "s"} left.`,
+      });
+    }
+    clearFailedLogins(user.email);
+    return res.status(200).json({
+      token: signToken(user._id, user.tokenVersion),
+      user: publicUser(user),
+      ...(result.method === "backup" ? { backupCodesLeft: result.backupCodesLeft } : {}),
+    });
+  } catch (err) {
+    console.error("login second factor error:", err.message);
+    return res.status(500).json({ error: "Sign in failed. Try again in a moment." });
+  }
+}
+
 async function forgotPassword(req, res) {
   try {
-    const { email, turnstileToken } = req.body || {};
+    const { email, turnstileToken } = req.body;
     if (!email) return res.status(400).json({ error: "email is required" });
 
     const human = await verifyTurnstile(turnstileToken, req.ip);
@@ -164,7 +207,7 @@ async function forgotPassword(req, res) {
       message:
         "If that address has an account, a code is on its way. If you asked a moment ago, give it a minute before asking again.",
     };
-    const user = await User.findOne({ email: String(email).toLowerCase().trim() });
+    const user = await accounts.findByEmail(email);
     if (!user) return res.status(200).json(generic);
 
     const sent = await issueResetCode(user);
@@ -179,14 +222,14 @@ async function forgotPassword(req, res) {
 
 async function resendResetCode(req, res) {
   try {
-    const { email } = req.body || {};
+    const { email } = req.body;
     if (!email) return res.status(400).json({ error: "email is required" });
     const generic = {
       ok: true,
       message:
         "If that address has an account, a new code is on its way. If you asked a moment ago, give it a minute.",
     };
-    const user = await User.findOne({ email: String(email).toLowerCase().trim() });
+    const user = await accounts.findByEmail(email);
     if (!user) return res.status(200).json(generic);
     const sent = await issueResetCode(user);
     return res.status(200).json({ ...generic, emailSent: sent.ok });
@@ -198,14 +241,14 @@ async function resendResetCode(req, res) {
 
 async function resetPassword(req, res) {
   try {
-    const { email, code, newPassword } = req.body || {};
+    const { email, code, newPassword } = req.body;
     if (!email || !code || !newPassword) {
       return res.status(400).json({ error: "email, code and newPassword are required" });
     }
     const weak = passwordProblem(newPassword, { email: String(email) });
     if (weak) return res.status(400).json({ error: weak });
 
-    const user = await User.findOne({ email: String(email).toLowerCase().trim() });
+    const user = await accounts.findByEmail(email);
     if (!user) return res.status(400).json({ error: "That code is not correct." });
 
     const check = await checkResetCode(user, code);
@@ -242,7 +285,7 @@ async function resetPassword(req, res) {
 }
 
 async function me(req, res) {
-  const withAvatar = await User.findById(req.user._id).select("avatarUrl").lean();
+  const withAvatar = await scopedRepo(req.user._id).self.get("avatarUrl").lean();
   const user = publicUser(req.user);
   if (user && withAvatar) user.avatarUrl = withAvatar.avatarUrl || null;
   return res.status(200).json({ user });
@@ -250,7 +293,7 @@ async function me(req, res) {
 
 async function updateMe(req, res) {
   try {
-    const { name, companyName, bankDetails, autoSend, notifyPrefs, crypto } = req.body || {};
+    const { name, companyName, bankDetails, autoSend, notifyPrefs, crypto } = req.body;
     const updates = {};
 
     if (typeof name === "string" && name.trim()) {
@@ -293,10 +336,7 @@ async function updateMe(req, res) {
       });
     }
 
-    const user = await User.findByIdAndUpdate(req.user._id, updates, {
-      new: true,
-      runValidators: true,
-    }).select("-passwordHash");
+    const user = await scopedRepo(req.user._id).self.update({ $set: updates }, { runValidators: true }).select("-passwordHash");
 
     return res.status(200).json({ user: publicUser(user) });
   } catch (err) {
@@ -308,10 +348,10 @@ async function updateMe(req, res) {
 
 async function verifyEmailCode(req, res) {
   try {
-    const { email, code } = req.body || {};
+    const { email, code } = req.body;
     if (!email || !code) return res.status(400).json({ error: "email and code are required" });
 
-    const user = await User.findOne({ email: String(email).toLowerCase().trim() });
+    const user = await accounts.findByEmail(email);
 
     const notCorrect = {
       error: "That code is not correct. If you have already confirmed this address, sign in instead.",
@@ -332,10 +372,10 @@ async function verifyEmailCode(req, res) {
 
 async function resendVerificationCode(req, res) {
   try {
-    const { email } = req.body || {};
+    const { email } = req.body;
     if (!email) return res.status(400).json({ error: "email is required" });
 
-    const user = await User.findOne({ email: String(email).toLowerCase().trim() });
+    const user = await accounts.findByEmail(email);
     const generic = { ok: true, message: "If that address needs confirming, a new code is on its way." };
 
     if (!user || user.emailVerified) return res.status(200).json(generic);
@@ -356,6 +396,7 @@ async function resendVerificationCode(req, res) {
 module.exports = {
   register,
   login,
+  loginSecondFactor,
   me,
   updateMe,
   verifyEmailCode,

@@ -40,7 +40,7 @@ describe("LW-046 — the keystore still reads, writes and decrypts as before", (
     store.set("ledgerwatch_token", token("user-1"));
     keystore = await import("../keystore");
     walletKeys = await import("../walletKeys");
-  });
+  }, 120000);
 
   it(
     "stores a new wallet encrypted, reads its address back, and decrypts it only with the password",

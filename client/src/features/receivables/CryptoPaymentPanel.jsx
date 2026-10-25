@@ -7,7 +7,6 @@ import { getStoredAddress, hasWallet } from "../wallet/keystore";
 import { verifyAddress } from "../wallet/derivation";
 import ProgressBar from "./ProgressBar";
 import SweepModal from "./SweepModal";
-import { confirmationsFor } from "./confirmations";
 import { fetchPaymentAddresses, revokePaymentAddress } from "./cryptoApi";
 import {
   agoLabel,
@@ -112,7 +111,7 @@ export default function CryptoPaymentPanel({ debt, refreshKey = 0 }) {
           chain={chains.find((c) => c.chainId === pa.chainId) || null}
           onChanged={load}
           sweepDestination={user?.crypto?.sweepDestination || null}
-          confirmationsNeeded={confirmationsFor(pa.chainId, user)}
+          confirmationsNeeded={pa.confirmationsRequired ?? null}
           currentRate={currentRate}
         />
       ))}
@@ -130,11 +129,13 @@ function AddressCard({
   confirmationsNeeded = null,
 }) {
   const [qr, setQr] = useState("");
+  const [qrFailed, setQrFailed] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyPassword, setVerifyPassword] = useState("");
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [verifyResult, setVerifyResult] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const [left, setLeft] = useState(() => countdown(pa.expiresAt));
   const [revoking, setRevoking] = useState(false);
   const [revokeError, setRevokeError] = useState("");
@@ -150,6 +151,7 @@ function AddressCard({
 
   useEffect(() => {
     let active = true;
+    setQrFailed(false);
     QRCode.toDataURL(pa.address, {
       width: 220,
       margin: 1,
@@ -158,7 +160,7 @@ function AddressCard({
       .then((url) => {
         if (active) setQr(url);
       })
-      .catch(() => {});
+      .catch(() => active && setQrFailed(true));
     return () => {
       active = false;
     };
@@ -174,9 +176,11 @@ function AddressCard({
   async function copy() {
     try {
       await navigator.clipboard.writeText(pa.address);
+      setCopyFailed(false);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
+      setCopyFailed(true);
     }
   }
 
@@ -252,6 +256,8 @@ function AddressCard({
         <div className="crypto-qr-col">
           {qr ? (
             <img src={qr} alt={`QR code for ${pa.address}`} className="receive-qr" />
+          ) : qrFailed ? (
+            <p className="error-text">The QR code could not be drawn. Copy the address instead.</p>
           ) : (
             <div className="receive-qr receive-qr-empty" />
           )}
@@ -261,6 +267,7 @@ function AddressCard({
               {copied ? <Check size={14} /> : <Copy size={14} />}
               {copied ? "Copied" : "Copy address"}
             </Button>
+            {copyFailed && <p className="error-text">Your browser blocked copying. Select the address and copy it by hand.</p>}
             {explorerAddress && (
               <a
                 className="btn btn-ghost btn-sm"

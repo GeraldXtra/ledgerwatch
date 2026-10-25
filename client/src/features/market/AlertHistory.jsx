@@ -8,7 +8,7 @@ function when(value) {
   return d.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-export default function AlertHistory({ alerts }) {
+export default function AlertHistory({ alerts, failed }) {
   return (
     <Card
       eyebrow="History"
@@ -16,7 +16,11 @@ export default function AlertHistory({ alerts }) {
       count={alerts.length}
       subtitle="Every alert the agent has raised, and what you decided."
     >
-      {alerts.length === 0 ? (
+      {alerts.length === 0 && failed ? (
+        <p className="error-text">
+          Your alert history could not be loaded, so this does not mean it is empty. Use Refresh to try again.
+        </p>
+      ) : alerts.length === 0 ? (
         <EmptyState
           icon={<History size={20} />}
           title="No alert history yet"

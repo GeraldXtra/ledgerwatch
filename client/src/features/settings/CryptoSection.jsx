@@ -11,25 +11,9 @@ const MAX_CONFIRMATIONS = 300;
 const MIN_EXPIRY_HOURS = 1;
 const MAX_EXPIRY_HOURS = 720;
 
-const DEFAULT_CONFIRMATIONS = {
-  11155111: 12,
-  84532: 5,
-  421614: 5,
-  11155420: 5,
-  80002: 5,
-
-  1: 12,
-  8453: 30,
-  10: 30,
-  42161: 240,
-  137: 135,
-  56: 135,
-  43114: 60,
-};
-
-function recommendedDepth(chainId) {
-  const v = DEFAULT_CONFIRMATIONS[chainId];
-  return Number.isFinite(v) ? v : null;
+function recommendedDepth(chain) {
+  const v = Number(chain && chain.recommendedConfirmations);
+  return Number.isFinite(v) && v > 0 ? v : null;
 }
 
 export default function CryptoSection() {
@@ -46,13 +30,22 @@ export default function CryptoSection() {
   });
   const [overrides, setOverrides] = useState(() => ({ ...(c.confirmationOverrides || {}) }));
   const [chains, setChains] = useState([]);
+  const [chainsError, setChainsError] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     fetchChains()
-      .then(setChains)
-      .catch(() => setChains([]));
+      .then((list) => {
+        setChains(list);
+        setChainsError("");
+      })
+      .catch((err) =>
+        setChainsError(
+          err?.response?.data?.error ||
+            "The networks could not be loaded, so the network choice and the confirmation counts are hidden. Reload the page to try again."
+        )
+      );
   }, []);
 
   const walletAddress = getStoredAddress();
@@ -82,7 +75,7 @@ export default function CryptoSection() {
   }
 
   const lowered = chains.filter((ch) => {
-    const recommended = recommendedDepth(ch.chainId);
+    const recommended = recommendedDepth(ch);
     if (recommended == null) return false;
     const v = Number(overrides[ch.chainId]);
     return Number.isFinite(v) && v > 0 && v < recommended;
@@ -97,6 +90,7 @@ export default function CryptoSection() {
           network is chosen per invoice, and the real ones are among them.
         </p>
       </div>
+      {chainsError && <p className="error-text">{chainsError}</p>}
 
       <div className="settings-section">
         <div className="overline">Accepting crypto</div>
@@ -209,8 +203,8 @@ export default function CryptoSection() {
                 max={MAX_CONFIRMATIONS}
                 value={overrides[ch.chainId] ?? ""}
                 placeholder={
-                  recommendedDepth(ch.chainId) != null
-                    ? `${recommendedDepth(ch.chainId)} (recommended)`
+                  recommendedDepth(ch) != null
+                    ? `${recommendedDepth(ch)} (recommended)`
                     : "the recommended depth"
                 }
                 onChange={(e) =>

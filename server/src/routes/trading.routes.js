@@ -4,6 +4,8 @@ const {
   resolveToken: resolveTokenLimit,
   addToken: addTokenLimit,
 } = require("../middleware/rateLimit");
+const { validate } = require("../middleware/validate");
+const schemas = require("../validation/trading.schemas");
 const {
   setMode,
   listTokens,
@@ -14,10 +16,10 @@ const {
 
 const router = express.Router();
 
-router.patch("/mode", requireAuth, setMode);
-router.get("/tokens", requireAuth, listTokens);
-router.post("/tokens", requireAuth, addTokenLimit, addToken);
-router.delete("/tokens", requireAuth, removeToken);
-router.get("/resolve", requireAuth, resolveTokenLimit, resolveToken);
+router.patch("/mode", requireAuth, validate(schemas.setMode), setMode);
+router.get("/tokens", requireAuth, validate(schemas.listTokens), listTokens);
+router.post("/tokens", requireAuth, addTokenLimit, validate(schemas.addToken), addToken);
+router.delete("/tokens", requireAuth, validate(schemas.removeToken), removeToken);
+router.get("/resolve", requireAuth, resolveTokenLimit, validate(schemas.resolveToken), resolveToken);
 
 module.exports = router;

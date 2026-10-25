@@ -21,6 +21,7 @@ function buildPaymentReceiptEmail({
   payToAddress,
   payToChainName,
   hasLogo,
+  unsubscribeUrl,
 }) {
   const supplier = esc(businessName || "your supplier");
 
@@ -174,6 +175,7 @@ function buildPaymentReceiptEmail({
         <div style="border-top:1px solid ${LINE};padding-top:16px;font:400 12px/1.6 ${FONT};color:${MUTED}">
           Reply to this email if anything here looks wrong to you.<br>
           Sent with <span style="color:${BODY};font-weight:600">LedgerWatch</span>.
+          ${unsubscribeUrl ? `<br><a href="${esc(unsubscribeUrl)}" style="color:${MUTED}">Stop payment reminder emails from ${supplier}</a>` : ""}
         </div>
       </td></tr>
 

@@ -25,7 +25,7 @@ function fail(res, outcome, context, coin) {
 }
 
 function coinOf(req) {
-  const raw = (req.body && req.body.coin) || (req.query && req.query.coin) || (req.params && req.params.coin);
+  const raw = req.body.coin || req.query.coin;
   const c = utxo.validateCoin(raw);
   return c.ok ? c.coin : null;
 }
@@ -95,7 +95,7 @@ function coins(req, res) {
 async function broadcast(req, res) {
   const coin = coinOf(req);
   if (!coin) return badCoin(res);
-  const { rawTx: hex, network } = req.body || {};
+  const { rawTx: hex, network } = req.body;
   const label = utxo.COINS[coin].label;
   const log = utxo.COINS[coin].log;
 

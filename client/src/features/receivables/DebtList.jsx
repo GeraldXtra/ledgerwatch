@@ -100,6 +100,7 @@ export default function DebtList({
                         {debt.debtorName}
                       </button>
                       <div className="lead-sub num">
+                        {debt.invoiceNumber ? `${debt.invoiceNumber} · ` : ""}
                         {debt.debtorPhone || "no phone on file"}
                         {hasCrypto && (
                           <span

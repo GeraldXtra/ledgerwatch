@@ -110,6 +110,8 @@ function MarketWatch() {
   const [alertHistory, setAlertHistory] = useState([]);
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState("");
+  const [failedParts, setFailedParts] = useState([]);
+  const [pollFailedAt, setPollFailedAt] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [trade, setTrade] = useState(null);
   const [running, setRunning] = useState(false);
@@ -163,6 +165,7 @@ function MarketWatch() {
       else failed.push("alert history");
       if (a.status !== "fulfilled") failed.push("alerts");
 
+      setFailedParts(failed);
       if (failed.length) {
         setError(`Could not load ${failed.join(", ")}. The rest of the page still works.`);
       }
@@ -180,6 +183,7 @@ function MarketWatch() {
       knownAlertIds.current = new Set(nextAlerts.map((al) => al._id));
       setAlerts(nextAlerts);
     } catch (err) {
+      setFailedParts(["watches", "alerts", "alert history", "portfolio"]);
       setError(err?.response?.data?.error || "Failed to load market data");
     }
   }, [toast, mode]);
@@ -189,6 +193,8 @@ function MarketWatch() {
     setAlerts([]);
     setAlertHistory([]);
     setPortfolio(null);
+    setFailedParts([]);
+    setPollFailedAt(null);
     knownAlertIds.current = null;
     loadData();
   }, [loadData]);
@@ -279,15 +285,23 @@ function MarketWatch() {
               http
                 .get("/api/alerts/history", { params: { mode: asked } })
                 .then((h) => {
-                  if (asked === modeRef.current) setAlertHistory(h.data.alerts);
+                  if (asked !== modeRef.current) return;
+                  setAlertHistory(h.data.alerts);
+                  setFailedParts((parts) => parts.filter((part) => part !== "alert history"));
                 })
-                .catch(() => {});
+                .catch(() => {
+                  if (asked === modeRef.current) setFailedParts((parts) => (parts.includes("alert history") ? parts : [...parts, "alert history"]));
+                });
             }
           }
           knownAlertIds.current = new Set(nextAlerts.map((al) => al._id));
           setAlerts(nextAlerts);
+          setFailedParts((parts) => parts.filter((part) => part !== "alerts"));
+          setPollFailedAt(null);
         })
-        .catch(() => {});
+        .catch(() => {
+          if (asked === modeRef.current) setPollFailedAt((at) => at || new Date());
+        });
     }, 10000);
     return () => clearInterval(t);
   }, [toast]);
@@ -597,8 +611,13 @@ function MarketWatch() {
           <SkeletonBlock height={280} />
         ) : (
           <>
-            <AlertsList alerts={alerts} onTrade={openTrade} onDismiss={dismiss} busyId={busyId} />
-            <AlertHistory alerts={alertHistory} />
+            {pollFailedAt && (
+              <p className="error-text">
+                New alerts could not be checked since {pollFailedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}, so this list may be out of date. It keeps trying every ten seconds.
+              </p>
+            )}
+            <AlertsList alerts={alerts} failed={failedParts.includes("alerts")} onTrade={openTrade} onDismiss={dismiss} busyId={busyId} />
+            <AlertHistory alerts={alertHistory} failed={failedParts.includes("alert history")} />
           </>
         )}
       </div>
@@ -620,7 +639,7 @@ function MarketWatch() {
                 </Button>
               }
             />
-            <WatchList watches={watches} onEdit={editWatch} onRemove={removeWatch} />
+            <WatchList watches={watches} failed={failedParts.includes("watches")} onEdit={editWatch} onRemove={removeWatch} />
           </>
         )}
       </div>

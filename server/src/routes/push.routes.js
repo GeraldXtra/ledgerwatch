@@ -1,18 +1,20 @@
 const express = require("express");
 const requireAuth = require("../middleware/auth");
 const { pushAction } = require("../middleware/rateLimit");
+const { validate } = require("../middleware/validate");
+const schemas = require("../validation/push.schemas");
 const { key, subscribe, resubscribe, devices, unsubscribe, test, action } = require("../controllers/push.controller");
 
 const router = express.Router();
 
-router.post("/action", pushAction, action);
-router.post("/resubscribe", pushAction, resubscribe);
+router.post("/action", pushAction, validate(schemas.action), action);
+router.post("/resubscribe", pushAction, validate(schemas.resubscribe), resubscribe);
 
-router.get("/key", requireAuth, key);
-router.get("/vapid", key);
-router.post("/subscribe", requireAuth, subscribe);
-router.get("/devices", requireAuth, devices);
-router.post("/unsubscribe", requireAuth, unsubscribe);
-router.post("/test", requireAuth, test);
+router.get("/key", requireAuth, validate(schemas.none), key);
+router.get("/vapid", validate(schemas.none), key);
+router.post("/subscribe", requireAuth, validate(schemas.subscribe), subscribe);
+router.get("/devices", requireAuth, validate(schemas.none), devices);
+router.post("/unsubscribe", requireAuth, validate(schemas.unsubscribe), unsubscribe);
+router.post("/test", requireAuth, validate(schemas.none), test);
 
 module.exports = router;

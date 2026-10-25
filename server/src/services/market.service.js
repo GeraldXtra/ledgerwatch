@@ -11,6 +11,19 @@ const { notifyUser, signActionToken } = require("./push.service");
 const STARTING_CASH = 1000000;
 const TRADE_FRACTION = 0.1;
 const ALERT_COOLDOWN_MS = 5 * 60 * 1000;
+const DEFAULT_PRICE_PASS_BUDGET_MS = 30 * 1000;
+let pricePassCursor = null;
+
+function pricePassBudgetMs() {
+  const n = Number(process.env.PRICE_PASS_BUDGET_MS);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_PRICE_PASS_BUDGET_MS;
+}
+
+function rotateFrom(watches, cursor) {
+  if (!cursor) return watches;
+  const start = watches.findIndex((w) => String(w._id) > cursor);
+  return start <= 0 ? watches : [...watches.slice(start), ...watches.slice(0, start)];
+}
 
 function httpError(status, message) {
   const err = new Error(message);
@@ -163,9 +176,10 @@ async function runPricePass({ userId } = {}) {
   const query = { active: true };
   if (userId) query.userId = userId;
 
-  const watches = await Watch.find(query);
-  const watchesChecked = watches.length;
-  if (watchesChecked === 0) return { alertsCreated: 0, watchesChecked: 0 };
+  const startedAt = Date.now();
+  const budgetMs = pricePassBudgetMs();
+  const watches = rotateFrom(await Watch.find(query).sort({ _id: 1 }), userId ? null : pricePassCursor);
+  if (watches.length === 0) return { alertsCreated: 0, watchesChecked: 0, watchesDeferred: 0 };
 
   const coinIds = [...new Set(watches.map((w) => w.coinId))];
   const prices = await getPrices(coinIds);
@@ -175,8 +189,16 @@ async function runPricePass({ userId } = {}) {
 
   const now = Date.now();
   let alertsCreated = 0;
+  let watchesChecked = 0;
+  let watchesDeferred = 0;
 
   for (const watch of watches) {
+    if (watchesChecked > 0 && Date.now() - startedAt > budgetMs) {
+      watchesDeferred = watches.length - watchesChecked;
+      break;
+    }
+    watchesChecked++;
+    if (!userId) pricePassCursor = String(watch._id);
     try {
       const priceRow = prices[watch.coinId];
       if (!priceRow || typeof priceRow.usd !== "number") continue;
@@ -278,7 +300,15 @@ async function runPricePass({ userId } = {}) {
     }
   }
 
-  return { alertsCreated, watchesChecked };
+  if (!userId && watchesDeferred === 0) pricePassCursor = null;
+  if (watchesDeferred > 0) {
+    console.warn(
+      `[market] price pass stopped after ${Math.round((Date.now() - startedAt) / 1000)}s, past its ` +
+        `${Math.round(budgetMs / 1000)}s budget. ${watchesDeferred} watch(es) wait for the next pass, ` +
+        `which starts with them.`
+    );
+  }
+  return { alertsCreated, watchesChecked, watchesDeferred };
 }
 
 function assertPaperAlert(alert) {

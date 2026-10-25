@@ -1,15 +1,11 @@
-const Alert = require("../models/Alert");
+const { scopedRepo } = require("../repositories/scoped");
 const { approveAlert, actOnAlert } = require("../services/market.service");
 const { requestedMode } = require("../utils/tradingMode");
 
 async function list(req, res) {
   try {
     const mode = requestedMode(req);
-    const alerts = await Alert.find({
-      mode,
-      userId: req.user._id,
-      status: "pending",
-    }).sort({ createdAt: -1 });
+    const alerts = await scopedRepo(req.user._id).alerts.find({ mode, status: "pending" }).sort({ createdAt: -1 });
     return res.json({ alerts, mode });
   } catch (err) {
     console.error("list alerts error:", err.message);
@@ -20,11 +16,7 @@ async function list(req, res) {
 async function history(req, res) {
   try {
     const mode = requestedMode(req);
-    const alerts = await Alert.find({
-      mode,
-      userId: req.user._id,
-      status: { $in: ["approved", "dismissed"] },
-    })
+    const alerts = await scopedRepo(req.user._id).alerts.find({ mode, status: { $in: ["approved", "dismissed"] } })
       .sort({ createdAt: -1 })
       .limit(50);
     return res.json({ alerts, mode });
@@ -36,7 +28,7 @@ async function history(req, res) {
 
 async function approve(req, res) {
   try {
-    const alert = await Alert.findOne({ _id: req.params.id, userId: req.user._id });
+    const alert = await scopedRepo(req.user._id).alerts.findById(req.params.id);
     if (!alert) return res.status(404).json({ error: "Alert not found" });
 
     const result = await approveAlert(req.user._id, alert);
@@ -50,19 +42,19 @@ async function approve(req, res) {
 
 async function executed(req, res) {
   try {
-    const alert = await Alert.findOne({ _id: req.params.id, userId: req.user._id });
+    const alert = await scopedRepo(req.user._id).alerts.findById(req.params.id);
     if (!alert) return res.status(404).json({ error: "Alert not found" });
 
     if (alert.status !== "pending") {
       return res.status(409).json({ error: `Alert is already ${alert.status}` });
     }
 
-    const side = req.body && req.body.side;
+    const side = req.body.side;
     if (side !== "buy" && side !== "sell") {
       return res.status(400).json({ error: 'side must be "buy" or "sell"' });
     }
 
-    const txHash = String((req.body && req.body.txHash) || "").trim();
+    const txHash = String(req.body.txHash || "").trim();
     if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
       return res.status(400).json({ error: "A transaction hash is required to close a live alert" });
     }
@@ -91,7 +83,7 @@ async function executed(req, res) {
 
 async function dismiss(req, res) {
   try {
-    const alert = await Alert.findOne({ _id: req.params.id, userId: req.user._id });
+    const alert = await scopedRepo(req.user._id).alerts.findById(req.params.id);
     if (!alert) return res.status(404).json({ error: "Alert not found" });
 
     if (alert.status !== "pending") {
@@ -111,8 +103,8 @@ async function dismiss(req, res) {
 
 async function act(req, res) {
   try {
-    const { action, amount, denom } = req.body || {};
-    const alert = await Alert.findOne({ _id: req.params.id, userId: req.user._id });
+    const { action, amount, denom } = req.body;
+    const alert = await scopedRepo(req.user._id).alerts.findById(req.params.id);
     if (!alert) return res.status(404).json({ error: "Alert not found" });
 
     if (action === "dismiss") {

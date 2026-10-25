@@ -52,9 +52,22 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (email, password, turnstileToken) => {
     const { data } = await http.post("/api/auth/login", { email, password, turnstileToken });
+    if (data.twoFactorRequired) return { twoFactorRequired: true, challenge: data.challenge };
     setToken(data.token);
     setUser(data.user);
     return data.user;
+  }, []);
+
+  const loginSecondFactor = useCallback(async (challenge, code) => {
+    const { data } = await http.post("/api/auth/login/2fa", { challenge, code });
+    setToken(data.token);
+    setUser(data.user);
+    return data;
+  }, []);
+
+  const applySession = useCallback((token, nextUser) => {
+    setToken(token);
+    if (nextUser) setUser(nextUser);
   }, []);
 
   const register = useCallback(async (payload) => {
@@ -130,6 +143,8 @@ export function AuthProvider({ children }) {
     resendResetCode,
     resetPassword,
     loginWithToken,
+    loginSecondFactor,
+    applySession,
     logout,
     updateProfile,
     applyUser,

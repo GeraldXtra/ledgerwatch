@@ -52,12 +52,20 @@ async function emailActivity(userId, category, content) {
   if (category && prefs[category] === false) return { sent: false, reason: "category-off" };
 
   const { sendEmail, getLogoAttachment } = require("./notify.service");
+  const unsubscribe = require("./unsubscribe.service").unsubscribeLinks({ kind: "owner", userId });
   const logo = getLogoAttachment();
-  const html = renderActivityEmail({ hasLogo: Boolean(logo), subtitle: "Account activity", ...content });
-  const text = activityText(content);
+  const html = renderActivityEmail({
+    hasLogo: Boolean(logo),
+    subtitle: "Account activity",
+    ...content,
+    unsubscribeUrl: unsubscribe.page,
+  });
+  const text = activityText({ ...content, unsubscribeUrl: unsubscribe.page });
   const res = await sendEmail(user.email, content.subject || content.title, html, {
     text,
     attachments: logo ? [logo] : [],
+    category: "activity",
+    unsubscribe,
   });
   return { sent: Boolean(res && res.ok), reason: res && res.reason };
 }

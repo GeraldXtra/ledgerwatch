@@ -160,3 +160,11 @@ jobs:
             exit 1
           fi
           echo "$entry carries no wallet code."
+
+      - name: Assert no localhost address reached the built site
+        run: |
+          if grep -rl "localhost:8000" dist; then
+            echo "::error::a localhost API address is in the built site (LW-021): the files listed above would send requests to the visitor's own machine."
+            exit 1
+          fi
+          echo "No localhost address in the built site."

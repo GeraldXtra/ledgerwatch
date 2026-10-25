@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import http from "../../api/http";
 import { Button, Field, Input, PageHeader } from "../../components/ui";
@@ -43,6 +43,7 @@ function toDateInput(value) {
 }
 
 export default function DebtForm({ initial, onSubmit, onCancel }) {
+  const noteId = useId();
   const editing = Boolean(initial);
   const [form, setForm] = useState(
     editing
@@ -171,8 +172,11 @@ export default function DebtForm({ initial, onSubmit, onCancel }) {
               placeholder="3"
             />
           </Field>
-          <Field label="Note (optional)">
-            <Input value={form.note} onChange={update("note")} />
+          <Field label="Note (optional)" htmlFor={noteId}>
+            <Input id={noteId} value={form.note} onChange={update("note")} aria-describedby={`${noteId}-shown`} />
+            <span id={`${noteId}-shown`} className="muted small">
+              Your customer sees this on the invoice PDF and the payment page.
+            </span>
           </Field>
         </div>
 

@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://www.useledgerwatch.co/</loc></url>
+  <url><loc>https://www.useledgerwatch.co/about</loc></url>
+  <url><loc>https://www.useledgerwatch.co/pricing</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/getting-started</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/on-your-phone</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/receivables</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/debts</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/payments</loc></url>
+  <url><loc>https://www.useledgerwatch.co/docs/invoices-and-payment-pages</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/reminders</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/debtors</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/crypto-payments</loc></url>
@@ -14,16 +17,27 @@
   <url><loc>https://www.useledgerwatch.co/docs/watches-and-alerts</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/paper-trading</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/live-trading</loc></url>
+  <url><loc>https://www.useledgerwatch.co/docs/profit-agent</loc></url>
+  <url><loc>https://www.useledgerwatch.co/docs/naira</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/wallet</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/networks</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/send-and-receive</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/tokens</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/bitcoin</loc></url>
+  <url><loc>https://www.useledgerwatch.co/docs/more-networks</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/settings</loc></url>
+  <url><loc>https://www.useledgerwatch.co/docs/notifications</loc></url>
+  <url><loc>https://www.useledgerwatch.co/docs/two-step-sign-in</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/backup-and-recovery</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/safety</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/troubleshooting</loc></url>
   <url><loc>https://www.useledgerwatch.co/docs/glossary</loc></url>
+  <url><loc>https://www.useledgerwatch.co/articles</loc></url>
+  <url><loc>https://www.useledgerwatch.co/articles/polite-payment-reminders</loc></url>
+  <url><loc>https://www.useledgerwatch.co/articles/whatsapp-payment-reminder-messages</loc></url>
+  <url><loc>https://www.useledgerwatch.co/articles/invoice-reminder-schedule</loc></url>
+  <url><loc>https://www.useledgerwatch.co/articles/accept-usdc-payments-nigeria</loc></url>
+  <url><loc>https://www.useledgerwatch.co/articles/track-who-owes-you-money</loc></url>
   <url><loc>https://www.useledgerwatch.co/contact</loc></url>
   <url><loc>https://www.useledgerwatch.co/privacy</loc></url>
   <url><loc>https://www.useledgerwatch.co/terms</loc></url>

@@ -296,6 +296,43 @@ export const GUIDE = [
     ],
   },
   {
+    slug: "invoices-and-payment-pages",
+    group: "receivables",
+    title: "Invoice numbers, PDFs and payment pages",
+    intro:
+      "Every invoice has a number, can be downloaded as a PDF, and has a private payment page your customer can open from any reminder.",
+    blocks: [
+      h2("Invoice numbers"),
+      p(
+        "Each new invoice is numbered in order for your account, starting from **INV-0001**. The number appears on the ledger under the customer's name, at the top of the invoice's page, on receipts, statements and the PDF, and in every reminder. An invoice made before numbering existed is given the next number the first time it is shared, downloaded or reminded."
+      ),
+      h2("The PDF"),
+      img("debt-invoice.webp", "The Invoice card on an open invoice."),
+      p(
+        "Open an invoice and press **Download PDF** on the **Invoice** card. The PDF shows your business name, the customer, the dates, the amount, what has been paid, the balance due, and how to pay: your bank details, an active crypto payment address if there is one, and the link to the payment page. Send it on WhatsApp or by email like any other file."
+      ),
+      h2("The payment page"),
+      p(
+        "**Copy payment page link** on the same card copies a private link to a page that shows the invoice and how to pay it. Your customer does not need an account to open it. The page shows:"
+      ),
+      img("pay-page.webp", "A payment page, as your customer sees it."),
+      ul([
+        "What is owed, what has been paid so far and the balance due.",
+        "The invoice's note, which is on the PDF too, so write it for your customer to read.",
+        "Your bank details, with a copy button beside each one.",
+        "The crypto payment address, its QR code and the exact amount, when one is active.",
+        "A button to download the PDF.",
+      ]),
+      p(
+        "It does not show your customer's phone number or email, and search engines are told not to list it. Every reminder carries the link, so the customer can see the invoice and pay without asking you anything. Once the invoice is paid, the page says so and hides the payment details."
+      ),
+      h2("Making a new link"),
+      p(
+        "Anyone who has the link can open the page, so share it only with that customer. If it goes somewhere it should not, press **Make a new link** and confirm. The old link stops working straight away, and new reminders carry the new one."
+      ),
+    ],
+  },
+  {
     slug: "reminders",
     group: "receivables",
     title: "Reminders",
@@ -312,7 +349,8 @@ export const GUIDE = [
         "If part has been paid, thanks for that payment and the balance that remains.",
         "Your bank details, exactly as saved in Settings under Payout details. Without them the message asks the customer to get in touch for the details.",
         "If the invoice has a live crypto payment address, a block with the network, the address, the exact stablecoin amount and the naira it corresponds to. See [Crypto payments](/docs/crypto-payments).",
-        "A warm sign off with your name.",
+        "The invoice number and a link to its payment page, where the customer sees what they owe and how to pay. See [Invoice numbers, PDFs and payment pages](/docs/invoices-and-payment-pages).",
+        "A warm sign off with your business name.",
       ]),
       p(
         "When the assistant is switched on for the server, the paragraphs are written for the specific customer and situation and the message is labelled **AI-drafted**. When it is not, a plain template is used and the message is labelled **Template**. The bank details and the crypto block are never written by the assistant; they are added word for word."
@@ -326,6 +364,9 @@ export const GUIDE = [
       ]),
       p(
         "The line under the buttons tells you what is missing: payout details not set, phone missing or invalid, no email on file. If a provider is not configured on the server, the send is reported as **skipped** rather than silently lost, and the WhatsApp link remains."
+      ),
+      p(
+        "Replies to a reminder email go to your own email address. Every reminder email ends with a link the customer can use to stop reminder emails from you. If they use it, later emails to them are skipped and the log says why; WhatsApp and the payment page still work."
       ),
       note(
         "An address at a reserved domain such as example.com is accepted by mail servers and bounced afterwards, so it would report as sent and never arrive. LedgerWatch warns you before sending to one.",
@@ -342,6 +383,9 @@ export const GUIDE = [
       h2("Automatic sending"),
       p(
         "By default reminders are drafted and wait for you. In Settings, Notifications, **Send reminders automatically** lets LedgerWatch send them itself, over WhatsApp, email or both, as they fall due. WhatsApp needs a provider on the server; **Open in WhatsApp** cannot be automated because it sends from your own phone. See [Settings](/docs/settings#notifications)."
+      ),
+      p(
+        "WhatsApp delivers a business message to someone who has not written to you in the last 24 hours only if it uses a message template Meta has approved. Once a template is named in the server's settings, automatic reminders use it, with the customer's name, your business name, the amount, the due date and the payment page link filled in. Until then, automatic WhatsApp reaches only people who wrote to you recently, and the log says so when a message is refused."
       ),
       h2("Reminding many at once"),
       p(
@@ -588,6 +632,10 @@ export const GUIDE = [
       p(
         "The **Holdings** card on the Portfolio view lists every simulated position with its quantity, average buy price, live price and value. Click one to open the coin's details on a page of their own."
       ),
+      h2("Paper and live are kept apart"),
+      p(
+        "Watches, alerts and trades made in paper trading stay in paper trading, and the same is true of live. When you switch to **Live wallet**, only your live watches and live alerts are shown, and an alert from the mode you are not in does not send you a notification. Switch back and they are all still there."
+      ),
       h2("Starting again"),
       p("**Clear all my data** in Settings, Danger zone, resets the simulated portfolio to its starting cash along with the rest of your data."),
     ],
@@ -610,6 +658,9 @@ export const GUIDE = [
         "**USDC** or **USDT** on that network, to buy with, and a little of the network's own coin for fees. The wallet page shows both.",
       ]),
       p("Press **Live wallet** at the top of the Portfolio view. The shared demo account cannot switch; every other account can, once it has a wallet."),
+      p(
+        "In live trading the Portfolio view also has the [profit agent](/docs/profit-agent) and the card for [buying and selling with naira](/docs/naira)."
+      ),
       h2("Live positions"),
       img("market-live.webp", "Live positions, read from the chain."),
       p(
@@ -662,6 +713,72 @@ export const GUIDE = [
     ],
   },
 
+  {
+    slug: "profit-agent",
+    group: "market",
+    title: "The profit agent",
+    intro:
+      "When you sell a coin for more than you paid, the agent works out the profit and helps you set it aside, so trading gains do not quietly flow back into the next trade.",
+    blocks: [
+      img("market-profit.webp", "The profit agent card in live trading."),
+      h2("How the profit is worked out"),
+      p(
+        "On every sale the agent compares what you received with the average price you paid for the coins you sold, using the purchases recorded in LedgerWatch. For a live sale it reads the amounts from the transaction itself once it confirms. A sale of a coin with no recorded purchase, for example one you bought somewhere else, has no profit figure, and the agent says so rather than guess."
+      ),
+      h2("In paper trading"),
+      p(
+        "The profit leaves your trading cash and moves to your **Profit balance** straight away. Your total value does not change; the profit is simply kept apart from the money you trade with."
+      ),
+      h2("In live trading"),
+      p(
+        "You are told about each profit, by notification and by email if you have them on, and it waits in the **Profit agent** card on the Portfolio view with two choices:"
+      ),
+      ul([
+        "**Move to profit wallet** sends exactly the profit, in the dollar coin you sold for, to your profit wallet. You confirm it with your wallet password like any transaction, and it pays a small network fee.",
+        "**Keep in trading wallet** leaves it where it is and marks it decided.",
+      ]),
+      h2("Your profit wallet"),
+      p(
+        "Your profit wallet is **Account 2** of your own recovery phrase. It is yours in exactly the same way as your main wallet, and any standard wallet restores it from the same phrase. The card shows what it holds on each network, and the **Move back** button returns it to your trading wallet when you want to use it."
+      ),
+      note(
+        "The profit figure is a record of what LedgerWatch saw. It is not tax advice, and it does not know about coins you bought or sold elsewhere.",
+        "warn"
+      ),
+    ],
+  },
+  {
+    slug: "naira",
+    group: "market",
+    title: "Buying and selling with naira",
+    intro:
+      "In live trading, Market Watch can open a page from Transak, a licensed payment provider, where you buy crypto with a Nigerian bank transfer or card, or sell crypto to your bank account.",
+    blocks: [
+      h2("Where it is"),
+      p(
+        "Switch Market Watch to **Live wallet** and open the Portfolio view. The **Buy or sell crypto with naira** card sits under your live positions. It is not shown in paper trading, because paper trading never touches real money."
+      ),
+      h2("Buying"),
+      ol([
+        "Choose **Buy** and the coin.",
+        "If you like, type an amount in naira.",
+        "Press **Prepare to buy**, then **Open the Transak page**. The link works once and for five minutes.",
+        "On Transak's page, pay by bank transfer or card. The first time, Transak checks your identity.",
+        "Transak sends the coin to your wallet address, which LedgerWatch fills in for you.",
+      ]),
+      h2("Selling"),
+      p(
+        "Choose **Sell** and the coin, and follow the same steps. Transak tells you where to send the coin from your wallet, then pays the naira into your bank account."
+      ),
+      h2("Following an order"),
+      p("Your orders appear on the card with their state. You are told when one completes, fails or is put on hold."),
+      note(
+        "Transak sets its own prices and fees and shows them before you pay. It checks identities and may hold or refuse an order. LedgerWatch never holds your naira or your coins and cannot change an order, so questions about an order go to Transak. See the [terms](/terms).",
+        "warn",
+        "Transak is a separate company"
+      ),
+    ],
+  },
   {
     slug: "wallet",
     group: "wallet",
@@ -733,6 +850,7 @@ export const GUIDE = [
         [
           ["Ethereum, Base, Arbitrum One, OP Mainnet, Polygon, BNB Chain, Avalanche C-Chain", "Ethereum Sepolia, Base Sepolia, Arbitrum Sepolia, Optimism Sepolia, Polygon Amoy"],
           ["Bitcoin", "Bitcoin Testnet"],
+          ["Litecoin, Dogecoin, TRON, Solana, TON", "Litecoin Testnet, TRON Nile Testnet, Solana Devnet, TON Testnet"],
         ]
       ),
       p(
@@ -740,7 +858,7 @@ export const GUIDE = [
       ),
       h2("One address, every network"),
       p(
-        "Your wallet address is the same on every network in the first row, so you never need a separate wallet per chain. Bitcoin is different: it has its own address, beginning bc1, derived from the same recovery phrase."
+        "Your wallet address is the same on every network in the first row, so you never need a separate wallet per chain. Bitcoin is different: it has its own address, beginning bc1, derived from the same recovery phrase. So do Litecoin, Dogecoin, TRON, Solana and TON; see [Litecoin, Dogecoin, TRON, Solana and TON](/docs/more-networks)."
       ),
       note(
         "Balances are per network and do not move between them. Funds on Base stay on Base. Sending to your own address does not carry them to another network; it returns them to you on the same one and costs a fee. Moving assets between networks needs a bridge. On the test networks that have one, LedgerWatch links to it from the Send and Receive panels; on a real network, use that network's official bridge.",
@@ -880,6 +998,42 @@ export const GUIDE = [
   },
 
   {
+    slug: "more-networks",
+    group: "wallet",
+    title: "Litecoin, Dogecoin, TRON, Solana and TON",
+    intro:
+      "The same recovery phrase also holds accounts on five more networks. Each has its own address, its own coins and its own rules.",
+    blocks: [
+      table(
+        ["Network", "Coins", "Good to know"],
+        [
+          ["Litecoin", "LTC", "Addresses begin ltc1. You choose how fast to send, and the fee follows."],
+          ["Dogecoin", "DOGE", "Addresses begin D. You choose how fast to send, and the fee follows."],
+          ["TRON", "TRX, and USDT (TRC-20)", "Addresses begin T. Sending USDT burns TRX for energy, so keep some TRX."],
+          ["Solana", "SOL, USDC and USDT", "Sending a token to someone without an account for it opens one, paid from your SOL."],
+          ["TON", "TON and USDT", "An exchange may ask for a comment with a deposit. The send form has a field for it."],
+        ]
+      ),
+      h2("Opening one"),
+      img("wallet-tron.webp", "A TRON account in the wallet."),
+      p(
+        "Choose the network from the network menu on the wallet. Real networks come first, then test networks. The page for each one shows your balance, **Receive** with the address and its QR code, **Send**, and your history."
+      ),
+      h2("Sending"),
+      p(
+        "Type the address and the amount, read the fee, and confirm with your wallet password. The transaction is built and signed in your browser, and the server only passes it on to the network. If the fee would use more of the network's own coin than you hold, the page says so before anything is signed."
+      ),
+      h2("Money arriving"),
+      p(
+        "LedgerWatch checks these addresses regularly and tells you when the balance goes up. It also tells you when it goes down, because only your browser can send from them."
+      ),
+      note(
+        "Send each coin only on its own network. USDT exists on TRON, Solana, TON and many other networks, and the copies are not interchangeable: USDT sent to your TRON address from another network will not arrive.",
+        "danger"
+      ),
+    ],
+  },
+  {
     slug: "settings",
     group: "settings",
     title: "Settings",
@@ -890,7 +1044,7 @@ export const GUIDE = [
       h2("Profile"),
       img("settings-profile.webp", "Profile."),
       p(
-        "Your picture, which is cropped to a square and shown beside your name; your display name, which signs your reminders; and your company name, which appears at the top of statements and receipts when it is set. Your email is shown but cannot be changed here."
+        "Your picture, which is cropped to a square and shown beside your name; your display name, which signs your reminders; and your company name, which appears at the top of statements, receipts, invoices and payment pages when it is set. To change your email, use Security."
       ),
       h2("Payout details"),
       img("settings-payout.webp", "Payout details."),
@@ -909,13 +1063,16 @@ export const GUIDE = [
       p(
         "Change the password you sign in with. It must be at least eight characters and different from the current one. Changing it signs every other device out. Your wallet password is separate and is not affected."
       ),
+      p(
+        "The same tab turns on two-step sign-in and changes the email you sign in with. See [Two-step sign-in and your email](/docs/two-step-sign-in)."
+      ),
       h2("Wallet backup"),
       p("The screen that stops the wallet being a trap. See [Backup and recovery](/docs/backup-and-recovery)."),
       h2("Notifications"),
       img("settings-notifications.webp", "Notifications."),
       h3("On this device"),
       p(
-        "The current browser permission is shown as a small label. **Enable notifications** asks the browser for permission and registers this device. **Send test notification** proves it works; the test appears when this tab is not in front, because while it is in front you get a toast instead. Then choose what to be told about: **Market alerts**, **Reminders due** and **Transaction updates**."
+        "The current browser permission is shown as a small label. **Enable notifications** asks the browser for permission and registers this device. **Send test notification** proves it works; the test appears when this tab is not in front, because while it is in front you get a toast instead. Then choose what to be told about: **Money received**, **Trades**, **Profit**, **Transaction updates**, **Market alerts** and **Reminders due**. See [Notifications and emails](/docs/notifications)."
       ),
       p("If Chrome has blocked notifications for the site, it will not ask again; the page explains how to allow them from the address bar and try again."),
       h3("Automatic reminders"),
@@ -925,10 +1082,77 @@ export const GUIDE = [
       h2("Danger zone"),
       img("settings-danger.webp", "The danger zone."),
       ul([
-        "**Clear all my data** deletes every invoice, payment, reminder, watch and alert, and resets the simulated portfolio. Your login, profile and payout details are kept. Type **CLEAR** to confirm.",
+        "**Clear all my data** deletes every invoice, payment, reminder, watch, alert, profit record and naira order, and resets the simulated portfolio. Your login, profile and payout details are kept. Type **CLEAR** to confirm.",
         "**Delete my account** removes the account and everything in it and signs you out. Type **DELETE** to confirm.",
       ]),
       p("Neither touches the wallet, which lives in your browser. Remove that from the Wallet page, after backing up the phrase."),
+    ],
+  },
+  {
+    slug: "notifications",
+    group: "settings",
+    title: "Notifications and emails",
+    intro:
+      "Every time money moves, LedgerWatch can tell you on every phone and computer you sign in on, and send you an email about it.",
+    blocks: [
+      h2("On your devices"),
+      p(
+        "In Settings, Notifications, press **Enable notifications** on each device you use and allow them when the browser asks. A device that is turned on keeps receiving them until you turn them off there or sign out on it. Signing in on a device that was used by another account moves it to yours."
+      ),
+      h2("What you can be told about"),
+      table(
+        ["Choice", "When"],
+        [
+          ["Money received", "Money reaches your wallet, an invoice is paid or part paid, or a payment is detected."],
+          ["Trades", "A live trade confirms or fails, or a paper trade is filled."],
+          ["Profit", "The profit agent records a profit, and when it is moved."],
+          ["Transaction updates", "A transfer, approval or sweep confirms or fails."],
+          ["Market alerts", "A watch condition hits and the agent has a recommendation."],
+          ["Reminders due", "An invoice reminder is ready to send."],
+        ]
+      ),
+      p(
+        "Each event is announced once, even if more than one part of LedgerWatch notices it. A market alert from the trading mode you are not in is kept for later and does not interrupt you."
+      ),
+      h2("Emails"),
+      p(
+        "**Email me about activity** sends a receipt by email for money received, trades, transfers, sweeps and profit. Every one of those emails has a **Stop these emails** link at the bottom, which turns them off straight away."
+      ),
+    ],
+  },
+  {
+    slug: "two-step-sign-in",
+    group: "settings",
+    title: "Two-step sign-in and your email",
+    intro:
+      "Two-step sign-in asks for a code from an app on your phone as well as your password, so someone who learns your password still cannot get in.",
+    blocks: [
+      h2("Turning it on"),
+      img("settings-two-step.webp", "Setting up two-step sign-in. The QR code and key are blurred here; yours are not."),
+      ol([
+        "Install an authenticator app on your phone, such as Google Authenticator or Microsoft Authenticator.",
+        "In Settings, Security, press **Set up two-step sign-in** and enter your LedgerWatch password.",
+        "Scan the QR code with the app, or type the key under it.",
+        "Enter the six digit code the app shows and press **Turn on two-step sign-in**.",
+        "Save the ten backup codes that appear. Copy them, or download them as a text file, and keep them away from your phone.",
+      ]),
+      note(
+        "Each backup code signs you in once if you lose your phone. They are shown only once. **Make new backup codes** replaces them all, and the old ones stop working.",
+        "warn"
+      ),
+      h2("Signing in"),
+      p(
+        "After your password, LedgerWatch asks for the code your app is showing. A backup code works in the same box. Sign in with Google asks for the code too. Five wrong codes in a row pause sign in for fifteen minutes."
+      ),
+      h2("Turning it off"),
+      p("Press **Turn it off** and enter your password and a code. You get an email when it is turned on or off."),
+      h2("Changing your sign in email"),
+      p(
+        "In Settings, Security, press **Change email**, type the new address and your password, and a code goes to the new address. Nothing changes until you enter that code. When you do, you sign in with the new address, every other device is signed out, and the old address gets an email saying it happened. With two-step sign-in on, a code from your app is needed too."
+      ),
+      p(
+        "If you sign in with Google and have never set a password, use **Forgot password** on the sign in page to set one first."
+      ),
     ],
   },
   {
@@ -1002,6 +1226,7 @@ export const GUIDE = [
         "**Keep a little of the network's coin** on every network you use, so funds are never stuck for want of a fee.",
         "**Sign out on shared devices**, and remove the wallet from a device before you give it away.",
         "**Keep your sign in password and your wallet password different**, and both strong.",
+        "**Turn on two-step sign-in**, and keep the backup codes away from your phone. See [Two-step sign-in and your email](/docs/two-step-sign-in).",
       ]),
       h2("Recognising a scam"),
       p(
@@ -1092,6 +1317,7 @@ export const GUIDE = [
         ["Term", "Meaning"],
         [
           ["**Address**", "The public identifier of a wallet on a network. Safe to share; it is where money is sent to."],
+          ["**Backup code**", "A one time code that signs you in when you do not have your phone. You get ten when you turn on two-step sign-in."],
           ["**Baseline**", "The price a coin had when a percentage watch was created. The percentage is measured from it."],
           ["**Bridge**", "A service that moves assets from one network to another. LedgerWatch does not do this itself."],
           ["**Confirmation**", "A block added to the network after the one containing your transaction. More confirmations mean it is less likely to be undone."],
@@ -1100,17 +1326,22 @@ export const GUIDE = [
           ["**Explorer**", "A public website that shows every transaction on a network. LedgerWatch links to the right one for each network."],
           ["**Fee tier**", "The pool on Uniswap a swap is routed through. LedgerWatch quotes every tier and picks the best."],
           ["**Gas**", "The fee paid to a network to process a transaction, in the network's own coin."],
+          ["**Invoice number**", "The number LedgerWatch gives each invoice, such as INV-0004, in order for your account."],
           ["**Keystore**", "The encrypted file that holds a wallet's keys. It opens only with the wallet password."],
           ["**Mainnet**", "A real network, where money is real."],
           ["**Paper trading**", "Trading with simulated money that follows real prices."],
+          ["**Payment page**", "A private page for one invoice that shows the customer what they owe and how to pay. Anyone with its link can open it."],
           ["**Price impact**", "How much your own trade moves the price against you, because of the size of the pool."],
           ["**Private key**", "The secret that controls one account. Anyone who has it controls the funds."],
+          ["**Profit wallet**", "Account 2 of your recovery phrase, where the profit agent moves live trading profit when you confirm it."],
           ["**Recovery phrase**", "Twelve words (or twenty four, for a wallet made elsewhere) from which every key in the wallet is derived. The complete backup."],
           ["**Reorganisation**", "When a network discards recent blocks in favour of others. A shallow transaction can vanish; confirmations protect against it."],
           ["**Slippage**", "How far the price may move between the quote and the trade before the trade is abandoned."],
           ["**Stablecoin**", "A token that tracks the dollar, such as USDC or USDT."],
           ["**Sweep**", "Moving collected invoice payments from their addresses into your main wallet."],
           ["**Testnet**", "A practice network whose coins are free and worthless."],
+          ["**Transak**", "The licensed payment provider that handles buying and selling crypto with naira."],
+          ["**Two-step sign-in**", "Signing in with a code from an app on your phone as well as your password."],
           ["**Watch**", "A condition on a coin's price that raises an alert when it is met."],
         ]
       ),

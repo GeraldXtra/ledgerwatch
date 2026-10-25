@@ -48,7 +48,7 @@ self.addEventListener("push", (event) => {
     tag: payload.tag || type,
     renotify: true,
     icon: iconFor(payload.icon),
-    badge: "/icon-192.png",
+    badge: "/badge-96.png",
     timestamp: Date.now(),
     actions: fitActions(payload.actions),
     requireInteraction: type === "alert",

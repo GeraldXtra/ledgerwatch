@@ -1,4 +1,5 @@
-const Watch = require("../models/Watch");
+const { scopedRepo } = require("../repositories/scoped");
+const { requestedMode } = require("../utils/tradingMode");
 const { getMarketsMap, logosFor } = require("../services/coingecko.service");
 
 const MAX_IDS = 250;
@@ -12,7 +13,7 @@ async function get(req, res) {
       .slice(0, MAX_IDS);
 
     if (ids.length === 0) {
-      const watches = await Watch.find({ userId: req.user._id, active: true, mode: req.user.tradingMode === "live" ? "live" : "paper" });
+      const watches = await scopedRepo(req.user._id).watches.find({ active: true, mode: requestedMode(req) });
       ids = [...new Set(watches.map((w) => w.coinId))].slice(0, MAX_IDS);
     }
 

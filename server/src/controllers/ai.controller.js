@@ -1,6 +1,6 @@
-const Debt = require("../models/Debt");
+const { scopedRepo } = require("../repositories/scoped");
 const { requestedMode } = require("../utils/tradingMode");
-const Watch = require("../models/Watch");
+const { assertCanTradeLive } = require("./trading.controller");
 const {
   answerReceivablesQuery,
   marketChat,
@@ -69,12 +69,12 @@ function computeFallback(debts) {
 
 async function receivablesQuery(req, res) {
   try {
-    const question = String((req.body && req.body.question) || "").slice(0, MAX_PROMPT_CHARS);
+    const question = String(req.body.question || "").slice(0, MAX_PROMPT_CHARS);
     if (!question.trim()) {
       return res.status(400).json({ error: "question is required" });
     }
 
-    const raw = await Debt.find({ userId: req.user._id });
+    const raw = await scopedRepo(req.user._id).debts.find({});
     const debts = await attachTotals(req.user._id, raw);
 
     const summary = debts.map((d) => ({
@@ -120,14 +120,16 @@ async function executeWatchIntents(userId, intents, mode = "paper") {
 
 async function chat(req, res) {
   try {
-    const message = String((req.body && req.body.message) || "").slice(0, MAX_PROMPT_CHARS);
+    const message = String(req.body.message || "").slice(0, MAX_PROMPT_CHARS);
     if (!message.trim()) {
       return res.status(400).json({ error: "message is required" });
     }
+    const mode = requestedMode(req);
+    if (mode === "live") assertCanTradeLive(req.user);
 
     const [watches, portfolio] = await Promise.all([
-      Watch.find({ userId: req.user._id, active: true, mode: requestedMode(req) }),
-      getPortfolio(req.user._id, requestedMode(req)),
+      scopedRepo(req.user._id).watches.find({ active: true, mode }),
+      getPortfolio(req.user._id, mode),
     ]);
     const coinIds = [...new Set(watches.map((w) => w.coinId))];
     const prices = coinIds.length ? await getPrices(coinIds) : {};
@@ -146,11 +148,7 @@ async function chat(req, res) {
 
     const aiResult = await marketChat(message, context);
     if (aiResult && typeof aiResult === "object") {
-      const { created, notes } = await executeWatchIntents(
-        req.user._id,
-        aiResult.watches,
-        requestedMode(req)
-      );
+      const { created, notes } = await executeWatchIntents(req.user._id, aiResult.watches, mode);
       let reply = aiResult.reply || "";
       if (created.length) {
         reply +=
@@ -163,7 +161,7 @@ async function chat(req, res) {
 
     const intents = parseWatchCommand(message);
     if (intents.length) {
-      const { created, notes } = await executeWatchIntents(req.user._id, intents, requestedMode(req));
+      const { created, notes } = await executeWatchIntents(req.user._id, intents, mode);
       let reply = created.length
         ? `Now watching: ${created.map((w) => w.symbol).join(", ")}.`
         : "";
@@ -175,6 +173,7 @@ async function chat(req, res) {
     const answer = await buildPortfolioSummaryText(req.user._id);
     return res.json({ reply: answer, createdWatches: [], source: "computed" });
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     console.error("chat error:", err.message);
     return res.status(500).json({ error: "Failed to process chat" });
   }

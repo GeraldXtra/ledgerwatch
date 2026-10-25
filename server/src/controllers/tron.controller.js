@@ -21,7 +21,7 @@ async function estimate(req, res) {
 }
 
 async function broadcast(req, res) {
-  const { hex, network } = req.body || {};
+  const { hex, network } = req.body;
   if (network === "mainnet" && String(process.env.ENABLE_MAINNET).toLowerCase() !== "true") {
     return res.status(403).json({ error: "Tron mainnet is switched off on this server.", kind: "invalid", resendUnsafe: false });
   }

@@ -5,10 +5,23 @@ const User = require("../models/User");
 const { getChain } = require("../config/chains");
 const { GRACE_DAYS, GRACE_SCAN_MINUTES, blockTimeFor } = require("../config/derivation");
 const { confirmationsFor } = require("./cryptoSettings.service");
-const { recomputeDebtStatus, paidForDebt } = require("./receivables.service");
+const { recomputeDebtStatus, paidKoboForDebt } = require("./receivables.service");
+const {
+  toUnits,
+  decimalToUnits,
+  unitsToNumber,
+  unitsToKobo,
+  koboOf,
+  koboToNaira,
+  nairaToKobo,
+  shareOf,
+  minUnits,
+  maxUnits,
+} = require("../domain/money");
 const { notifyActivity } = require("./activity.service");
 const { rpcCall, rpcCallTyped } = require("./rpc.service");
 const { onInvoiceSettled } = require("./settlement.service");
+const { reportProblem } = require("./opsAlert.service");
 const { resyncActivePaymentAddress } = require("./paymentAddress.service");
 
 const TRANSFER_TOPIC =
@@ -18,9 +31,16 @@ const TOLERANCE = Number(process.env.USDC_SETTLEMENT_TOLERANCE || 0.005);
 
 const MAX_SHORTFALL = Number(process.env.USDC_MAX_SHORTFALL || 0.05);
 
-function toleratedShortfall(expected) {
-  const proportional = Number(expected || 0) * TOLERANCE;
-  return Math.min(proportional, MAX_SHORTFALL);
+const NOTE_THRESHOLD = 0.004;
+
+function toleratedShortfallUnits(expectedUnits, decimals) {
+  const proportional = shareOf(maxUnits(0n, expectedUnits), TOLERANCE);
+  const cap = decimalToUnits(Number.isFinite(MAX_SHORTFALL) && MAX_SHORTFALL > 0 ? MAX_SHORTFALL : 0, decimals);
+  return minUnits(proportional, cap);
+}
+
+function toleratedShortfall(expected, decimals = 6) {
+  return unitsToNumber(toleratedShortfallUnits(decimalToUnits(Number(expected) || 0, decimals), decimals), decimals);
 }
 
 const MAX_BLOCK_SPAN = Number(process.env.PAYMENT_WATCH_BLOCK_SPAN || 1500);
@@ -124,34 +144,49 @@ async function tokenDecimals(chain, contract, fallback) {
 }
 
 function unitsToAmount(raw, decimals) {
-  const asBig = typeof raw === "string" && raw.startsWith("0x") ? BigInt(raw) : BigInt(raw || 0);
-  const divisor = 10n ** BigInt(decimals);
-  const whole = asBig / divisor;
-  const frac = asBig % divisor;
-  return Number(whole) + Number(frac) / Number(divisor);
+  return unitsToNumber(toUnits(raw), decimals);
 }
 
 function addressTopic(address) {
   return "0x" + address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 }
 
-async function tokenBalance(chain, contract, address, decimals) {
+async function tokenBalanceUnits(chain, contract, address) {
   const data = "0x70a08231" + address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
   const result = await rpc(chain, "eth_call", [{ to: contract, data }, "latest"]);
   if (!result || result === "0x") return null;
   try {
-    return unitsToAmount(result, decimals);
+    return toUnits(result);
   } catch {
     return null;
   }
 }
 
-function accountedOnChain(pa) {
+async function tokenBalance(chain, contract, address, decimals) {
+  const units = await tokenBalanceUnits(chain, contract, address);
+  return units === null ? null : unitsToNumber(units, decimals);
+}
+
+function sweptUnits(pa) {
+  return (pa.sweeps || []).reduce((sum, s) => sum + decimalToUnits(Number(s.amountUsdc) || 0, pa.tokenDecimals), 0n);
+}
+
+function accountedUnits(pa) {
   const seen = pa.observed
     .filter((o) => o.status !== "orphaned")
-    .reduce((sum, o) => sum + unitsToAmount(o.value, pa.tokenDecimals), 0);
-  const swept = (pa.sweeps || []).reduce((sum, s) => sum + (Number(s.amountUsdc) || 0), 0);
-  return Math.max(0, seen - swept);
+    .reduce((sum, o) => sum + toUnits(o.value), 0n);
+  return maxUnits(0n, seen - sweptUnits(pa));
+}
+
+function confirmedUnsweptUnits(pa) {
+  const confirmed = (pa.observed || [])
+    .filter((o) => o.status === "confirmed")
+    .reduce((sum, o) => sum + toUnits(o.value), 0n);
+  return confirmed - sweptUnits(pa);
+}
+
+function accountedOnChain(pa) {
+  return unitsToNumber(accountedUnits(pa), pa.tokenDecimals);
 }
 
 async function expireDueAddresses({ userId } = {}) {
@@ -169,9 +204,11 @@ async function expireDueAddresses({ userId } = {}) {
 }
 
 async function settleIfDue(pa, chain) {
+  const decimals = pa.tokenDecimals;
   const confirmed = pa.observed.filter((o) => o.status === "confirmed");
-  const totalUsdc = confirmed.reduce((s, o) => s + unitsToAmount(o.value, pa.tokenDecimals), 0);
-  if (totalUsdc <= 0) return null;
+  const totalUnits = confirmed.reduce((s, o) => s + toUnits(o.value), 0n);
+  if (totalUnits <= 0n) return null;
+  const totalUsdc = unitsToNumber(totalUnits, decimals);
 
   const unstamped = confirmed.filter((o) => !o.settledPaymentId && o.txHash);
   if (unstamped.length) {
@@ -202,13 +239,14 @@ async function settleIfDue(pa, chain) {
     }
   }
 
-  const settledUsdc = confirmed
+  const settledUnits = confirmed
     .filter((o) => o.settledPaymentId)
-    .reduce((s, o) => s + unitsToAmount(o.value, pa.tokenDecimals), 0);
-  const unsettledUsdc = Math.max(0, totalUsdc - settledUsdc);
-  if (unsettledUsdc <= 0) return { outcome: "NOTHING_NEW" };
+    .reduce((s, o) => s + toUnits(o.value), 0n);
+  const unsettledUnits = maxUnits(0n, totalUnits - settledUnits);
+  if (unsettledUnits <= 0n) return { outcome: "NOTHING_NEW" };
+  const unsettledUsdc = unitsToNumber(unsettledUnits, decimals);
 
-  const settledNgn = unsettledUsdc * pa.ngnPerUsd;
+  const receivedKobo = unitsToKobo(unsettledUnits, decimals, pa.ngnPerUsd);
 
   const debt = await Debt.findById(pa.debtId);
   if (!debt) {
@@ -249,10 +287,11 @@ async function settleIfDue(pa, chain) {
     return { outcome: "ORPHANED_INVOICE", unattributedUsdc: unsettledUsdc };
   }
 
-  const alreadyPaid = await paidForDebt(debt._id);
-  const remainingNgn = Math.max(0, (debt.amount || 0) - alreadyPaid);
+  const alreadyPaidKobo = await paidKoboForDebt(debt._id);
+  const remainingKobo = Math.max(0, koboOf(debt) - alreadyPaidKobo);
+  const remainingNgn = koboToNaira(remainingKobo);
 
-  if (remainingNgn <= 0) {
+  if (remainingKobo <= 0) {
     pa.unattributedUsdc = unsettledUsdc;
     pa.unattributedAt = new Date();
     pa.receivedUsdc = totalUsdc;
@@ -294,15 +333,18 @@ async function settleIfDue(pa, chain) {
     return { outcome: "UNATTRIBUTED", unattributedUsdc: unsettledUsdc };
   }
 
-  const fullyPaid = unsettledUsdc >= pa.expectedUsdc - toleratedShortfall(pa.expectedUsdc);
+  const expectedUnits = decimalToUnits(Number(pa.expectedUsdc) || 0, decimals);
+  const fullyPaid = unsettledUnits >= expectedUnits - toleratedShortfallUnits(expectedUnits, decimals);
 
-  const creditNgn = fullyPaid ? remainingNgn : Math.min(settledNgn, remainingNgn);
-  if (creditNgn <= 0) {
-    console.error(
-      `[paymentWatch] ${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} at ${pa.address} on ` +
-        `${chain.name} credits nothing against invoice ${debt._id}, which still owes ` +
-        `${Math.round(remainingNgn).toLocaleString("en-NG")} naira. Nothing was written.`
-    );
+  const creditKobo = fullyPaid ? remainingKobo : Math.min(receivedKobo, remainingKobo);
+  const creditNgn = koboToNaira(creditKobo);
+  if (creditKobo <= 0) {
+    const line =
+      `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} at ${pa.address} on ` +
+      `${chain.name} credits nothing against invoice ${debt._id}, which still owes ` +
+      `${Math.round(remainingNgn).toLocaleString("en-NG")} naira. Nothing was written.`;
+    console.error(`[paymentWatch] ${line}`);
+    reportProblem({ area: "payment watching", message: line, severity: "critical" });
     return { outcome: "NOTHING_CREDITABLE", unsettledUsdc, remainingNgn };
   }
 
@@ -317,15 +359,18 @@ async function settleIfDue(pa, chain) {
   }
   const keyTx = unsettled[unsettled.length - 1];
 
-  const overpaidUsdc = fullyPaid ? Math.max(0, unsettledUsdc - pa.expectedUsdc) : 0;
+  const overpaidUnits = fullyPaid ? maxUnits(0n, unsettledUnits - expectedUnits) : 0n;
+  const overpaidUsdc = unitsToNumber(overpaidUnits, decimals);
+  const noteThreshold = decimalToUnits(NOTE_THRESHOLD, decimals);
   const isLate = unsettled.some((o) => o.late);
   const quoted = pa.quote && pa.quote.expectedUsdc != null ? pa.quote.expectedUsdc : null;
+  const quotedUnits = quoted != null ? decimalToUnits(Number(quoted) || 0, decimals) : null;
 
   const noteParts = [
     `${unsettledUsdc.toFixed(2)} ${pa.tokenSymbol} received on ${chain.name}`,
     `rate ${pa.ngnPerUsd.toLocaleString("en-NG")} naira per ${pa.tokenSymbol}`,
   ];
-  if (quoted != null && Math.abs(quoted - unsettledUsdc) > 0.004) {
+  if (quotedUnits != null && (quotedUnits > unsettledUnits ? quotedUnits - unsettledUnits : unsettledUnits - quotedUnits) > noteThreshold) {
     noteParts.push(
       `quoted ${quoted.toFixed(2)} ${pa.tokenSymbol} at issue` +
         (pa.quote.reconstructed ? " (reconstructed, not a record)" : "")
@@ -334,10 +379,10 @@ async function settleIfDue(pa, chain) {
   if (isLate) {
     noteParts.push("paid after the address expired");
   }
-  if (overpaidUsdc > 0.004) {
+  if (overpaidUnits > noteThreshold) {
     noteParts.push(
       `overpaid by ${overpaidUsdc.toFixed(2)} ${pa.tokenSymbol} ` +
-        `(about ${Math.round(overpaidUsdc * pa.ngnPerUsd).toLocaleString("en-NG")} naira)`
+        `(about ${Math.round(koboToNaira(unitsToKobo(overpaidUnits, decimals, pa.ngnPerUsd))).toLocaleString("en-NG")} naira)`
     );
   }
 
@@ -347,6 +392,7 @@ async function settleIfDue(pa, chain) {
       debtId: debt._id,
       userId: pa.userId,
       amount: creditNgn,
+      amountKobo: creditKobo,
       method: "crypto",
       note: noteParts.join(", "),
       txHash: keyTx.txHash,
@@ -372,9 +418,11 @@ async function settleIfDue(pa, chain) {
     o.settledPaymentId = payment._id;
   });
 
+  const priorSettledKobo = Number.isSafeInteger(pa.settledKobo) ? pa.settledKobo : nairaToKobo(pa.settledNgn || 0);
   pa.receivedUsdc = totalUsdc;
-  pa.settledNgn = (pa.settledNgn || 0) + creditNgn;
-  pa.overpaidUsdc = (pa.overpaidUsdc || 0) + overpaidUsdc;
+  pa.settledKobo = priorSettledKobo + creditKobo;
+  pa.settledNgn = koboToNaira(pa.settledKobo);
+  pa.overpaidUsdc = unitsToNumber(decimalToUnits(Number(pa.overpaidUsdc) || 0, decimals) + overpaidUnits, decimals);
 
   if (fullyPaid) {
     pa.status = "paid";
@@ -382,11 +430,12 @@ async function settleIfDue(pa, chain) {
   try {
     await pa.save();
   } catch (err) {
-    console.error(
-      `[paymentWatch] SETTLED payment ${payment._id} for ${pa.address} but could not save the ` +
-        `address stamps (${err.message}). Hashes ${unsettled.map((o) => o.txHash).join(",")}. ` +
-        `They will be repaired on the next pass; nothing will be credited twice.`
-    );
+    const line =
+      `SETTLED payment ${payment._id} for ${pa.address} but could not save the ` +
+      `address stamps (${err.message}). Hashes ${unsettled.map((o) => o.txHash).join(",")}. ` +
+      `They will be repaired on the next pass; nothing will be credited twice.`;
+    console.error(`[paymentWatch] ${line}`);
+    reportProblem({ area: "payment watching", message: line, severity: "critical" });
   }
 
   if (!fullyPaid) await resyncActivePaymentAddress(debt._id);
@@ -412,7 +461,14 @@ async function settleIfDue(pa, chain) {
         );
       }
     })
-    .catch((err) => console.error("[paymentWatch] settlement event failed:", err.message));
+    .catch((err) => {
+      console.error("[paymentWatch] settlement event failed:", err.message);
+      reportProblem({
+        area: "payment watching",
+        message: `Invoice ${debt._id} settled, but its receipt and notices failed: ${err.message}`,
+        detail: err.stack,
+      });
+    });
 
   return { payment, fullyPaid, totalUsdc, creditNgn };
 }
@@ -429,10 +485,8 @@ async function scanAddress(pa, chain, head, mode = "active") {
   let scanning = true;
 
   if (mode === "grace") {
-    const live = await tokenBalance(chain, pa.tokenContract, pa.address, decimals);
-    const expected = accountedOnChain(pa);
-    const dust = 1 / 10 ** decimals;
-    const hasNewMoney = live !== null && live > expected + dust;
+    const live = await tokenBalanceUnits(chain, pa.tokenContract, pa.address);
+    const hasNewMoney = live !== null && live > accountedUnits(pa) + 1n;
 
     const awaitingConfirmation = pa.observed.some((o) => o.status === "detected");
     if (!hasNewMoney && !awaitingConfirmation) return { found: 0, newlyConfirmed: 0, late: 0 };
@@ -748,6 +802,10 @@ module.exports = {
   scanAddress,
   unitsToAmount,
   toleratedShortfall,
+  toleratedShortfallUnits,
+  accountedUnits,
+  confirmedUnsweptUnits,
+  tokenBalanceUnits,
   MAX_SHORTFALL,
   accountedOnChain,
   tokenBalance,

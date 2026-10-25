@@ -1,4 +1,5 @@
-const Payment = require("../models/Payment");
+const { scopedRepo } = require("../repositories/scoped");
+const { koboToNaira } = require("../domain/money");
 const {
   debtorGroups,
   debtorProfile,
@@ -17,8 +18,8 @@ async function list(req, res) {
 
 async function lookup(req, res) {
   try {
-    const phone = String(req.query.phone || "").trim().slice(0, 40);
-    const name = String(req.query.name || "").trim().slice(0, 120);
+    const phone = String(req.query.phone || "").trim();
+    const name = String(req.query.name || "").trim();
     if (!phone && !name) return res.json({ debtor: null });
 
     const groups = await debtorGroups(req.user._id);
@@ -31,14 +32,9 @@ async function lookup(req, res) {
   }
 }
 
-function paramKey(req) {
-  return String(req.params.key || "");
-}
-
 async function profile(req, res) {
   try {
-    const key = paramKey(req);
-    const data = await debtorProfile(req.user._id, key);
+    const data = await debtorProfile(req.user._id, req.params.key);
     if (!data) return res.status(404).json({ error: "Debtor not found" });
     return res.json(data);
   } catch (err) {
@@ -49,14 +45,11 @@ async function profile(req, res) {
 
 async function statement(req, res) {
   try {
-    const key = paramKey(req);
-    const data = await debtorProfile(req.user._id, key);
+    const data = await debtorProfile(req.user._id, req.params.key);
     if (!data) return res.status(404).json({ error: "Debtor not found" });
 
     const ids = data.debts.map((d) => d._id);
-    const payments = await Payment.find({ userId: req.user._id, debtId: { $in: ids } }).sort({
-      paidAt: 1,
-    });
+    const payments = await scopedRepo(req.user._id).payments.find({ debtId: { $in: ids } }).sort({ paidAt: 1 });
     const byDebt = new Map();
     for (const p of payments) {
       const k = String(p.debtId);
@@ -66,9 +59,9 @@ async function statement(req, res) {
 
     const debts = data.debts.map((d) => ({ ...d, payments: byDebt.get(String(d._id)) || [] }));
     const totals = {
-      totalBorrowed: debts.reduce((s, d) => s + (d.amount || 0), 0),
-      totalPaid: debts.reduce((s, d) => s + (d.amountPaid || 0), 0),
-      totalOutstanding: debts.reduce((s, d) => s + (d.balance || 0), 0),
+      totalBorrowed: koboToNaira(debts.reduce((s, d) => s + d.amountKobo, 0)),
+      totalPaid: koboToNaira(debts.reduce((s, d) => s + d.amountPaidKobo, 0)),
+      totalOutstanding: koboToNaira(debts.reduce((s, d) => s + d.balanceKobo, 0)),
     };
 
     return res.json({

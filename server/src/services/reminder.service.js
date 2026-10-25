@@ -1,19 +1,33 @@
 const Reminder = require("../models/Reminder");
 const PaymentAddress = require("../models/PaymentAddress");
 const { normalizePhone } = require("../utils/phone");
-const { buildReminderMessage } = require("../utils/reminderTemplate");
+const { buildReminderMessage, formatAmount } = require("../utils/reminderTemplate");
 const { cryptoBlockText, cryptoBlockHtml } = require("../utils/cryptoPaymentBlock");
 const { getChain } = require("../config/chains");
 const { draftReminder } = require("./anthropic.service");
-const { paidForDebt } = require("./receivables.service");
+const { paidKoboForDebt } = require("./receivables.service");
+const { koboOf, koboToNaira } = require("../domain/money");
 const {
   sendWhatsApp,
   sendEmail,
   buildReminderEmail,
   getLogoAttachment,
 } = require("./notify.service");
+const { ensureInvoiceNumber, ensurePublicToken, payPageUrl } = require("./invoice.service");
+const { isOptedOut, unsubscribeLinks } = require("./unsubscribe.service");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+function businessNameOf(owner) {
+  return (owner && (owner.companyName || owner.name)) || "your supplier";
+}
+
+function insertBeforeSignOff(text, block) {
+  const idx = text.lastIndexOf("\nWarm regards,");
+  return idx === -1
+    ? `${text.replace(/\s+$/, "")}\n${block}`
+    : `${text.slice(0, idx).replace(/\s+$/, "")}\n${block}\n${text.slice(idx + 1)}`;
+}
 
 function formatDueDate(value) {
   if (!value) return "";
@@ -41,8 +55,18 @@ async function dispatchReminder(reminder, debt, owner, { channels = [], force = 
     }
     let res;
     if (channel === "whatsapp") {
-      res = await sendWhatsApp(debt.debtorPhone, reminder.messageText);
+      res = await sendWhatsApp(debt.debtorPhone, reminder.messageText, await reminderTemplateFor(debt, owner));
     } else if (channel === "email") {
+      if (await isOptedOut(debt.userId, debt.debtorEmail)) {
+        results.push({
+          channel,
+          status: "skipped",
+          reason: "unsubscribed",
+          error: `${debt.debtorEmail} has asked not to receive payment reminder emails from you, so none was sent. WhatsApp and the payment page link still work.`,
+          at: new Date(),
+        });
+        continue;
+      }
       const attachments = [];
       const logo = getLogoAttachment();
       if (logo) attachments.push(logo);
@@ -81,21 +105,34 @@ async function dispatchReminder(reminder, debt, owner, { channels = [], force = 
       }
 
       const { balance } = await outstandingBalance(debt);
+      const business = businessNameOf(owner);
+      const payUrl = payPageUrl(await ensurePublicToken(debt));
+      const invoiceNumber = await ensureInvoiceNumber(debt);
+      const unsubscribe = unsubscribeLinks({ kind: "debtor", userId: debt.userId, email: debt.debtorEmail });
       const html = buildReminderEmail({
-        businessName: owner && owner.name,
+        businessName: business,
         debtorName: debt.debtorName,
         amount: balance > 0 ? balance : debt.amount,
         dueDate: formatDueDate(debt.dueDate),
-        messageText: cryptoHtml ? reminder.baseMessageText || reminder.messageText : reminder.messageText,
+        messageText: reminder.baseMessageText || reminder.messageText,
         bankDetails: (owner && owner.bankDetails) || {},
         cryptoHtml,
         hasLogo: Boolean(logo),
+        invoiceNumber,
+        payUrl,
+        unsubscribeUrl: unsubscribe.page,
       });
       res = await sendEmail(
         debt.debtorEmail,
-        `Payment reminder from ${(owner && owner.name) || "your supplier"}`,
+        `Payment reminder from ${business} for invoice ${invoiceNumber}`,
         html,
-        { text: reminder.messageText, attachments }
+        {
+          text: `${reminder.messageText}\n\nStop payment reminder emails from ${business}: ${unsubscribe.page}`,
+          attachments,
+          category: "reminder",
+          unsubscribe,
+          replyTo: owner && owner.email,
+        }
       );
     } else {
       continue;
@@ -124,8 +161,22 @@ function daysOverdueFor(dueDate) {
 }
 
 async function outstandingBalance(debt) {
-  const paid = await paidForDebt(debt._id);
-  return { balance: Math.max(0, (debt.amount || 0) - paid), amountPaid: paid };
+  const paidKobo = await paidKoboForDebt(debt._id);
+  return {
+    balance: koboToNaira(Math.max(0, koboOf(debt) - paidKobo)),
+    amountPaid: koboToNaira(paidKobo),
+  };
+}
+
+async function reminderTemplateFor(debt, owner) {
+  const { balance } = await outstandingBalance(debt);
+  return {
+    debtorName: debt.debtorName,
+    businessName: businessNameOf(owner),
+    amount: formatAmount(balance > 0 ? balance : debt.amount, debt.currency),
+    dueDate: formatDueDate(debt.dueDate),
+    payUrl: payPageUrl(await ensurePublicToken(debt)),
+  };
 }
 
 async function generateReminderForDebt(debt, owner) {
@@ -159,7 +210,7 @@ async function generateReminderForDebt(debt, owner) {
     daysOverdue,
     tone,
     bankDetails,
-    ownerName: owner && owner.name,
+    ownerName: businessNameOf(owner),
   };
 
   const aiText = await draftReminder(params);
@@ -175,15 +226,11 @@ async function generateReminderForDebt(debt, owner) {
   let messageText = baseText;
   if (activeAddress) {
     const chain = getChain(activeAddress.chainId);
-    if (chain) {
-      const block = cryptoBlockText(activeAddress, chain);
-      const idx = baseText.lastIndexOf("\nWarm regards,");
-      messageText =
-        idx === -1
-          ? `${baseText.replace(/\s+$/, "")}\n${block}`
-          : `${baseText.slice(0, idx).replace(/\s+$/, "")}\n${block}\n${baseText.slice(idx + 1)}`;
-    }
+    if (chain) messageText = insertBeforeSignOff(messageText, cryptoBlockText(activeAddress, chain));
   }
+  const invoiceNumber = await ensureInvoiceNumber(debt);
+  const payUrl = payPageUrl(await ensurePublicToken(debt));
+  if (payUrl) messageText = insertBeforeSignOff(messageText, `See invoice ${invoiceNumber} and pay online: ${payUrl}`);
 
   const reminder = await Reminder.create({
     debtId: debt._id,

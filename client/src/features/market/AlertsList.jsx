@@ -2,7 +2,7 @@ import { BellOff, TrendingDown, TrendingUp, X } from "lucide-react";
 import { price as fmtPrice } from "./format";
 import { Button, Card, EmptyState, StatusPill } from "../../components/ui";
 
-export default function AlertsList({ alerts, onTrade, onDismiss, busyId }) {
+export default function AlertsList({ alerts, failed, onTrade, onDismiss, busyId }) {
   return (
     <Card
       eyebrow="Your decision"
@@ -10,7 +10,11 @@ export default function AlertsList({ alerts, onTrade, onDismiss, busyId }) {
       count={alerts.length}
       subtitle="The agent recommends; you choose the side and the amount. Nothing executes until you confirm."
     >
-      {alerts.length === 0 ? (
+      {alerts.length === 0 && failed ? (
+        <p className="error-text">
+          Your alerts could not be loaded, so this does not mean there are none. Use Refresh to try again.
+        </p>
+      ) : alerts.length === 0 ? (
         <EmptyState
           icon={<BellOff size={20} />}
           title="No pending alerts"

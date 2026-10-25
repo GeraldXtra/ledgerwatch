@@ -1,34 +1,27 @@
-const Debt = require("../models/Debt");
-const Payment = require("../models/Payment");
-const { recomputeDebtStatus, withDerived, paidForDebt } = require("../services/receivables.service");
+const { scopedRepo } = require("../repositories/scoped");
+const { recomputeDebtStatus, withDerived, paidKoboForDebt } = require("../services/receivables.service");
 const { resyncActivePaymentAddress } = require("../services/paymentAddress.service");
 const { onInvoiceSettled } = require("../services/settlement.service");
-
-async function findMyDebt(req) {
-  return Debt.findOne({ _id: req.params.id, userId: req.user._id });
-}
-
-async function amountPaidFor(debtId) {
-  return paidForDebt(debtId);
-}
+const { nairaToKobo, koboToNaira, koboOf, hasWholeKobo, MAX_NAIRA } = require("../domain/money");
 
 async function record(req, res) {
   try {
-    const debt = await findMyDebt(req);
+    const repo = scopedRepo(req.user._id);
+    const debt = await repo.debts.findById(req.params.id);
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
-    const { amount, method, note, paidAt, idempotencyKey } = req.body || {};
+    const { amount, method, note, paidAt, idempotencyKey } = req.body;
     const amt = Number(amount);
     if (!amt || isNaN(amt) || amt <= 0) {
       return res.status(400).json({ error: "amount must be a number greater than 0" });
     }
-    if (method && !["cash", "transfer", "other"].includes(method)) {
-      return res.status(400).json({ error: "method must be cash, transfer or other" });
+    if (amt > MAX_NAIRA) {
+      return res.status(400).json({ error: "amount can be at most 1,000,000,000,000" });
     }
-    const when = paidAt ? new Date(String(paidAt)) : new Date();
-    if (Number.isNaN(when.getTime())) {
-      return res.status(400).json({ error: "paidAt is not a valid date" });
+    if (!hasWholeKobo(amt)) {
+      return res.status(400).json({ error: "amount can have at most two decimal places" });
     }
+    const when = paidAt ? new Date(paidAt) : new Date();
     const cleanNote = note == null ? undefined : String(note).trim().slice(0, 500);
 
     if (typeof idempotencyKey !== "string" || !/^[A-Za-z0-9_-]{8,80}$/.test(idempotencyKey)) {
@@ -40,13 +33,14 @@ async function record(req, res) {
       });
     }
     const key = `manual:${req.user._id}:${idempotencyKey}`;
+    const amountKobo = nairaToKobo(amt);
 
     let payment;
     try {
-      payment = await Payment.create({
+      payment = await repo.payments.create({
         debtId: debt._id,
-        userId: req.user._id,
-        amount: amt,
+        amount: koboToNaira(amountKobo),
+        amountKobo,
         method: method || "transfer",
         note: cleanNote,
         paidAt: when,
@@ -54,7 +48,7 @@ async function record(req, res) {
       });
     } catch (err) {
       if (err && err.code === 11000) {
-        const existing = await Payment.findOne({ txHash: key, userId: req.user._id });
+        const existing = await repo.payments.findOne({ txHash: key });
         const totalPaidNow = await recomputeDebtStatus(debt);
         return res.status(200).json({
           payment: existing,
@@ -76,7 +70,7 @@ async function record(req, res) {
       debt,
       payment: forReceipt,
       method: "bank",
-      creditNgn: amt,
+      creditNgn: koboToNaira(amountKobo),
       totalPaid,
       fullyPaid: debt.status === "paid",
     }).catch((err) => ({ emailed: false, reason: err && err.message }));
@@ -102,11 +96,10 @@ async function record(req, res) {
 
 async function list(req, res) {
   try {
-    const debt = await findMyDebt(req);
+    const repo = scopedRepo(req.user._id);
+    const debt = await repo.debts.findById(req.params.id);
     if (!debt) return res.status(404).json({ error: "Debt not found" });
-    const payments = await Payment.find({ debtId: debt._id, userId: req.user._id }).sort({
-      paidAt: -1,
-    });
+    const payments = await repo.payments.find({ debtId: debt._id }).sort({ paidAt: -1 });
     return res.json({ payments });
   } catch (err) {
     console.error("list payments error:", err.message);
@@ -116,14 +109,11 @@ async function list(req, res) {
 
 async function remove(req, res) {
   try {
-    const debt = await findMyDebt(req);
+    const repo = scopedRepo(req.user._id);
+    const debt = await repo.debts.findById(req.params.id);
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
-    const payment = await Payment.findOne({
-      _id: req.params.paymentId,
-      debtId: debt._id,
-      userId: req.user._id,
-    });
+    const payment = await repo.payments.findOne({ _id: req.params.paymentId, debtId: debt._id });
     if (!payment) return res.status(404).json({ error: "Payment not found" });
 
     const covered = [
@@ -132,10 +122,8 @@ async function remove(req, res) {
     ].filter(Boolean);
 
     if (covered.length) {
-      const PaymentAddress = require("../models/PaymentAddress");
-      const addresses = await PaymentAddress.find({
+      const addresses = await repo.paymentAddresses.find({
         debtId: debt._id,
-        userId: req.user._id,
         "observed.txHash": { $in: covered },
       });
       for (const pa of addresses) {
@@ -147,7 +135,9 @@ async function remove(req, res) {
           }
         }
         if (released) {
-          pa.settledNgn = Math.max(0, (pa.settledNgn || 0) - (payment.amount || 0));
+          const settledKobo = Number.isSafeInteger(pa.settledKobo) ? pa.settledKobo : nairaToKobo(pa.settledNgn || 0);
+          pa.settledKobo = Math.max(0, settledKobo - koboOf(payment));
+          pa.settledNgn = koboToNaira(pa.settledKobo);
           if (pa.status === "paid") {
             const stillOpen = pa.expiresAt && new Date(pa.expiresAt).getTime() > Date.now();
             pa.status = stillOpen ? "active" : "expired";
@@ -178,36 +168,29 @@ async function remove(req, res) {
 
 async function receipt(req, res) {
   try {
-    const debt = await findMyDebt(req);
+    const repo = scopedRepo(req.user._id);
+    const debt = await repo.debts.findById(req.params.id);
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
-    let payment;
-    if (req.query.paymentId) {
-      payment = await Payment.findOne({
-        _id: req.query.paymentId,
-        debtId: debt._id,
-        userId: req.user._id,
-      });
-    } else {
-      payment = await Payment.findOne({ debtId: debt._id, userId: req.user._id }).sort({
-        paidAt: -1,
-      });
-    }
+    const payment = req.query.paymentId
+      ? await repo.payments.findOne({ _id: req.query.paymentId, debtId: debt._id })
+      : await repo.payments.findOne({ debtId: debt._id }).sort({ paidAt: -1 });
     if (!payment) return res.status(404).json({ error: "No payment to receipt" });
 
-    const totalPaid = await amountPaidFor(debt._id);
-    const balanceRemaining = Math.max(0, (debt.amount || 0) - totalPaid);
+    const paidKobo = await paidKoboForDebt(debt._id);
+    const owedKobo = koboOf(debt);
 
     return res.json({
       receipt: {
         businessName: req.user.companyName || req.user.name,
         debtorName: debt.debtorName,
-        amount: payment.amount,
+        invoiceNumber: debt.invoiceNumber || null,
+        amount: koboToNaira(koboOf(payment)),
         method: payment.method,
         paidAt: payment.paidAt,
         currency: debt.currency || "NGN",
-        balanceRemaining,
-        originalAmount: debt.amount,
+        balanceRemaining: koboToNaira(Math.max(0, owedKobo - paidKobo)),
+        originalAmount: koboToNaira(owedKobo),
       },
     });
   } catch (err) {

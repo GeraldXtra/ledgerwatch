@@ -58,6 +58,7 @@ export default function AuthPage() {
     resendResetCode,
     resetPassword,
     loginWithToken,
+    loginSecondFactor,
   } = useAuth();
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({
@@ -82,6 +83,8 @@ export default function AuthPage() {
   const [resetCode, setResetCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [secondStep, setSecondStep] = useState(null);
+  const [secondCode, setSecondCode] = useState("");
 
   const isRegister = mode === "register";
   const isForgot = mode === "forgot";
@@ -94,8 +97,9 @@ export default function AuthPage() {
     if (!hash) return;
     const params = new URLSearchParams(hash);
     const token = params.get("token");
+    const challenge = params.get("challenge");
     const oauthError = params.get("error");
-    if (!token && !oauthError) return;
+    if (!token && !challenge && !oauthError) return;
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
     if (oauthError) {
       setError(oauthError);
@@ -108,6 +112,10 @@ export default function AuthPage() {
       setError(
         "That sign in did not start in this browser, so it was not used. Press Continue with Google here to sign in."
       );
+      return;
+    }
+    if (challenge) {
+      setSecondStep({ challenge });
       return;
     }
     setBusy(true);
@@ -183,7 +191,11 @@ export default function AuthPage() {
           return;
         }
       } else {
-        await login(form.email, form.password, tsToken);
+        const res = await login(form.email, form.password, tsToken);
+        if (res && res.twoFactorRequired) {
+          setSecondStep({ challenge: res.challenge });
+          setSecondCode("");
+        }
       }
     } catch (err) {
       const data = err?.response?.data;
@@ -194,6 +206,33 @@ export default function AuthPage() {
       }
       setError(data?.error || "Something went wrong. Please try again.");
       resetTurnstile();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSecondStep(e) {
+    e.preventDefault();
+    setError("");
+    const given = secondCode.replace(/\s+/g, "");
+    if (!/^\d{6}$/.test(given) && !/^[a-zA-Z0-9]{10}$/.test(given)) {
+      setError("Enter the six digit code from your authenticator app, or one of your ten character backup codes.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const data = await loginSecondFactor(secondStep.challenge, given);
+      if (data.backupCodesLeft != null) {
+        setNotice(`You used a backup code. ${data.backupCodesLeft} left.`);
+      }
+    } catch (err) {
+      const data = err?.response?.data;
+      setError(data?.error || "That code could not be checked. Please try again.");
+      if (data && data.restart) {
+        setSecondStep(null);
+        setSecondCode("");
+        resetTurnstile();
+      }
     } finally {
       setBusy(false);
     }
@@ -363,7 +402,9 @@ export default function AuthPage() {
           </Link>
 
           <h1>
-            {pending
+            {secondStep
+              ? "Enter your sign in code"
+              : pending
               ? "Check your email"
               : isForgot
                 ? "Reset your password"
@@ -374,7 +415,9 @@ export default function AuthPage() {
                     : "Sign in"}
           </h1>
           <p className="sub">
-            {pending
+            {secondStep
+              ? "Open your authenticator app and enter the six digit code for LedgerWatch. One of your backup codes works too."
+              : pending
               ? `We sent a six digit code to ${pending.email}. It is good for thirty minutes.`
               : isForgot
                 ? "Enter the email on your account and we will send a six digit code."
@@ -398,7 +441,39 @@ export default function AuthPage() {
             </div>
           )}
 
-          {pending && (
+          {secondStep && (
+            <form onSubmit={onSecondStep} className="stack-sm" noValidate>
+              <Field label="Sign in code">
+                <Input
+                  value={secondCode}
+                  onChange={(e) => setSecondCode(e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 10))}
+                  autoComplete="one-time-code"
+                  placeholder="000000"
+                  className="input gate-code"
+                  autoFocus
+                />
+              </Field>
+              <Button variant="primary" type="submit" block loading={busy} style={{ marginTop: 6 }}>
+                Sign in
+              </Button>
+              <div className="gate-alt">
+                <button
+                  type="button"
+                  className="linklike"
+                  onClick={() => {
+                    setSecondStep(null);
+                    setSecondCode("");
+                    setError("");
+                    resetTurnstile();
+                  }}
+                >
+                  Start again
+                </button>
+              </div>
+            </form>
+          )}
+
+          {!secondStep && pending && (
             <form onSubmit={onVerify} className="stack-sm" noValidate>
               <Field label="Six digit code">
                 <Input
@@ -446,7 +521,7 @@ export default function AuthPage() {
             </form>
           )}
 
-          {!pending && isForgot && (
+          {!secondStep && !pending && isForgot && (
             <form onSubmit={onForgot} className="stack-sm" noValidate>
               <Field label="Email" error={fieldErrors.email}>
                 <Input
@@ -479,7 +554,7 @@ export default function AuthPage() {
             </form>
           )}
 
-          {!pending && isReset && (
+          {!secondStep && !pending && isReset && (
             <form onSubmit={onReset} className="stack-sm" noValidate>
               <Field label="Six digit code">
                 <Input
@@ -541,7 +616,7 @@ export default function AuthPage() {
             </form>
           )}
 
-          {!pending && !isForgot && !isReset && (
+          {!secondStep && !pending && !isForgot && !isReset && (
             <>
 
               <form onSubmit={onSubmit} className="stack-sm" noValidate>

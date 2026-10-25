@@ -1,8 +1,8 @@
-const User = require("../models/User");
-const mongoose = require("mongoose");
-const WalletTx = require("../models/WalletTx");
-const ProfitRecord = require("../models/ProfitRecord");
+const { scopedRepo } = require("../repositories/scoped");
+const { decimalToUnits } = require("../domain/money");
 const { listChains, getChain } = require("../config/chains");
+const { confirmationsFor: recommendedConfirmations } = require("../config/derivation");
+const { confirmationsFor } = require("../services/cryptoSettings.service");
 const rpcService = require("../services/rpc.service");
 const { sanitizeText } = require("../services/walletHistory.service");
 const { limitsFor } = require("../config/tradingLimits");
@@ -28,6 +28,7 @@ const ALLOWED_METHODS = new Set([
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const HASH_RE = /^0x[0-9a-fA-F]{64}$/;
+const OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
 
 function defaultChainId() {
   const mainnet = process.env.ENABLE_MAINNET === "true";
@@ -40,7 +41,11 @@ function defaultChainId() {
 
 async function chains(req, res) {
   return res.json({
-    chains: listChains(),
+    chains: listChains().map((chain) => ({
+      ...chain,
+      recommendedConfirmations: recommendedConfirmations(chain.chainId),
+      confirmations: confirmationsFor(chain.chainId, req.user),
+    })),
     enableMainnet: process.env.ENABLE_MAINNET === "true",
     defaultChainId: defaultChainId(),
   });
@@ -109,15 +114,11 @@ async function rpc(req, res) {
 
 async function setAddress(req, res) {
   try {
-    const address = (req.body && req.body.address) || "";
+    const address = req.body.address || "";
     if (!ADDRESS_RE.test(address)) {
       return res.status(400).json({ error: "Invalid address" });
     }
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      { walletAddress: address },
-      { new: true }
-    ).select("-passwordHash");
+    const user = await scopedRepo(req.user._id).self.update({ $set: { walletAddress: address } }).select("-passwordHash");
     return res.json({ walletAddress: user.walletAddress });
   } catch (err) {
     console.error("wallet setAddress error:", err.message);
@@ -127,7 +128,7 @@ async function setAddress(req, res) {
 
 async function clearAddress(req, res) {
   try {
-    await User.findByIdAndUpdate(req.user._id, { walletAddress: null });
+    await scopedRepo(req.user._id).self.updateOne({ $set: { walletAddress: null } });
     return res.json({ ok: true });
   } catch (err) {
     console.error("wallet clearAddress error:", err.message);
@@ -137,7 +138,7 @@ async function clearAddress(req, res) {
 
 async function listTxs(req, res) {
   try {
-    const query = { userId: req.user._id };
+    const query = {};
     if (req.query.chainId) query.chainId = Number(req.query.chainId);
 
     if (req.query.chainId && req.user.walletAddress) {
@@ -149,7 +150,7 @@ async function listTxs(req, res) {
       }).catch((err) => console.error("[wallet] inbound sync failed:", err.message));
     }
 
-    const txs = await WalletTx.find(query).sort({ createdAt: -1 }).limit(100);
+    const txs = await scopedRepo(req.user._id).walletTxs.find(query).sort({ createdAt: -1 }).limit(100);
     return res.json({ txs });
   } catch (err) {
     console.error("wallet listTxs error:", err.message);
@@ -163,7 +164,8 @@ async function recordTx(req, res) {
       chainId, hash, from, to, value, symbol, tokenAddress, direction,
       kind, tokenOut, tokenOutSymbol, amountOut, minAmountOut, feeTier,
       priceImpactPct, side, alertId, route, profitId,
-    } = req.body || {};
+    } = req.body;
+    const repo = scopedRepo(req.user._id);
     if (!getChain(chainId)) return res.status(400).json({ error: "Unknown or disabled chain" });
     if (!HASH_RE.test(hash || "")) return res.status(400).json({ error: "Invalid tx hash" });
     if (!ADDRESS_RE.test(from || "") || !ADDRESS_RE.test(to || "")) {
@@ -185,18 +187,19 @@ async function recordTx(req, res) {
       return res.status(400).json({ error: "Invalid token symbol" });
     }
 
-    const existing = await WalletTx.findOne({ hash, userId: req.user._id });
+    const existing = await repo.walletTxs.findOne({ hash });
     if (existing) return res.status(200).json({ tx: existing });
 
     let profitRow = null;
     if (profitId != null) {
-      if (!mongoose.isValidObjectId(profitId)) return res.status(400).json({ error: "Invalid profit record" });
-      profitRow = await ProfitRecord.findOne({ _id: profitId, userId: req.user._id, mode: "live" }).lean();
+      if (!OBJECT_ID_RE.test(String(profitId))) return res.status(400).json({ error: "Invalid profit record" });
+      profitRow = await repo.profits.findOne({ _id: profitId, mode: "live" }).lean();
       if (!profitRow || !["pending", "moving"].includes(profitRow.status)) {
         return res.status(409).json({ error: "That profit has already been moved or set aside.", code: "profit_closed" });
       }
       const sameToken = String(tokenAddress || "").toLowerCase() === String(profitRow.cashAddress || "");
-      const withinProfit = Number(value) > 0 && Number(value) <= Number(profitRow.profitAmount) + 1e-12;
+      const moved = value != null ? decimalToUnits(String(value), 36) : 0n;
+      const withinProfit = moved > 0n && profitRow.profitAmount != null && moved <= decimalToUnits(String(profitRow.profitAmount), 36);
       if (kind === "swap" || kind === "approval" || direction === "in" || Number(chainId) !== profitRow.chainId || !sameToken || !withinProfit) {
         return res.status(400).json({
           error: `A profit move must send at most ${profitRow.profitAmount} ${profitRow.cashSymbol} on the chain where the profit was made.`,
@@ -218,9 +221,8 @@ async function recordTx(req, res) {
       if (!verdict.ok) return res.status(409).json({ error: verdict.error, code: verdict.code });
     }
 
-    const tx = await WalletTx.create({
+    const tx = await repo.walletTxs.create({
       profitId: profitRow ? profitRow._id : null,
-      userId: req.user._id,
       chainId: Number(chainId),
       hash,
       from,
@@ -249,7 +251,7 @@ async function recordTx(req, res) {
     return res.status(201).json({ tx });
   } catch (err) {
     if (err.code === 11000) {
-      const existing = await WalletTx.findOne({ hash: req.body.hash, userId: req.user._id });
+      const existing = await scopedRepo(req.user._id).walletTxs.findOne({ hash: req.body.hash });
       if (existing) return res.status(200).json({ tx: existing });
       return res.status(409).json({ error: "That transaction is already recorded." });
     }
@@ -268,7 +270,7 @@ function announceLater(tx) {
 const MAX_CHAIN_ADDRESSES = 30;
 
 async function listChainAddresses(req, res) {
-  const user = await User.findById(req.user._id).select("chainAddresses").lean();
+  const user = await scopedRepo(req.user._id).self.get("chainAddresses").lean();
   return res.json({
     addresses: ((user && user.chainAddresses) || []).map(({ chain, network, address, addedAt }) => ({ chain, network, address, addedAt })),
   });
@@ -276,13 +278,14 @@ async function listChainAddresses(req, res) {
 
 async function setChainAddress(req, res) {
   try {
-    const { chain, network, address } = req.body || {};
+    const { chain, network, address } = req.body;
     const { validateChainAddress } = require("../config/chainAddresses");
     const v = validateChainAddress(chain, network, address);
     if (!v.ok) return res.status(400).json({ error: v.reason });
-    await User.updateOne({ _id: req.user._id }, { $pull: { chainAddresses: { chain: v.chain, network: v.network } } });
-    const r = await User.updateOne(
-      { _id: req.user._id, [`chainAddresses.${MAX_CHAIN_ADDRESSES - 1}`]: { $exists: false } },
+    const self = scopedRepo(req.user._id).self;
+    await self.updateOne({ $pull: { chainAddresses: { chain: v.chain, network: v.network } } });
+    const r = await self.updateWhere(
+      { [`chainAddresses.${MAX_CHAIN_ADDRESSES - 1}`]: { $exists: false } },
       { $push: { chainAddresses: { chain: v.chain, network: v.network, address: v.address, addedAt: new Date() } } }
     );
     if (!r.modifiedCount) return res.status(409).json({ error: "Too many addresses are registered on this account." });
@@ -295,12 +298,12 @@ async function setChainAddress(req, res) {
 
 async function updateTxStatus(req, res) {
   try {
-    const status = req.body && req.body.status;
+    const status = req.body.status;
     if (!["pending", "confirmed", "failed"].includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
     }
 
-    const tx = await WalletTx.findOne({ _id: req.params.id, userId: req.user._id });
+    const tx = await scopedRepo(req.user._id).walletTxs.findById(req.params.id);
     if (!tx) return res.status(404).json({ error: "Transaction not found" });
 
     if (tx.kind === "swap" && status === "failed" && tx.status !== "failed") {
@@ -368,8 +371,7 @@ function swapCashValue({ side, symbol, value, tokenOutSymbol, amountOut }) {
 
 async function spentInLast24h(userId) {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const rows = await WalletTx.find({
-    userId,
+  const rows = await scopedRepo(userId).walletTxs.find({
     kind: "swap",
     status: { $ne: "failed" },
     createdAt: { $gte: since },
@@ -478,7 +480,7 @@ async function discovered(req, res) {
       });
     }
 
-    const user = await User.findById(req.user._id).select("discoveredTokens").lean();
+    const user = await scopedRepo(req.user._id).self.get("discoveredTokens").lean();
     return res.json({ tokens: shapeDiscovered(user && user.discoveredTokens, chain), sync });
   } catch (err) {
     console.error("wallet discovered error:", err.message);
@@ -492,12 +494,12 @@ async function discoveredAct(req, res) {
     if (!chain) return res.status(400).json({ error: "Unknown or disabled chain" });
     const address = String(req.params.address || "").toLowerCase();
     if (!ADDRESS_RE.test(address)) return res.status(400).json({ error: "Invalid contract address" });
-    const action = req.body && req.body.action;
+    const action = req.body.action;
     if (!["add", "ignore", "restore"].includes(action)) {
       return res.status(400).json({ error: "Action must be add, ignore or restore" });
     }
 
-    const user = await User.findById(req.user._id).select("discoveredTokens customTokens");
+    const user = await scopedRepo(req.user._id).self.get("discoveredTokens customTokens");
     if (!user) return res.status(404).json({ error: "Account not found" });
     const entry = (user.discoveredTokens || []).find(
       (d) => d.chainId === chain.chainId && d.address === address

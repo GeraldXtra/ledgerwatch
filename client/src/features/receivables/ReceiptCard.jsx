@@ -8,6 +8,7 @@ function receiptText(r) {
     `PAYMENT RECEIPT`,
     `${r.businessName}`,
     ``,
+    ...(r.invoiceNumber ? [`Invoice: ${r.invoiceNumber}`] : []),
     `Received from: ${r.debtorName}`,
     `Amount paid: ${ngn(r.amount, r.currency)}`,
     `Method: ${METHOD_LABEL[r.method] || r.method}`,
@@ -20,13 +21,16 @@ function receiptText(r) {
 
 export default function ReceiptCard({ receipt }) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
   async function copy() {
     try {
       await navigator.clipboard.writeText(receiptText(receipt));
+      setCopyFailed(false);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {
+      setCopyFailed(true);
     }
   }
 
@@ -38,6 +42,7 @@ export default function ReceiptCard({ receipt }) {
           <span className="receipt-biz">{receipt.businessName}</span>
         </div>
         <dl className="receipt-rows">
+          {receipt.invoiceNumber && <div><dt>Invoice</dt><dd className="num">{receipt.invoiceNumber}</dd></div>}
           <div><dt>Received from</dt><dd>{receipt.debtorName}</dd></div>
           <div><dt>Amount paid</dt><dd className="num mono-strong">{ngn(receipt.amount, receipt.currency)}</dd></div>
           <div><dt>Method</dt><dd>{METHOD_LABEL[receipt.method] || receipt.method}</dd></div>
@@ -58,6 +63,9 @@ export default function ReceiptCard({ receipt }) {
           <Printer size={14} /> Print
         </Button>
       </div>
+      {copyFailed && (
+        <p className="error-text no-print">Your browser blocked copying. Select the receipt above and copy it by hand.</p>
+      )}
     </div>
   );
 }

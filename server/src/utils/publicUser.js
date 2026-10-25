@@ -18,8 +18,15 @@ function publicUser(user) {
     authProvider: u.authProvider === "google" ? "google" : "password",
     tradingMode: u.tradingMode || "paper",
     customTokens: u.customTokens || [],
+    twoFactorEnabled: Boolean(u.twoFactor && u.twoFactor.enabled),
+    pendingEmail: pendingEmailOf(u.emailChange),
     createdAt: u.createdAt,
   };
+}
+
+function pendingEmailOf(change) {
+  if (!change || !change.newEmail || !change.expiresAt) return null;
+  return new Date(change.expiresAt).getTime() > Date.now() ? change.newEmail : null;
 }
 
 function cryptoSettings(crypto) {

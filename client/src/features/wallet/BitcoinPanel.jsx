@@ -59,6 +59,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
   const [balance, setBalance] = useState(null);
   const [balError, setBalError] = useState(null);
@@ -253,9 +254,11 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
   async function copyAddr() {
     try {
       await navigator.clipboard.writeText(address);
+      setCopyFailed(false);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
+      setCopyFailed(true);
     }
   }
 
@@ -626,6 +629,7 @@ export default function BitcoinPanel({ userId, network, evmAddress = null, onBus
           </span>
           {copied ? <Check size={14} /> : <Copy size={14} />}
         </button>
+        {copyFailed && <p className="error-text">Your browser blocked copying. Select the address and copy it by hand.</p>}
         <div className="mm-icons">
           <button
             type="button"

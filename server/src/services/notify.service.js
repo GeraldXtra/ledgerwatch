@@ -184,7 +184,27 @@ function buildWaLink(toPhone, body) {
   return `https://wa.me/${intl}?text=${encodeURIComponent(body)}`;
 }
 
-async function sendViaCloud(toPhone, body) {
+const TEMPLATE_FIELDS = ["debtorName", "businessName", "amount", "dueDate", "payUrl"];
+
+function templateText(value) {
+  return String(value == null ? "" : value)
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/ {4,}/g, "   ")
+    .trim()
+    .slice(0, 1000) || "-";
+}
+
+function cloudTemplate() {
+  const name = String(process.env.WHATSAPP_CLOUD_TEMPLATE || "").trim();
+  if (!name) return null;
+  return { name, language: String(process.env.WHATSAPP_CLOUD_TEMPLATE_LANG || "en").trim() || "en" };
+}
+
+function twilioContentSid() {
+  return String(process.env.TWILIO_WHATSAPP_CONTENT_SID || "").trim() || null;
+}
+
+async function sendViaCloud(toPhone, body, template) {
   const token = process.env.WHATSAPP_CLOUD_TOKEN;
   const phoneId = process.env.WHATSAPP_CLOUD_PHONE_ID;
   if (!token || !phoneId) {
@@ -194,15 +214,30 @@ async function sendViaCloud(toPhone, body) {
   const { valid, intl } = normalizePhone(toPhone);
   if (!valid) return { ok: false, reason: "invalid-number", error: "That phone number is not valid for WhatsApp." };
 
+  const approved = template ? cloudTemplate() : null;
+  const payload = approved
+    ? {
+        messaging_product: "whatsapp",
+        to: intl,
+        type: "template",
+        template: {
+          name: approved.name,
+          language: { code: approved.language },
+          components: [
+            { type: "body", parameters: TEMPLATE_FIELDS.map((k) => ({ type: "text", text: templateText(template[k]) })) },
+          ],
+        },
+      }
+    : { messaging_product: "whatsapp", to: intl, type: "text", text: { preview_url: false, body } };
+
   try {
     const axios = require("axios");
     const version = process.env.WHATSAPP_CLOUD_VERSION || "v21.0";
-    const { data } = await axios.post(
-      `https://graph.facebook.com/${version}/${phoneId}/messages`,
-      { messaging_product: "whatsapp", to: intl, type: "text", text: { preview_url: false, body } },
-      { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 }
-    );
-    return { ok: true, providerId: data?.messages?.[0]?.id || null, provider: "cloud" };
+    const { data } = await axios.post(`https://graph.facebook.com/${version}/${phoneId}/messages`, payload, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 15000,
+    });
+    return { ok: true, providerId: data?.messages?.[0]?.id || null, provider: "cloud", template: Boolean(approved) };
   } catch (err) {
     const meta = err?.response?.data?.error;
     const code = meta?.code;
@@ -210,7 +245,11 @@ async function sendViaCloud(toPhone, body) {
     if (code === 131047 || code === 131026) {
       message =
         "WhatsApp will not deliver free text to this number because they have not messaged you in the last 24 hours. " +
-        "Business initiated reminders need an approved message template.";
+        "Reminders to them need an approved message template: set WHATSAPP_CLOUD_TEMPLATE to its name.";
+    } else if (code === 132001 || code === 132000) {
+      message =
+        `WhatsApp could not use the template "${approved && approved.name}" (${meta?.message || "not found"}). ` +
+        "Check its name and language in Meta Business settings, and that it has five body variables.";
     } else if (code === 190) {
       message = "The WhatsApp Cloud token has expired or been revoked. Generate a new one in Meta Business settings.";
     }
@@ -219,7 +258,7 @@ async function sendViaCloud(toPhone, body) {
   }
 }
 
-async function sendViaTwilio(toPhone, body) {
+async function sendViaTwilio(toPhone, body, template) {
   const client = getTwilio();
   const from = process.env.TWILIO_WHATSAPP_FROM;
   if (!client || !from) {
@@ -227,19 +266,30 @@ async function sendViaTwilio(toPhone, body) {
   }
   const to = toWhatsAppAddress(toPhone);
   if (!to) return { ok: false, reason: "invalid-number", error: "That phone number is not valid for WhatsApp." };
+  const contentSid = template ? twilioContentSid() : null;
+  const message = contentSid
+    ? {
+        from,
+        to,
+        contentSid,
+        contentVariables: JSON.stringify(
+          Object.fromEntries(TEMPLATE_FIELDS.map((k, i) => [String(i + 1), templateText(template[k])]))
+        ),
+      }
+    : { from, to, body };
   try {
-    const msg = await client.messages.create({ from, to, body });
-    return { ok: true, providerId: msg.sid, provider: "twilio" };
+    const msg = await client.messages.create(message);
+    return { ok: true, providerId: msg.sid, provider: "twilio", template: Boolean(contentSid) };
   } catch (err) {
     console.error("[whatsapp] twilio send failed:", err.message);
     return { ok: false, reason: "send-failed", error: err.message, provider: "twilio" };
   }
 }
 
-async function sendWhatsApp(toPhone, body) {
+async function sendWhatsApp(toPhone, body, template = null) {
   const provider = whatsappProvider();
-  if (provider === "cloud") return sendViaCloud(toPhone, body);
-  if (provider === "twilio") return sendViaTwilio(toPhone, body);
+  if (provider === "cloud") return sendViaCloud(toPhone, body, template);
+  if (provider === "twilio") return sendViaTwilio(toPhone, body, template);
 
   const link = buildWaLink(toPhone, body);
   if (!link) return { ok: false, reason: "invalid-number", error: "That phone number is not valid for WhatsApp." };
@@ -258,22 +308,34 @@ function whatsappConfigStatus() {
   const provider = whatsappProvider();
   if (provider === "cloud") {
     const missing = ["WHATSAPP_CLOUD_TOKEN", "WHATSAPP_CLOUD_PHONE_ID"].filter((k) => !process.env[k]);
+    const template = Boolean(cloudTemplate());
     return {
       provider,
       automatic: missing.length === 0,
+      template,
       missing,
-      reason: missing.length ? `WhatsApp Cloud API is missing: ${missing.join(", ")}.` : null,
+      reason: missing.length
+        ? `WhatsApp Cloud API is missing: ${missing.join(", ")}.`
+        : template
+          ? null
+          : "Reminders reach only people who have messaged you in the last 24 hours until WHATSAPP_CLOUD_TEMPLATE names an approved template.",
     };
   }
   if (provider === "twilio") {
     const missing = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"].filter(
       (k) => !process.env[k]
     );
+    const template = Boolean(twilioContentSid());
     return {
       provider,
       automatic: missing.length === 0,
+      template,
       missing,
-      reason: missing.length ? `Twilio WhatsApp is missing: ${missing.join(", ")}.` : null,
+      reason: missing.length
+        ? `Twilio WhatsApp is missing: ${missing.join(", ")}.`
+        : template
+          ? null
+          : "Reminders reach only people who have messaged you in the last 24 hours until TWILIO_WHATSAPP_CONTENT_SID names an approved template.",
     };
   }
   return {
@@ -296,27 +358,27 @@ function normalizeFrom(raw) {
   return name ? `"${name.replace(/"/g, "")}" <${address}>` : address;
 }
 
-function unsubscribeUrl(to) {
-  const base = String(process.env.MAIL_UNSUBSCRIBE_URL || "").trim();
-  if (!base) return null;
-  const sep = base.includes("?") ? "&" : "?";
-  return `${base}${sep}email=${encodeURIComponent(to || "")}`;
-}
-
 function unsubscribeMailbox() {
   const raw = process.env.MAIL_UNSUBSCRIBE || process.env.MAIL_FROM || "";
   const match = String(raw).match(/<([^>]+)>/);
   return (match ? match[1] : raw).trim() || "unsubscribe@localhost";
 }
 
-function unsubscribeHeaders(to) {
-  const url = unsubscribeUrl(to);
+function unsubscribeHeaders(opts) {
+  if (opts.category === "transactional") return {};
   const mailto = `<mailto:${unsubscribeMailbox()}?subject=unsubscribe>`;
-  if (!url) return { "List-Unsubscribe": mailto };
+  const oneClick = opts.unsubscribe && opts.unsubscribe.oneClick;
+  if (!oneClick || !/^https:\/\//.test(oneClick)) return { "List-Unsubscribe": mailto };
   return {
-    "List-Unsubscribe": `<${url}>, ${mailto}`,
+    "List-Unsubscribe": `<${oneClick}>, ${mailto}`,
     "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
   };
+}
+
+function replyToFor(opts, from) {
+  const wanted = opts.replyTo && String(opts.replyTo).trim();
+  if (wanted && require("../utils/email").isPlainAddress(wanted)) return wanted;
+  return normalizeFrom(process.env.MAIL_REPLY_TO) || from;
 }
 
 async function sendEmail(to, subject, html, opts = {}) {
@@ -353,17 +415,17 @@ async function sendEmail(to, subject, html, opts = {}) {
     const info = await transport.sendMail({
       from,
       to,
-      replyTo: normalizeFrom(process.env.MAIL_REPLY_TO) || from,
+      replyTo: replyToFor(opts, from),
       subject,
       html,
       text: opts.text || undefined,
       attachments: attachments.length ? attachments : undefined,
 
       headers: {
-        ...unsubscribeHeaders(to),
+        ...unsubscribeHeaders(opts),
         "Auto-Submitted": "auto-generated",
         "X-Auto-Response-Suppress": "OOF, AutoReply",
-        Precedence: "bulk",
+        ...(opts.category === "transactional" ? {} : { Precedence: "bulk" }),
         "X-Entity-Ref-ID": `ledgerwatch-${Date.now()}`,
       },
     });
@@ -427,11 +489,20 @@ function getLogoAttachment() {
   return null;
 }
 
-const { FONT, INK, BODY, MUTED, LINE, WELL, PAGE, esc, brandHeader } = require("../utils/emailBrand");
+const { FONT, INK, BODY, MUTED, LINE, WELL, PAGE, ACCENT, esc, brandHeader } = require("../utils/emailBrand");
 const NAVY = INK;
 
 function money(amount) {
   return Number(amount || 0).toLocaleString("en-NG", { maximumFractionDigits: 2 });
+}
+
+function payButton(payUrl) {
+  const href = payUrl && /^https?:\/\//.test(payUrl) ? payUrl : null;
+  if (!href) return "";
+  return `<tr><td style="padding:18px 28px 4px" align="left">
+    <a href="${esc(href)}" style="display:inline-block;background:${ACCENT};color:${INK};text-decoration:none;
+       font:700 14px ${FONT};padding:12px 22px;border-radius:999px">View invoice and pay</a>
+  </td></tr>`;
 }
 
 function buildReminderEmail({
@@ -443,6 +514,9 @@ function buildReminderEmail({
   debtorName,
   cryptoHtml,
   hasLogo,
+  invoiceNumber,
+  payUrl,
+  unsubscribeUrl,
 }) {
   const bodyHtml = esc(messageText)
     .split(/\n{2,}/)
@@ -467,7 +541,7 @@ function buildReminderEmail({
                ${
                  amount
                    ? `<td style="padding:16px 18px">
-                        <div style="font:600 11px ${FONT};color:${MUTED}">Amount outstanding</div>
+                        <div style="font:600 11px ${FONT};color:${MUTED}">${invoiceNumber ? `Invoice ${esc(invoiceNumber)}, amount outstanding` : "Amount outstanding"}</div>
                         <div style="font:700 24px ${FONT};color:${INK};padding-top:5px">&#8358;${money(amount)}</div>
                       </td>`
                    : ""
@@ -544,6 +618,7 @@ function buildReminderEmail({
       </td></tr>
 
       ${summary}
+      ${payButton(payUrl)}
       ${bank}
       ${cryptoHtml ? `<tr><td style="padding:16px 28px 4px">${cryptoHtml}</td></tr>` : ""}
 
@@ -551,6 +626,7 @@ function buildReminderEmail({
         <div style="border-top:1px solid ${LINE};padding-top:16px;font:400 12px/1.6 ${FONT};color:${MUTED}">
           Reply to this email to arrange payment or raise a query with ${supplier}.<br>
           Sent with <span style="color:${BODY};font-weight:600">LedgerWatch</span>.
+          ${unsubscribeUrl ? `<br><a href="${esc(unsubscribeUrl)}" style="color:${MUTED}">Stop payment reminder emails from ${supplier}</a>` : ""}
         </div>
       </td></tr>
 

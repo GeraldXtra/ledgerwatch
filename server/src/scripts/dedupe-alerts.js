@@ -1,42 +1,42 @@
-require("dotenv").config();
-
 const mongoose = require("mongoose");
 const connectDB = require("../config/db");
 const Alert = require("../models/Alert");
 
-async function main() {
-  await connectDB();
-
-  const pending = await Alert.find({ status: "pending" })
-    .select("_id watchId createdAt")
-    .sort({ createdAt: -1 })
-    .lean();
-
-  if (pending.length === 0) {
-    return { scanned: 0, kept: 0, dismissed: 0 };
-  }
-
+function findStale(pending) {
   const keptWatches = new Set();
   const stale = [];
-
   for (const a of pending) {
     const key = String(a.watchId);
     if (keptWatches.has(key)) stale.push(a._id);
     else keptWatches.add(key);
   }
+  return { kept: keptWatches.size, stale };
+}
 
-  if (stale.length > 0) {
+async function dedupeAlerts({ apply = false } = {}) {
+  const pending = await Alert.find({ status: "pending" })
+    .select("_id watchId createdAt")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const { kept, stale } = findStale(pending);
+
+  if (apply && stale.length > 0) {
     await Alert.updateMany(
-      { _id: { $in: stale } },
+      { _id: { $in: stale }, status: "pending" },
       { $set: { status: "dismissed", userAction: "dismiss", actedAt: new Date() } }
     );
   }
 
-  return { scanned: pending.length, kept: keptWatches.size, dismissed: stale.length };
+  return { apply, scanned: pending.length, kept, stale: stale.length, dismissed: apply ? stale.length : 0 };
 }
 
 if (require.main === module) {
-  main()
+  require("dotenv").config();
+  const apply = process.argv.includes("--apply");
+  console.log(`\nMODE: ${apply ? "APPLY (writing)" : "DRY RUN (nothing is written)"}\n`);
+  connectDB()
+    .then(() => dedupeAlerts({ apply }))
     .then((r) => {
       if (r.scanned === 0) {
         console.log("No pending alerts found. Nothing to clean up.");
@@ -44,7 +44,9 @@ if (require.main === module) {
         console.log(
           `Pending alerts scanned: ${r.scanned}\n` +
             `Kept pending:          ${r.kept} (one per watch)\n` +
-            `Dismissed as stale:    ${r.dismissed}`
+            (r.apply
+              ? `Dismissed as stale:    ${r.dismissed}`
+              : `Would dismiss:         ${r.stale}${r.stale ? "\nRun again with --apply to dismiss them." : ""}`)
         );
       }
       return mongoose.disconnect();
@@ -56,3 +58,5 @@ if (require.main === module) {
       process.exit(1);
     });
 }
+
+module.exports = { dedupeAlerts, findStale };

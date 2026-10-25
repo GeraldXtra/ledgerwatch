@@ -3,15 +3,24 @@ const Payment = require("../models/Payment");
 const Reminder = require("../models/Reminder");
 const { normalizePhone } = require("../utils/phone");
 const mongoose = require("mongoose");
+const { koboOf, koboToNaira, nairaToKobo, shareOf } = require("../domain/money");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-async function paidForDebt(debtId) {
+const PAYMENT_KOBO = {
+  $ifNull: ["$amountKobo", { $floor: { $add: [{ $multiply: ["$amount", 100] }, 0.5] } }],
+};
+
+async function paidKoboForDebt(debtId) {
   const rows = await Payment.aggregate([
     { $match: { debtId: toObjectId(debtId) } },
-    { $group: { _id: null, paid: { $sum: "$amount" } } },
+    { $group: { _id: null, paid: { $sum: PAYMENT_KOBO } } },
   ]);
   return rows.length ? rows[0].paid : 0;
+}
+
+async function paidForDebt(debtId) {
+  return koboToNaira(await paidKoboForDebt(debtId));
 }
 
 function toObjectId(value) {
@@ -19,51 +28,64 @@ function toObjectId(value) {
   return new mongoose.Types.ObjectId(String(value));
 }
 
-async function paidByDebt(userId, debtIds) {
+async function paidKoboByDebt(userId, debtIds) {
   if (!debtIds.length) return new Map();
   const rows = await Payment.aggregate([
     { $match: { userId, debtId: { $in: debtIds } } },
-    { $group: { _id: "$debtId", paid: { $sum: "$amount" } } },
+    { $group: { _id: "$debtId", paid: { $sum: PAYMENT_KOBO } } },
   ]);
   const map = new Map();
   for (const r of rows) map.set(String(r._id), r.paid);
   return map;
 }
 
-function displayStatus(debt, balance) {
-  if (debt.status === "paid" || balance <= 0) return "paid";
+function displayStatus(debt, balanceKobo, amountKobo) {
+  if (debt.status === "paid" || balanceKobo <= 0) return "paid";
   if (new Date(debt.dueDate).getTime() < Date.now()) return "overdue";
-  if (balance < debt.amount) return "partially_paid";
+  if (balanceKobo < amountKobo) return "partially_paid";
   return "pending";
 }
 
-function withDerived(debt, amountPaid) {
+function withDerivedKobo(debt, paidKobo) {
   const obj = typeof debt.toObject === "function" ? debt.toObject() : { ...debt };
-  const paid = amountPaid || 0;
-  const balance = Math.max(0, (obj.amount || 0) - paid);
-  obj.amountPaid = paid;
-  obj.balance = balance;
-  obj.displayStatus = displayStatus(obj, balance);
+  const amountKobo = koboOf(obj);
+  const paid = Math.max(0, Math.round(Number(paidKobo) || 0));
+  const balanceKobo = Math.max(0, amountKobo - paid);
+  obj.amountKobo = amountKobo;
+  obj.amount = koboToNaira(amountKobo);
+  obj.amountPaidKobo = paid;
+  obj.amountPaid = koboToNaira(paid);
+  obj.balanceKobo = balanceKobo;
+  obj.balance = koboToNaira(balanceKobo);
+  obj.displayStatus = displayStatus(obj, balanceKobo, amountKobo);
   return obj;
+}
+
+function withDerived(debt, amountPaid) {
+  return withDerivedKobo(debt, nairaToKobo(amountPaid || 0));
 }
 
 async function attachTotals(userId, debts) {
   const ids = debts.map((d) => d._id);
-  const map = await paidByDebt(userId, ids);
-  return debts.map((d) => withDerived(d, map.get(String(d._id)) || 0));
+  const map = await paidKoboByDebt(userId, ids);
+  return debts.map((d) => withDerivedKobo(d, map.get(String(d._id)) || 0));
 }
 
-function toleratedShortfallNgn(invoiceAmountNgn) {
-  const TOLERANCE = Number(process.env.USDC_SETTLEMENT_TOLERANCE || 0.005);
-  const MAX_DUST_NGN = Number(process.env.SETTLEMENT_MAX_DUST_NGN || 100);
-  return Math.min(Number(invoiceAmountNgn || 0) * TOLERANCE, MAX_DUST_NGN);
+function toleratedShortfallKobo(invoiceKobo) {
+  const tolerance = Number(process.env.USDC_SETTLEMENT_TOLERANCE || 0.005);
+  const maxDustNgn = Number(process.env.SETTLEMENT_MAX_DUST_NGN || 100);
+  const proportional = Number(shareOf(BigInt(Math.max(0, Math.round(Number(invoiceKobo) || 0))), tolerance));
+  const cap = Number.isFinite(maxDustNgn) && maxDustNgn >= 0 ? nairaToKobo(maxDustNgn) : 0;
+  return Math.min(proportional, cap);
 }
 
 async function recomputeDebtStatus(debt) {
-  const amountPaid = await paidForDebt(debt._id);
-  const balance = (debt.amount || 0) - amountPaid;
+  const paidKobo = await paidKoboForDebt(debt._id);
+  const amountKobo = koboOf(debt);
+  const balanceKobo = amountKobo - paidKobo;
+  const amountPaid = koboToNaira(paidKobo);
 
-  const settled = balance <= toleratedShortfallNgn(debt.amount);
+  const settled = balanceKobo <= toleratedShortfallKobo(amountKobo);
 
   const wasPaid = debt.status === "paid";
   if (settled) {
@@ -91,9 +113,13 @@ function debtorKey(debt) {
   return `name:${(debt.debtorName || "").trim().toLowerCase()}`;
 }
 
+function sumPaymentsKobo(payments) {
+  return (payments || []).reduce((s, p) => s + koboOf(p), 0);
+}
+
 function settledDate(debt, payments) {
-  const paid = payments.reduce((s, p) => s + p.amount, 0);
-  if (paid < (debt.amount || 0) - toleratedShortfallNgn(debt.amount)) return null;
+  const amountKobo = koboOf(debt);
+  if (sumPaymentsKobo(payments) < amountKobo - toleratedShortfallKobo(amountKobo)) return null;
   const dates = payments.map((p) => new Date(p.paidAt).getTime());
   return dates.length ? new Date(Math.max(...dates)) : null;
 }
@@ -107,9 +133,10 @@ function reliabilityScore({ debts, paymentsByDebt }) {
 
   for (const d of debts) {
     const pays = paymentsByDebt.get(String(d._id)) || [];
-    const collected = pays.reduce((s, p) => s + p.amount, 0);
-    totalBorrowed += d.amount || 0;
-    totalCollected += Math.min(collected, d.amount || 0);
+    const collected = sumPaymentsKobo(pays);
+    const owed = koboOf(d);
+    totalBorrowed += owed;
+    totalCollected += Math.min(collected, owed);
 
     const settled = settledDate(d, pays);
     if (settled) {
@@ -174,9 +201,10 @@ async function debtorGroups(userId) {
 
     for (const d of g.debts) {
       const pays = paymentsByDebt.get(String(d._id)) || [];
-      const collected = pays.reduce((s, p) => s + p.amount, 0);
-      totalBorrowed += d.amount || 0;
-      totalOutstanding += Math.max(0, (d.amount || 0) - collected);
+      const collected = sumPaymentsKobo(pays);
+      const owed = koboOf(d);
+      totalBorrowed += owed;
+      totalOutstanding += Math.max(0, owed - collected);
 
       const settled = settledDate(d, pays);
       if (settled) {
@@ -197,8 +225,8 @@ async function debtorGroups(userId) {
       debtorName: g.debtorName,
       debtorPhone: g.debtorPhone,
       debtCount: g.debts.length,
-      totalBorrowed,
-      totalOutstanding,
+      totalBorrowed: koboToNaira(totalBorrowed),
+      totalOutstanding: koboToNaira(totalOutstanding),
       avgDaysToPay: paidCount ? Math.round(daysToPaySum / paidCount) : null,
       onTimeRate: rel.onTimeRate,
       completionRate: rel.completionRate,
@@ -227,16 +255,14 @@ async function debtorProfile(userId, key) {
     if (!paymentsByDebt.has(k)) paymentsByDebt.set(k, []);
     paymentsByDebt.get(k).push(p);
   }
-  const derivedDebts = debts.map((d) =>
-    withDerived(d, (paymentsByDebt.get(String(d._id)) || []).reduce((s, p) => s + p.amount, 0))
-  );
+  const derivedDebts = debts.map((d) => withDerivedKobo(d, sumPaymentsKobo(paymentsByDebt.get(String(d._id)))));
 
   const timeline = [];
   for (const d of debts) {
-    timeline.push({ type: "debt_created", at: d.createdAt, debtId: d._id, amount: d.amount, note: d.note });
+    timeline.push({ type: "debt_created", at: d.createdAt, debtId: d._id, amount: koboToNaira(koboOf(d)), note: d.note });
   }
   for (const p of payments) {
-    timeline.push({ type: "payment", at: p.paidAt, debtId: p.debtId, amount: p.amount, method: p.method });
+    timeline.push({ type: "payment", at: p.paidAt, debtId: p.debtId, amount: koboToNaira(koboOf(p)), method: p.method });
   }
   for (const r of reminders) {
     timeline.push({ type: "reminder", at: r.createdAt, debtId: r.debtId, status: r.status });
@@ -264,7 +290,7 @@ async function analytics(userId) {
 
   const paidMap = new Map();
   for (const p of payments) {
-    paidMap.set(String(p.debtId), (paidMap.get(String(p.debtId)) || 0) + p.amount);
+    paidMap.set(String(p.debtId), (paidMap.get(String(p.debtId)) || 0) + koboOf(p));
   }
 
   const now = new Date();
@@ -285,12 +311,13 @@ async function analytics(userId) {
 
   for (const d of debts) {
     const paid = paidMap.get(String(d._id)) || 0;
-    const balance = Math.max(0, (d.amount || 0) - paid);
-    totalBorrowed += d.amount || 0;
-    totalCollected += Math.min(paid, d.amount || 0);
+    const owed = koboOf(d);
+    const balance = Math.max(0, owed - paid);
+    totalBorrowed += owed;
+    totalCollected += Math.min(paid, owed);
     totalOutstanding += balance;
 
-    const ds = displayStatus(d, balance);
+    const ds = displayStatus(d, balance, owed);
     countByStatus[ds] = (countByStatus[ds] || 0) + 1;
 
     if (balance > 0) {
@@ -314,7 +341,7 @@ async function analytics(userId) {
       const at = new Date(p.paidAt);
       return at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth();
     })
-    .reduce((s, p) => s + p.amount, 0);
+    .reduce((s, p) => s + koboOf(p), 0);
 
   const months = [];
   for (let i = 5; i >= 0; i--) {
@@ -324,30 +351,32 @@ async function analytics(userId) {
   const monthIndex = new Map(months.map((m, i) => [m.key, i]));
   for (const d of debts) {
     const idx = monthIndex.get(monthKey(d.createdAt));
-    if (idx != null) months[idx].owed += d.amount || 0;
+    if (idx != null) months[idx].owed += koboOf(d);
   }
   for (const p of payments) {
     const idx = monthIndex.get(monthKey(p.paidAt));
-    if (idx != null) months[idx].collected += p.amount || 0;
+    if (idx != null) months[idx].collected += koboOf(p);
   }
 
   return {
-    totalOutstanding,
-    collectedThisMonth,
+    totalOutstanding: koboToNaira(totalOutstanding),
+    collectedThisMonth: koboToNaira(collectedThisMonth),
     collectionRate: totalBorrowed ? Math.round((totalCollected / totalBorrowed) * 100) : 0,
     avgDaysToPayment: settledCount ? Math.round(daysToPaySum / settledCount) : null,
     countByStatus,
-    monthly: months.map((m) => ({ month: m.label, owed: m.owed, collected: m.collected })),
-    aging,
+    monthly: months.map((m) => ({ month: m.label, owed: koboToNaira(m.owed), collected: koboToNaira(m.collected) })),
+    aging: Object.fromEntries(Object.entries(aging).map(([k, v]) => [k, koboToNaira(v)])),
   };
 }
 
 module.exports = {
   paidForDebt,
+  paidKoboForDebt,
   attachTotals,
   withDerived,
+  withDerivedKobo,
   recomputeDebtStatus,
-  toleratedShortfallNgn,
+  toleratedShortfallKobo,
   debtorKey,
   debtorGroups,
   debtorProfile,

@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { Button, Field, Input, Select } from "../components/ui";
 import PublicShell from "../components/PublicShell";
 import Turnstile, { turnstileEnabled, unloadTurnstile } from "../components/Turnstile";
+import usePageMeta from "../components/usePageMeta";
 
 const TOPICS = [
   { id: "payment", label: "A payment or an invoice" },
@@ -31,13 +32,13 @@ export default function ContactPage() {
   const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
 
-  useEffect(() => {
-    document.title = "Contact · LedgerWatch";
-    return () => {
-      document.title = "LedgerWatch: Automated receivables and market monitoring";
-      unloadTurnstile();
-    };
-  }, []);
+  usePageMeta({
+    title: "Contact · LedgerWatch",
+    description: "Write to the person who runs LedgerWatch about a payment, the wallet, Market Watch, your account or a security concern.",
+    path: "/contact",
+  });
+
+  useEffect(() => () => unloadTurnstile(), []);
 
   useEffect(() => {
     if (!user) return;

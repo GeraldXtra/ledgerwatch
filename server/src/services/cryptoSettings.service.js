@@ -1,5 +1,5 @@
 const User = require("../models/User");
-const { getChain } = require("../config/chains");
+const { getChain, allChains } = require("../config/chains");
 const { confirmationsFor: baseConfirmationsFor } = require("../config/derivation");
 
 const MIN_CONFIRMATIONS = 1;
@@ -90,15 +90,24 @@ function buildCryptoUpdate(patch) {
 
   if (patch.confirmationOverrides !== undefined) {
     const src = patch.confirmationOverrides || {};
+    if (typeof src !== "object" || Array.isArray(src)) {
+      throw httpError(400, "Confirmation overrides must be a list of networks and counts.");
+    }
+    const known = new Map(allChains().map((c) => [String(c.chainId), c]));
     const clean = {};
     for (const [chainId, value] of Object.entries(src)) {
-      if (!getChain(Number(chainId))) continue;
+      const chain = known.get(String(chainId));
+      if (!chain) {
+        throw httpError(400, `Network ${chainId} is not one LedgerWatch supports, so no confirmation count can be set for it.`);
+      }
       const n = Number(value);
-      if (!Number.isFinite(n)) continue;
-      clean[String(chainId)] = Math.min(
-        MAX_CONFIRMATIONS,
-        Math.max(MIN_CONFIRMATIONS, Math.round(n))
-      );
+      if (!Number.isInteger(n) || n < MIN_CONFIRMATIONS || n > MAX_CONFIRMATIONS) {
+        throw httpError(
+          400,
+          `The confirmation count for ${chain.name} must be a whole number from ${MIN_CONFIRMATIONS} to ${MAX_CONFIRMATIONS}.`
+        );
+      }
+      clean[String(chainId)] = n;
     }
     updates["crypto.confirmationOverrides"] = clean;
   }
