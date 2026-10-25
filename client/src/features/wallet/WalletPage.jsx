@@ -52,7 +52,6 @@ import UtxoPanel from "./UtxoPanel";
 import TronPanel from "./TronPanel";
 import SolanaPanel from "./SolanaPanel";
 import TonPanel from "./TonPanel";
-import RampCard from "./RampCard";
 import { clearChainAddresses } from "./chainAddresses";
 import { clearPendingSends } from "./bitcoin/pendingSend";
 import HoldingDetail from "./HoldingDetail";
@@ -1006,8 +1005,6 @@ function WalletInner() {
           </section>
         </>
       )}
-
-      {address && <RampCard address={address} />}
 
       {!isNonEvm && panel && (
         <DetailPane

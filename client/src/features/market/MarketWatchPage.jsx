@@ -39,6 +39,7 @@ import TradingModeToggle from "./TradingModeToggle";
 import LiveSwapModal from "./LiveSwapModal";
 import LivePortfolioPanel from "./LivePortfolioPanel";
 import ProfitPanel from "./ProfitPanel";
+import RampCard from "../wallet/RampCard";
 import { resolveTradeable } from "./resolveTradeable";
 import { toSpendAmount } from "./amount";
 import { fetchChains, fetchSpend24h } from "../wallet/walletApi";
@@ -135,16 +136,23 @@ function MarketWatch() {
 
   const knownAlertIds = useRef(null);
   const pushedAlertIds = useRef(new Set());
+  const modeRef = useRef(mode);
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   const loadData = useCallback(async () => {
     setError("");
     try {
+      const params = { params: { mode } };
       const [w, a, p, h] = await Promise.allSettled([
-        http.get("/api/watches"),
-        http.get("/api/alerts"),
-        http.get("/api/portfolio"),
-        http.get("/api/alerts/history"),
+        http.get("/api/watches", params),
+        http.get("/api/alerts", params),
+        http.get("/api/portfolio", params),
+        http.get("/api/alerts/history", params),
       ]);
+      if (mode !== modeRef.current) return;
 
       const failed = [];
       if (w.status === "fulfilled") setWatches(w.value.data.watches);
@@ -174,7 +182,6 @@ function MarketWatch() {
     } catch (err) {
       setError(err?.response?.data?.error || "Failed to load market data");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toast, mode]);
 
   useEffect(() => {
@@ -244,18 +251,22 @@ function MarketWatch() {
       setTrade({ alert: target, side: side === "sell" ? "sell" : "buy" });
     } else {
       setDeepLinkNote(
-        "That alert has already been handled, so there is nothing left to act on. Any alert still open is listed below."
+        mode === "live"
+          ? "That alert is not open in live trading. It has been handled already, or it belongs to paper trading. Any live alert still open is listed below."
+          : "That alert is not open in paper trading. It has been handled already, or it belongs to live trading. Any paper alert still open is listed below."
       );
     }
     window.history.replaceState({}, "", window.location.pathname);
-  }, [alerts]);
+  }, [alerts, mode]);
 
   useEffect(() => {
     const t = setInterval(() => {
       if (document.visibilityState !== "visible") return;
+      const asked = modeRef.current;
       http
-        .get("/api/alerts")
+        .get("/api/alerts", { params: { mode: asked } })
         .then(({ data }) => {
+          if (asked !== modeRef.current || (data.mode && data.mode !== asked)) return;
           const nextAlerts = data.alerts;
           if (knownAlertIds.current) {
             const fresh = nextAlerts.filter((al) => !knownAlertIds.current.has(al._id));
@@ -265,7 +276,12 @@ function MarketWatch() {
                 .forEach((al) =>
                   toast(`New alert on ${al.symbol}. The agent suggests ${al.suggestion}.`, { type: "info" })
                 );
-              http.get("/api/alerts/history").then((h) => setAlertHistory(h.data.alerts)).catch(() => {});
+              http
+                .get("/api/alerts/history", { params: { mode: asked } })
+                .then((h) => {
+                  if (asked === modeRef.current) setAlertHistory(h.data.alerts);
+                })
+                .catch(() => {});
             }
           }
           knownAlertIds.current = new Set(nextAlerts.map((al) => al._id));
@@ -728,6 +744,8 @@ function MarketWatch() {
               />
             )}
 
+            {mode === "live" && walletAddress && <RampCard address={walletAddress} />}
+
             <div className="kpi-row">
               {mode === "paper" && (
                 <>
@@ -764,14 +782,14 @@ function MarketWatch() {
               reloadKey={mode === "live" ? liveReloadKey : portfolio}
             />
 
-            <ChatBox onAction={loadData} />
+            <ChatBox onAction={loadData} mode={mode} />
           </>
         )}
       </div>
 
       {addingWatch && (
         <Modal label="Watch a coin" view="watch" onClose={() => setAddingWatch(false)}>
-          <AddWatchForm onAdded={loadData} onCancel={() => setAddingWatch(false)} />
+          <AddWatchForm onAdded={loadData} onCancel={() => setAddingWatch(false)} mode={mode} />
         </Modal>
       )}
 

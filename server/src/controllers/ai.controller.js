@@ -1,4 +1,5 @@
 const Debt = require("../models/Debt");
+const { requestedMode } = require("../utils/tradingMode");
 const Watch = require("../models/Watch");
 const {
   answerReceivablesQuery,
@@ -125,8 +126,8 @@ async function chat(req, res) {
     }
 
     const [watches, portfolio] = await Promise.all([
-      Watch.find({ userId: req.user._id, active: true, mode: req.user.tradingMode === "live" ? "live" : "paper" }),
-      getPortfolio(req.user._id, req.user.tradingMode === "live" ? "live" : "paper"),
+      Watch.find({ userId: req.user._id, active: true, mode: requestedMode(req) }),
+      getPortfolio(req.user._id, requestedMode(req)),
     ]);
     const coinIds = [...new Set(watches.map((w) => w.coinId))];
     const prices = coinIds.length ? await getPrices(coinIds) : {};
@@ -148,7 +149,7 @@ async function chat(req, res) {
       const { created, notes } = await executeWatchIntents(
         req.user._id,
         aiResult.watches,
-        req.user.tradingMode === "live" ? "live" : "paper"
+        requestedMode(req)
       );
       let reply = aiResult.reply || "";
       if (created.length) {
@@ -162,7 +163,7 @@ async function chat(req, res) {
 
     const intents = parseWatchCommand(message);
     if (intents.length) {
-      const { created, notes } = await executeWatchIntents(req.user._id, intents, req.user.tradingMode === "live" ? "live" : "paper");
+      const { created, notes } = await executeWatchIntents(req.user._id, intents, requestedMode(req));
       let reply = created.length
         ? `Now watching: ${created.map((w) => w.symbol).join(", ")}.`
         : "";

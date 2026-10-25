@@ -14,7 +14,7 @@ const TYPES = [
 
 const isPriceType = (t) => t === "price_below" || t === "price_above";
 
-export default function AddWatchForm({ onAdded, onCancel }) {
+export default function AddWatchForm({ onAdded, onCancel, mode }) {
   const [coin, setCoin] = useState(null);
   const [type, setType] = useState("price_below");
   const [value, setValue] = useState("");
@@ -75,6 +75,7 @@ export default function AddWatchForm({ onAdded, onCancel }) {
         symbol: coin.symbol,
         type,
         value: num,
+        mode,
       });
       setOk(`Now watching ${coin.symbol}.`);
       setValue("");
