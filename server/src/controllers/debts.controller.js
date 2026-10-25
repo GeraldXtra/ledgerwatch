@@ -1,15 +1,29 @@
-const Debt = require("../models/Debt");
-const Reminder = require("../models/Reminder");
-const Payment = require("../models/Payment");
-const PaymentAddress = require("../models/PaymentAddress");
+const { scopedRepo } = require("../repositories/scoped");
 const { normalizePhone } = require("../utils/phone");
 const {
   generateReminderForDebt,
   dispatchReminder,
 } = require("../services/reminder.service");
-const { attachTotals, withDerived, recomputeDebtStatus, paidForDebt } = require("../services/receivables.service");
+const {
+  attachTotals,
+  withDerived,
+  recomputeDebtStatus,
+  paidKoboForDebt,
+} = require("../services/receivables.service");
 const { resyncActivePaymentAddress } = require("../services/paymentAddress.service");
 const { onInvoiceSettled } = require("../services/settlement.service");
+const {
+  nextInvoiceNumber,
+  ensureInvoiceNumber,
+  ensurePublicToken,
+  rotatePublicToken,
+  payPageUrl,
+  invoiceView,
+  buildInvoicePdf,
+  invoiceFileName,
+} = require("../services/invoice.service");
+const { nairaToKobo, koboToNaira, koboOf, hasWholeKobo, MAX_NAIRA } = require("../domain/money");
+const { confirmedUnsweptUnits } = require("../services/paymentWatch.service");
 
 const { isPlainAddress } = require("../utils/email");
 
@@ -23,40 +37,46 @@ function cleanText(body) {
   return body;
 }
 
+function has(body, key) {
+  return body[key] !== undefined && body[key] !== null && body[key] !== "";
+}
+
 function validateDebtFields(body, { partial = false } = {}) {
   const errors = [];
   cleanText(body);
 
-  const has = (k) => body[k] !== undefined && body[k] !== null && body[k] !== "";
-
-  if (!partial || has("debtorName")) {
-    if (!has("debtorName")) errors.push("debtorName is required");
+  if (!partial || has(body, "debtorName")) {
+    if (!has(body, "debtorName")) errors.push("debtorName is required");
   }
-  if (!partial || has("amount")) {
+  if (!partial || has(body, "amount")) {
     const amt = Number(body.amount);
-    if (!has("amount") || isNaN(amt) || amt <= 0) {
+    if (!has(body, "amount") || isNaN(amt) || amt <= 0) {
       errors.push("amount must be a number greater than 0");
+    } else if (amt > MAX_NAIRA) {
+      errors.push("amount can be at most 1,000,000,000,000");
+    } else if (!hasWholeKobo(amt)) {
+      errors.push("amount can have at most two decimal places");
     }
   }
-  if (!partial || has("dueDate")) {
+  if (!partial || has(body, "dueDate")) {
     const d = new Date(body.dueDate);
-    if (!has("dueDate") || isNaN(d.getTime())) {
+    if (!has(body, "dueDate") || isNaN(d.getTime())) {
       errors.push("dueDate is required and must be a valid date");
     }
   }
-  if (has("debtorPhone")) {
+  if (has(body, "debtorPhone")) {
     if (!normalizePhone(body.debtorPhone).valid) {
       errors.push("debtorPhone does not look like a usable phone number");
     }
   }
-  if (has("debtorEmail")) {
+  if (has(body, "debtorEmail")) {
     if (!isPlainAddress(String(body.debtorEmail))) {
       errors.push("debtorEmail is not a valid email address");
     }
   }
-  if (has("reminderCadenceDays")) {
+  if (has(body, "reminderCadenceDays")) {
     const c = Number(body.reminderCadenceDays);
-    if (isNaN(c) || c < 1) errors.push("reminderCadenceDays must be >= 1");
+    if (!Number.isInteger(c) || c < 1) errors.push("reminderCadenceDays must be a whole number of at least 1");
   }
 
   return errors;
@@ -64,23 +84,22 @@ function validateDebtFields(body, { partial = false } = {}) {
 
 async function create(req, res) {
   try {
-    const errors = validateDebtFields(req.body || {});
+    const body = req.body;
+    const errors = validateDebtFields(body);
     if (errors.length) return res.status(400).json({ error: errors.join("; ") });
 
-    const { debtorName, debtorPhone, debtorEmail, amount, dueDate, note, reminderCadenceDays } =
-      req.body;
-
-    const debt = await Debt.create({
-      userId: req.user._id,
-      debtorName,
-      debtorPhone,
-      debtorEmail,
-      amount: Number(amount),
-      dueDate: new Date(dueDate),
-      note,
-      ...(reminderCadenceDays !== undefined
-        ? { reminderCadenceDays: Number(reminderCadenceDays) }
-        : {}),
+    const amountKobo = nairaToKobo(body.amount);
+    const invoiceNumber = await nextInvoiceNumber(req.user._id);
+    const debt = await scopedRepo(req.user._id).debts.create({
+      invoiceNumber,
+      debtorName: body.debtorName,
+      debtorPhone: body.debtorPhone,
+      debtorEmail: body.debtorEmail,
+      amount: koboToNaira(amountKobo),
+      amountKobo,
+      dueDate: new Date(body.dueDate),
+      note: body.note,
+      ...(has(body, "reminderCadenceDays") ? { reminderCadenceDays: Number(body.reminderCadenceDays) } : {}),
       history: [{ event: "created" }],
     });
 
@@ -91,43 +110,37 @@ async function create(req, res) {
   }
 }
 
+const SORTS = {
+  amount: (a, b) => b.amountKobo - a.amountKobo,
+  balance: (a, b) => b.balanceKobo - a.balanceKobo,
+  due: (a, b) => new Date(a.dueDate) - new Date(b.dueDate),
+  overdue: (a, b) => new Date(a.dueDate) - new Date(b.dueDate),
+  debtor: (a, b) => (a.debtorName || "").localeCompare(b.debtorName || ""),
+  status: (a, b) => (a.displayStatus || "").localeCompare(b.displayStatus || ""),
+};
+
 async function list(req, res) {
   try {
-    const filter = { userId: req.user._id };
+    const filter = {};
     const { status, sort, search, from, to } = req.query;
 
-    if (["pending", "partially_paid", "paid"].includes(status)) {
-      filter.status = status;
-    }
+    if (status) filter.status = status;
     const term = String(search || "").trim().slice(0, 100);
     if (term) {
       const rx = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
       filter.$or = [{ debtorName: rx }, { debtorPhone: rx }];
     }
     if (from || to) {
-      const fromDate = from ? new Date(String(from)) : null;
-      const toDate = to ? new Date(String(to)) : null;
-      if ((fromDate && Number.isNaN(fromDate.getTime())) || (toDate && Number.isNaN(toDate.getTime()))) {
-        return res.status(400).json({ error: "from and to must be valid dates" });
-      }
       filter.dueDate = {};
-      if (fromDate) filter.dueDate.$gte = fromDate;
-      if (toDate) filter.dueDate.$lte = toDate;
+      if (from) filter.dueDate.$gte = new Date(from);
+      if (to) filter.dueDate.$lte = new Date(to);
     }
 
-    const raw = await Debt.find(filter).sort({ createdAt: -1 });
+    const raw = await scopedRepo(req.user._id).debts.find(filter).sort({ createdAt: -1 });
     let debts = await attachTotals(req.user._id, raw);
 
-    const dir = 1;
-    const cmp = {
-      amount: (a, b) => b.amount - a.amount,
-      balance: (a, b) => b.balance - a.balance,
-      due: (a, b) => new Date(a.dueDate) - new Date(b.dueDate),
-      overdue: (a, b) => new Date(a.dueDate) - new Date(b.dueDate),
-      debtor: (a, b) => (a.debtorName || "").localeCompare(b.debtorName || ""),
-      status: (a, b) => (a.displayStatus || "").localeCompare(b.displayStatus || ""),
-    }[sort];
-    if (cmp) debts = debts.sort((a, b) => cmp(a, b) * dir);
+    const cmp = SORTS[sort];
+    if (cmp) debts = debts.sort(cmp);
 
     return res.json({ debts });
   } catch (err) {
@@ -138,52 +151,51 @@ async function list(req, res) {
 
 async function getOne(req, res) {
   try {
-    const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
+    const debt = await scopedRepo(req.user._id).debts.findById(req.params.id);
     if (!debt) return res.status(404).json({ error: "Debt not found" });
     const [withPaid] = await attachTotals(req.user._id, [debt]);
     return res.json({ debt: withPaid });
   } catch (err) {
-    if (err && err.name === "CastError") {
-      return res.status(404).json({ error: "Debt not found" });
-    }
     console.error("getOne debt error:", err.message);
     return res.status(500).json({ error: "Could not load that invoice just now." });
   }
 }
 
+const EDITABLE = ["debtorName", "debtorPhone", "debtorEmail", "amount", "dueDate", "note", "reminderCadenceDays"];
+
 async function update(req, res) {
   try {
-    const errors = validateDebtFields(req.body || {}, { partial: true });
+    const body = req.body;
+    const errors = validateDebtFields(body, { partial: true });
     if (errors.length) return res.status(400).json({ error: errors.join("; ") });
 
-    const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
+    const debt = await scopedRepo(req.user._id).debts.findById(req.params.id);
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
-    const editable = [
-      "debtorName",
-      "debtorPhone",
-      "debtorEmail",
-      "amount",
-      "dueDate",
-      "note",
-      "reminderCadenceDays",
-    ];
-    const amountBefore = Number(debt.amount) || 0;
-    for (const key of editable) {
-      if (req.body[key] === undefined) continue;
-      if (key === "amount") debt.amount = Number(req.body.amount);
-      else if (key === "dueDate") debt.dueDate = new Date(req.body.dueDate);
-      else if (key === "reminderCadenceDays")
-        debt.reminderCadenceDays = Number(req.body.reminderCadenceDays);
-      else debt[key] = req.body[key];
+    const amountKoboBefore = koboOf(debt);
+    for (const key of EDITABLE) {
+      if (body[key] === undefined) continue;
+      if (key === "amount") {
+        if (!has(body, "amount")) continue;
+        debt.amountKobo = nairaToKobo(body.amount);
+        debt.amount = koboToNaira(debt.amountKobo);
+      } else if (key === "dueDate") {
+        if (has(body, "dueDate")) debt.dueDate = new Date(body.dueDate);
+      } else if (key === "reminderCadenceDays") {
+        if (has(body, "reminderCadenceDays")) debt.reminderCadenceDays = Number(body.reminderCadenceDays);
+      } else if (key === "debtorName") {
+        if (has(body, "debtorName")) debt.debtorName = body.debtorName;
+      } else {
+        debt[key] = body[key];
+      }
     }
-    const amountChanged = Number(debt.amount) !== amountBefore;
+    const amountChanged = koboOf(debt) !== amountKoboBefore;
 
     if (amountChanged) {
-      const paid = await paidForDebt(debt._id);
-      if (Number(debt.amount) < paid) {
+      const paidKobo = await paidKoboForDebt(debt._id);
+      if (koboOf(debt) < paidKobo) {
         return res.status(400).json({
-          error: `The amount cannot be lower than the ${paid.toLocaleString("en-NG")} already recorded as paid on this invoice.`,
+          error: `The amount cannot be lower than the ${koboToNaira(paidKobo).toLocaleString("en-NG")} already recorded as paid on this invoice.`,
         });
       }
     }
@@ -206,23 +218,14 @@ async function update(req, res) {
 
 async function remove(req, res) {
   try {
-    const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
+    const repo = scopedRepo(req.user._id);
+    const debt = await repo.debts.findById(req.params.id);
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
-    const addressesHeld = await PaymentAddress.find({
-      debtId: debt._id,
-      userId: req.user._id,
-    }).lean();
+    const addressesHeld = await repo.paymentAddresses.find({ debtId: debt._id }).lean();
+    const holding = addressesHeld.filter((pa) => confirmedUnsweptUnits(pa) > 1n);
 
-    const holding = addressesHeld.filter((pa) => {
-      const seen = (pa.observed || [])
-        .filter((o) => o.status === "confirmed")
-        .reduce((sum, o) => sum + Number(o.value || 0) / 10 ** (pa.tokenDecimals || 6), 0);
-      const swept = (pa.sweeps || []).reduce((sum, x) => sum + (Number(x.amountUsdc) || 0), 0);
-      return seen - swept > 1 / 10 ** (pa.tokenDecimals || 6);
-    });
-
-    const force = String(req.query.force || "").toLowerCase() === "true";
+    const force = req.query.force === "true";
     if (holding.length && !force) {
       return res.status(409).json({
         error:
@@ -247,9 +250,9 @@ async function remove(req, res) {
       );
     }
 
-    await Reminder.deleteMany({ debtId: debt._id, userId: req.user._id });
-    await Payment.deleteMany({ debtId: debt._id, userId: req.user._id });
-    await PaymentAddress.deleteMany({ debtId: debt._id, userId: req.user._id });
+    await repo.reminders.deleteMany({ debtId: debt._id });
+    await repo.payments.deleteMany({ debtId: debt._id });
+    await repo.paymentAddresses.deleteMany({ debtId: debt._id });
     await debt.deleteOne();
 
     return res.json({ ok: true });
@@ -261,20 +264,21 @@ async function remove(req, res) {
 
 async function markPaid(req, res) {
   try {
-    const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
+    const repo = scopedRepo(req.user._id);
+    const debt = await repo.debts.findById(req.params.id);
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
-    const paidSoFar = await paidForDebt(debt._id);
-    const balance = (debt.amount || 0) - paidSoFar;
+    const paidSoFarKobo = await paidKoboForDebt(debt._id);
+    const balanceKobo = koboOf(debt) - paidSoFarKobo;
 
     let payment = null;
-    if (balance > 0) {
-      const key = `markpaid:${debt._id}:${Math.round(paidSoFar * 100)}`;
+    if (balanceKobo > 0) {
+      const key = `markpaid:${debt._id}:${paidSoFarKobo}`;
       try {
-        payment = await Payment.create({
+        payment = await repo.payments.create({
           debtId: debt._id,
-          userId: req.user._id,
-          amount: balance,
+          amount: koboToNaira(balanceKobo),
+          amountKobo: balanceKobo,
           method: "other",
           note: "Marked as fully paid",
           txHash: key,
@@ -298,7 +302,7 @@ async function markPaid(req, res) {
         debt,
         payment: forReceipt,
         method: "bank",
-        creditNgn: balance,
+        creditNgn: koboToNaira(balanceKobo),
         totalPaid,
         fullyPaid: true,
       }).catch((err) => ({ emailed: false, reason: err && err.message }));
@@ -321,14 +325,11 @@ async function markPaid(req, res) {
 
 async function listReminders(req, res) {
   try {
-    const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
+    const repo = scopedRepo(req.user._id);
+    const debt = await repo.debts.findById(req.params.id);
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
-    const reminders = await Reminder.find({
-      debtId: debt._id,
-      userId: req.user._id,
-    }).sort({ createdAt: -1 });
-
+    const reminders = await repo.reminders.find({ debtId: debt._id }).sort({ createdAt: -1 });
     return res.json({ reminders });
   } catch (err) {
     console.error("listReminders error:", err.message);
@@ -338,7 +339,7 @@ async function listReminders(req, res) {
 
 async function remind(req, res) {
   try {
-    const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
+    const debt = await scopedRepo(req.user._id).debts.findById(req.params.id);
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
     const result = await generateReminderForDebt(debt, req.user);
@@ -352,11 +353,10 @@ async function remind(req, res) {
 
 async function send(req, res) {
   try {
-    const debt = await Debt.findOne({ _id: req.params.id, userId: req.user._id });
+    const debt = await scopedRepo(req.user._id).debts.findById(req.params.id);
     if (!debt) return res.status(404).json({ error: "Debt not found" });
 
-    const requested = Array.isArray(req.body && req.body.channels) ? req.body.channels : [];
-    const channels = requested.filter((c) => ["whatsapp", "email"].includes(c));
+    const channels = [...new Set(req.body.channels || [])];
     if (channels.length === 0) {
       return res.status(400).json({ error: "channels must include 'whatsapp' and/or 'email'" });
     }
@@ -378,7 +378,39 @@ async function send(req, res) {
   }
 }
 
+async function invoicePdf(req, res) {
+  try {
+    const debt = await scopedRepo(req.user._id).debts.findById(req.params.id);
+    if (!debt) return res.status(404).json({ error: "Debt not found" });
+    await ensureInvoiceNumber(debt);
+    const token = await ensurePublicToken(debt);
+    const view = await invoiceView(debt, req.user);
+    const pdf = await buildInvoicePdf(view, { payUrl: payPageUrl(token) });
+    res.set("Content-Type", "application/pdf");
+    res.set("Content-Disposition", `attachment; filename="${invoiceFileName(view)}"`);
+    return res.send(pdf);
+  } catch (err) {
+    console.error("invoice pdf error:", err.message);
+    return res.status(500).json({ error: "The invoice PDF could not be made just now." });
+  }
+}
+
+async function share(req, res) {
+  try {
+    const debt = await scopedRepo(req.user._id).debts.findById(req.params.id);
+    if (!debt) return res.status(404).json({ error: "Debt not found" });
+    await ensureInvoiceNumber(debt);
+    const token = req.body.renew ? await rotatePublicToken(debt) : await ensurePublicToken(debt);
+    return res.json({ url: payPageUrl(token), invoiceNumber: debt.invoiceNumber, renewed: Boolean(req.body.renew) });
+  } catch (err) {
+    console.error("share invoice error:", err.message);
+    return res.status(500).json({ error: "The payment page link could not be made just now." });
+  }
+}
+
 module.exports = {
+  invoicePdf,
+  share,
   create,
   list,
   getOne,

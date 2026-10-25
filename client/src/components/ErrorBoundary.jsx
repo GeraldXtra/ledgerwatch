@@ -1,4 +1,5 @@
 import { Component } from "react";
+import { reportError } from "../api/reportError";
 
 export default class ErrorBoundary extends Component {
   constructor(props) {
@@ -12,6 +13,7 @@ export default class ErrorBoundary extends Component {
 
   componentDidCatch(error, info) {
     console.error("Unhandled UI error:", error, info);
+    reportError("render", error);
   }
 
   render() {

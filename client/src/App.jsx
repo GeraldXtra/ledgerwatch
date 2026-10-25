@@ -14,6 +14,12 @@ const SettingsPage = lazy(() => import("./pages/Settings"));
 const DocsPage = lazy(() => import("./pages/DocsPage"));
 const LegalPage = lazy(() => import("./pages/LegalPage"));
 const ContactPage = lazy(() => import("./pages/ContactPage"));
+const AboutPage = lazy(() => import("./pages/AboutPage"));
+const PricingPage = lazy(() => import("./pages/PricingPage"));
+const ArticlesPage = lazy(() => import("./pages/ArticlesPage"));
+const PayPage = lazy(() => import("./pages/PayPage"));
+const UnsubscribePage = lazy(() => import("./pages/UnsubscribePage"));
+const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 
 function Booting() {
   return (
@@ -169,6 +175,12 @@ export default function App() {
         <Route path="/privacy" element={<Public><LegalPage which="privacy" /></Public>} />
         <Route path="/terms" element={<Public><LegalPage which="terms" /></Public>} />
         <Route path="/contact" element={<Public><ContactPage /></Public>} />
+        <Route path="/about" element={<Public><AboutPage /></Public>} />
+        <Route path="/pricing" element={<Public><PricingPage /></Public>} />
+        <Route path="/articles" element={<Public><ArticlesPage /></Public>} />
+        <Route path="/articles/:slug" element={<Public><ArticlesPage /></Public>} />
+        <Route path="/pay/:token" element={<Public><PayPage /></Public>} />
+        <Route path="/unsubscribe/:token" element={<Public><UnsubscribePage /></Public>} />
         <Route
           path="/app"
           element={
@@ -184,7 +196,7 @@ export default function App() {
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/app/receivables" replace />} />
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Public><NotFoundPage /></Public>} />
       </Routes>
     </AuthProvider>
   );

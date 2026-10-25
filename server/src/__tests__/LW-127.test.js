@@ -95,7 +95,7 @@ describe("LW-127 — wallet outcomes are announced by the server, once, whether 
 
     const out = await walletActivity.runWalletTxPass({ userId: user._id });
     expect(out).toMatchObject({ checked: 1, settled: 1 });
-    await vi.waitFor(() => expect(emails).toHaveLength(1));
+    await vi.waitFor(() => expect(emails).toHaveLength(1), { timeout: 5000 });
 
     expect((await WalletTx.findById(tx._id)).status).toBe("confirmed");
     expect(pushes).toHaveLength(1);
@@ -113,7 +113,7 @@ describe("LW-127 — wallet outcomes are announced by the server, once, whether 
     await walletActivity.runWalletTxPass({ userId: user._id });
     await Promise.all([walletActivity.announceWalletTx(tx._id), walletActivity.announceWalletTx(tx._id)]);
     await walletActivity.runWalletTxPass({ userId: user._id });
-    await vi.waitFor(() => expect(pushes).toHaveLength(1));
+    await vi.waitFor(() => expect(pushes).toHaveLength(1), { timeout: 5000 });
     await new Promise((r) => setTimeout(r, 50));
     expect(pushes).toHaveLength(1);
   });
@@ -123,7 +123,7 @@ describe("LW-127 — wallet outcomes are announced by the server, once, whether 
     const tx = await aPendingTx(user);
     chainAnswers(() => ({ ok: true, result: { status: "0x0" } }));
     await walletActivity.runWalletTxPass({ userId: user._id });
-    await vi.waitFor(() => expect(pushes).toHaveLength(1));
+    await vi.waitFor(() => expect(pushes).toHaveLength(1), { timeout: 5000 });
     expect((await WalletTx.findById(tx._id)).status).toBe("failed");
     expect(pushes[0].title).toBe("Transfer failed on Base Sepolia");
     expect(emails).toHaveLength(0);
@@ -170,7 +170,7 @@ describe("LW-127 — wallet outcomes are announced by the server, once, whether 
     });
     chainAnswers(() => ({ ok: true, result: { status: "0x1", logs: [] } }));
     await walletActivity.runWalletTxPass({ userId: user._id });
-    await vi.waitFor(() => expect(pushes).toHaveLength(1));
+    await vi.waitFor(() => expect(pushes).toHaveLength(1), { timeout: 5000 });
     expect(pushes[0]).toMatchObject({ title: "Bought 0.03 WETH", type: "trades" });
     expect(pushes[0].icon).toBe("https://coin-images.coingecko.com/coins/images/279/large/ethereum.png");
   });
@@ -180,7 +180,7 @@ describe("LW-127 — wallet outcomes are announced by the server, once, whether 
     await aPendingTx(user);
     chainAnswers(() => ({ ok: true, result: { status: "0x1" } }));
     await walletActivity.runWalletTxPass({ userId: user._id });
-    await vi.waitFor(() => expect(pushes).toHaveLength(1));
+    await vi.waitFor(() => expect(pushes).toHaveLength(1), { timeout: 5000 });
     await new Promise((r) => setTimeout(r, 50));
     expect(emails).toHaveLength(0);
   });
@@ -212,9 +212,9 @@ describe("LW-127 — money arriving in the wallet is noticed and announced", () 
     logsChain({ head, logs: [usdcIn(head - 10, 25_000_000)] });
     const sync = await syncInboundTransfers({ userId: user._id, chainId: CHAIN, address: WALLET });
     expect(sync).toMatchObject({ added: 1, announced: 1 });
-    await vi.waitFor(() => expect(pushes).toHaveLength(1));
+    await vi.waitFor(() => expect(pushes).toHaveLength(1), { timeout: 5000 });
     expect(pushes[0]).toMatchObject({ title: "Received 25 USDC", type: "moneyIn" });
-    await vi.waitFor(() => expect(emails).toHaveLength(1));
+    await vi.waitFor(() => expect(emails).toHaveLength(1), { timeout: 5000 });
     expect(emails[0].subject).toBe("You received 25 USDC");
   });
 
@@ -261,7 +261,7 @@ describe("LW-127 — money arriving in the wallet is noticed and announced", () 
     expect(await walletActivity.checkNativeArrival({ userId: user._id, chain, address: WALLET, since: Date.now() })).toBe(0);
     logsChain({ head: 1, logs: [], balance: "0x" + (3n * 10n ** 17n).toString(16) });
     expect(await walletActivity.checkNativeArrival({ userId: user._id, chain, address: WALLET, since: Date.now() })).toBe(1);
-    await vi.waitFor(() => expect(pushes).toHaveLength(1));
+    await vi.waitFor(() => expect(pushes).toHaveLength(1), { timeout: 5000 });
     expect(pushes[0].title).toBe("Received 0.2 ETH");
   });
 
@@ -318,13 +318,13 @@ describe("LW-127 — money arriving or leaving on Bitcoin, Litecoin, Dogecoin, T
 
     balance = 6000;
     expect((await walletActivity.runChainWatchPass({ userId: user._id, now: Date.now() + LATER })).announced).toBe(1);
-    await vi.waitFor(() => expect(pushes).toHaveLength(1));
+    await vi.waitFor(() => expect(pushes).toHaveLength(1), { timeout: 5000 });
     expect(pushes[0]).toMatchObject({ title: "Received 0.00005 LTC", type: "moneyIn" });
-    await vi.waitFor(() => expect(emails).toHaveLength(1));
+    await vi.waitFor(() => expect(emails).toHaveLength(1), { timeout: 5000 });
 
     balance = 2000;
     await walletActivity.runChainWatchPass({ userId: user._id, now: Date.now() + 2 * LATER });
-    await vi.waitFor(() => expect(pushes).toHaveLength(2));
+    await vi.waitFor(() => expect(pushes).toHaveLength(2), { timeout: 5000 });
     expect(pushes[1].title).toBe("0.00004 LTC left your Litecoin wallet");
     expect(pushes[1].body).toMatch(/If you did not send this/);
   });

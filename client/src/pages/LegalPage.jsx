@@ -2,16 +2,19 @@ import { useEffect } from "react";
 import PublicShell from "../components/PublicShell";
 import { Blocks, slugify } from "../docs/Blocks";
 import { PRIVACY, TERMS } from "../docs/legal";
+import usePageMeta, { plainText } from "../components/usePageMeta";
 
 export default function LegalPage({ which }) {
   const doc = which === "terms" ? TERMS : PRIVACY;
 
+  usePageMeta({
+    title: `${doc.title} · LedgerWatch`,
+    description: plainText(doc.blocks.find((b) => b.type === "p")?.text),
+    path: which === "privacy" ? "/privacy" : "/terms",
+  });
+
   useEffect(() => {
-    document.title = `${doc.title} · LedgerWatch`;
     window.scrollTo(0, 0);
-    return () => {
-      document.title = "LedgerWatch: Automated receivables and market monitoring";
-    };
   }, [doc]);
 
   const headings = doc.blocks.filter((b) => b.type === "h2");

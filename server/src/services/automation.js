@@ -6,6 +6,7 @@ const {
   DAY_MS,
 } = require("./reminder.service");
 const { runPricePass } = require("./market.service");
+const { reportProblem } = require("./opsAlert.service");
 const { runPaymentWatchPass } = require("./paymentWatch.service");
 const { notifyUser, signActionToken } = require("./push.service");
 const { emailConfigured } = require("./notify.service");
@@ -21,6 +22,7 @@ const state = {
   lastDebtsChecked: null,
   lastAlertsCreated: null,
   lastWatchesChecked: null,
+  lastWatchesDeferred: null,
   lastAddressesChecked: null,
   lastPaymentsDetected: null,
   lastPaymentsSettled: null,
@@ -175,13 +177,15 @@ async function runAllPasses({ userId } = {}) {
       reminders = await doReminderPass({ userId });
     } catch (err) {
       console.error("Automation: reminder pass error:", err.message);
+      reportProblem({ area: "reminders", message: `The reminder pass failed: ${err.message}`, detail: err.stack, severity: "error" });
     }
 
-    let prices = { alertsCreated: 0, watchesChecked: 0 };
+    let prices = { alertsCreated: 0, watchesChecked: 0, watchesDeferred: 0 };
     try {
       prices = await runPricePass({ userId });
     } catch (err) {
       console.error("Automation: price pass error:", err.message);
+      reportProblem({ area: "price alerts", message: `The price pass failed: ${err.message}`, detail: err.stack, severity: "error" });
     }
 
     let payments = { addressesChecked: 0, detected: 0, confirmed: 0, settled: 0 };
@@ -189,6 +193,7 @@ async function runAllPasses({ userId } = {}) {
       payments = await runPaymentWatchPass({ userId });
     } catch (err) {
       console.error("Automation: payment watch pass error:", err.message);
+      reportProblem({ area: "payment watching", message: `The payment watch pass failed: ${err.message}`, detail: err.stack, severity: "critical" });
     }
 
     let walletTxs = { checked: 0, settled: 0 };
@@ -201,6 +206,7 @@ async function runAllPasses({ userId } = {}) {
       inbound.announced += chains.announced;
     } catch (err) {
       console.error("Automation: wallet activity pass error:", err.message);
+      reportProblem({ area: "wallet activity", message: `The wallet activity pass failed: ${err.message}`, detail: err.stack, severity: "error" });
     }
 
     state.lastRunAt = new Date();
@@ -208,6 +214,7 @@ async function runAllPasses({ userId } = {}) {
     state.lastDebtsChecked = reminders.debtsChecked;
     state.lastAlertsCreated = prices.alertsCreated;
     state.lastWatchesChecked = prices.watchesChecked;
+    state.lastWatchesDeferred = prices.watchesDeferred;
     state.lastPaymentsSettled = payments.settled;
     state.lastPaymentsDetected = payments.detected;
     state.lastAddressesChecked = payments.addressesChecked;
@@ -229,6 +236,7 @@ async function runAllPasses({ userId } = {}) {
       debtsChecked: reminders.debtsChecked,
       alertsCreated: prices.alertsCreated,
       watchesChecked: prices.watchesChecked,
+      watchesDeferred: prices.watchesDeferred,
       addressesChecked: payments.addressesChecked,
       paymentsDetected: payments.detected,
       paymentsConfirmed: payments.confirmed,
@@ -252,7 +260,8 @@ function startAutomation() {
       } else {
         console.log(
           `Automation: reminder pass — generated ${result.generated} (checked ${result.debtsChecked}); ` +
-            `price pass — alerts ${result.alertsCreated} (watches ${result.watchesChecked}); ` +
+            `price pass — alerts ${result.alertsCreated} (watches ${result.watchesChecked}` +
+            `${result.watchesDeferred ? `, ${result.watchesDeferred} deferred` : ""}); ` +
             `payment pass — addresses ${result.addressesChecked}, detected ${result.paymentsDetected}, ` +
             `confirmed ${result.paymentsConfirmed}, settled ${result.paymentsSettled}`
         );
@@ -278,6 +287,7 @@ function getStatus() {
     lastDebtsChecked: state.lastDebtsChecked,
     lastAlertsCreated: state.lastAlertsCreated,
     lastWatchesChecked: state.lastWatchesChecked,
+    lastWatchesDeferred: state.lastWatchesDeferred,
     lastAddressesChecked: state.lastAddressesChecked,
     lastPaymentsDetected: state.lastPaymentsDetected,
     lastPaymentsSettled: state.lastPaymentsSettled,

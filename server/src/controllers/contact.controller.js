@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
-const ContactMessage = require("../models/ContactMessage");
+const contactRepo = require("../repositories/contact");
+const accounts = require("../repositories/accounts");
 const { sendEmail, normalizeFrom } = require("../services/notify.service");
 const { verifyTurnstile } = require("../services/turnstile.service");
 
@@ -49,8 +50,7 @@ async function optionalUserId(req) {
     const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET, { algorithms: ["HS256"] });
     if (!payload || !payload.id) return null;
 
-    const User = require("../models/User");
-    const user = await User.findById(payload.id).select("tokenVersion").lean();
+    const user = await accounts.findById(payload.id).select("tokenVersion").lean();
     if (!user) return null;
     if ((Number(payload.v) || 0) !== (Number(user.tokenVersion) || 0)) return null;
     return payload.id;
@@ -125,7 +125,7 @@ async function submit(req, res) {
 }
 
 async function submitInner(req, res) {
-  const body = req.body || {};
+  const body = req.body;
 
   if (typeof body.extra === "string" && body.extra.trim()) {
     return res.json({ ok: true });
@@ -158,7 +158,7 @@ async function submitInner(req, res) {
   const human = await verifyTurnstile(body.turnstileToken, req.ip);
   if (!human.ok) return res.status(400).json({ error: human.error, turnstile: true });
 
-  const doc = await ContactMessage.create({
+  const doc = await contactRepo.create({
     userId: await optionalUserId(req),
     name,
     email,
@@ -171,7 +171,11 @@ async function submitInner(req, res) {
   const to = ownerAddress();
   if (to) {
     const notice = buildNotice(doc);
-    const sent = await sendEmail(to, notice.subject, notice.html, { text: notice.plain });
+    const sent = await sendEmail(to, notice.subject, notice.html, {
+      text: notice.plain,
+      category: "transactional",
+      replyTo: doc.email,
+    });
     doc.emailed = Boolean(sent && sent.ok);
     doc.emailError = doc.emailed ? "" : String((sent && (sent.error || sent.reason)) || "not sent");
   } else {

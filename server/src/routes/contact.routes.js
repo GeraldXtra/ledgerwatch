@@ -1,5 +1,7 @@
 const express = require("express");
 const { rateLimit } = require("../middleware/rateLimit");
+const { validate } = require("../middleware/validate");
+const schemas = require("../validation/misc.schemas");
 const { submit } = require("../controllers/contact.controller");
 
 const router = express.Router();
@@ -11,6 +13,6 @@ const contactLimit = rateLimit({
   message: "You have sent several messages in the last hour. Please wait a while before sending another.",
 });
 
-router.post("/", contactLimit, submit);
+router.post("/", contactLimit, validate(schemas.contact), submit);
 
 module.exports = router;

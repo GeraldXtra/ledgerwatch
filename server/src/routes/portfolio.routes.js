@@ -1,9 +1,12 @@
 const express = require("express");
 const requireAuth = require("../middleware/auth");
 const { priceData } = require("../middleware/rateLimit");
+const { validate } = require("../middleware/validate");
+const schemas = require("../validation/market.schemas");
 const { get } = require("../controllers/portfolio.controller");
 
 const router = express.Router();
-router.get("/", requireAuth, priceData("portfolio", 60), get);
+
+router.get("/", requireAuth, priceData("portfolio", 60), validate(schemas.portfolio), get);
 
 module.exports = router;

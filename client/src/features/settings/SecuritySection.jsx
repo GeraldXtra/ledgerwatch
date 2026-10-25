@@ -2,6 +2,8 @@ import { useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import http, { setToken } from "../../api/http";
 import { Button, Field, Input, useToast } from "../../components/ui";
+import TwoFactorCard from "./TwoFactorCard";
+import EmailChangeCard from "./EmailChangeCard";
 
 export default function SecuritySection() {
   const toast = useToast();
@@ -43,7 +45,7 @@ export default function SecuritySection() {
     <div className="stack">
       <div className="settings-head">
         <h2 className="section-title">Security</h2>
-        <p className="muted small">Change the password you use to sign in.</p>
+        <p className="muted small">Your sign in email, your password and two-step sign-in.</p>
       </div>
 
       <form className="stack" onSubmit={changePassword}>
@@ -84,6 +86,12 @@ export default function SecuritySection() {
           </Button>
         </div>
       </form>
+
+      <hr className="settings-rule" />
+      <TwoFactorCard />
+
+      <hr className="settings-rule" />
+      <EmailChangeCard />
 
       <p className="settings-note">
         <ShieldCheck size={15} />

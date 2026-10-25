@@ -1,3 +1,5 @@
+const { clientUrl } = require("./links");
+
 const FONT = "'Open Sans','Helvetica Neue',Helvetica,Arial,sans-serif";
 const MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
 const INK = "#16191F";
@@ -29,11 +31,7 @@ function safeHref(raw) {
 }
 
 function appUrl(path = "/app") {
-  const base = String(process.env.CLIENT_URL || "http://localhost:5173")
-    .split(",")[0]
-    .trim()
-    .replace(/\/+$/, "");
-  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  return clientUrl(path);
 }
 
 function brandHeader({ hasLogo, subtitle }) {
@@ -128,6 +126,8 @@ function renderActivityEmail({
   rows,
   cta,
   footnote,
+  unsubscribeUrl,
+  reason,
 }) {
   const t = TONES[tone] || TONES.info;
   const heroHtml = hero
@@ -153,8 +153,13 @@ function renderActivityEmail({
   const footerHtml = `<tr><td style="padding:22px 28px 24px">
       <div style="border-top:1px solid ${LINE};padding-top:16px;font:400 12px/1.6 ${FONT};color:${MUTED}">
         ${footnote ? `${esc(footnote)}<br>` : ""}
-        You receive these emails because activity notifications are on for your account.
-        Change them in Settings, Notifications, at <a href="${esc(appUrl("/app/settings?section=notifications"))}" style="color:${ACCENT_INK}">LedgerWatch</a>.
+        ${
+          reason
+            ? esc(reason)
+            : `You receive these emails because activity notifications are on for your account.
+        Change them in Settings, Notifications, at <a href="${esc(appUrl("/app/settings?section=notifications"))}" style="color:${ACCENT_INK}">LedgerWatch</a>.`
+        }
+        ${safeHref(unsubscribeUrl) ? `<br><a href="${esc(safeHref(unsubscribeUrl))}" style="color:${MUTED}">Stop these emails</a>` : ""}
       </div>
     </td></tr>`;
 
@@ -167,15 +172,17 @@ function renderActivityEmail({
   });
 }
 
-function activityText({ title, intro, rows, cta, footnote }) {
+function activityText({ title, intro, hero, rows, cta, footnote, unsubscribeUrl, reason }) {
   const lines = [title, ""];
   if (intro) lines.push(intro, "");
+  if (hero && hero.value != null) lines.push(`${hero.label}: ${hero.value}${hero.sub ? ` (${hero.sub})` : ""}`, "");
   for (const r of rows || []) {
     if (r && r.value != null && r.value !== "") lines.push(`${r.label}: ${r.value}`);
   }
   if (cta && cta.url) lines.push("", `${cta.label}: ${cta.url}`);
   if (footnote) lines.push("", footnote);
-  lines.push("", "Change these emails in Settings, Notifications.");
+  lines.push("", reason || "Change these emails in Settings, Notifications.");
+  if (unsubscribeUrl) lines.push(`Stop these emails: ${unsubscribeUrl}`);
   return lines.join("\n");
 }
 

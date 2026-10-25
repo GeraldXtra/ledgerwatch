@@ -3,7 +3,8 @@ const Debt = require("../models/Debt");
 const PaymentAddress = require("../models/PaymentAddress");
 const { getChain } = require("../config/chains");
 const { MAX_ADDRESSES_PER_HOUR, confirmationsFor } = require("../config/derivation");
-const { attachTotals, toleratedShortfallNgn, paidForDebt } = require("./receivables.service");
+const { attachTotals, toleratedShortfallKobo, paidKoboForDebt } = require("./receivables.service");
+const { koboOf, koboToNaira, nairaToKobo, koboToUsdCents } = require("../domain/money");
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -47,10 +48,13 @@ async function getNgnRate() {
   return { rate: fallback, fetchedAt: new Date(), stale: true };
 }
 
-function usdcForNgn(ngnAmount, ngnPerUsd) {
+function usdcForKobo(kobo, ngnPerUsd) {
   if (!(ngnPerUsd > 0)) throw httpError(500, "Invalid NGN/USD rate");
-  const raw = ngnAmount / ngnPerUsd;
-  return Math.ceil(raw * 100) / 100;
+  return koboToUsdCents(kobo, ngnPerUsd) / 100;
+}
+
+function usdcForNgn(ngnAmount, ngnPerUsd) {
+  return usdcForKobo(nairaToKobo(ngnAmount), ngnPerUsd);
 }
 
 function pickStablecoin(chain, symbol) {
@@ -86,7 +90,8 @@ async function quoteForInvoice({ userId, debtId, chainId, tokenSymbol }) {
   if (!debt) throw httpError(404, "Invoice not found");
 
   const [withTotals] = await attachTotals(userId, [debt]);
-  const balance = withTotals.balance != null ? withTotals.balance : debt.amount;
+  const balanceKobo = withTotals.balanceKobo;
+  const balance = koboToNaira(balanceKobo);
 
   const { rate, fetchedAt, stale } = await getNgnRate();
   const user = await User.findById(userId).select("crypto");
@@ -96,7 +101,7 @@ async function quoteForInvoice({ userId, debtId, chainId, tokenSymbol }) {
 
   return {
     balanceNgn: balance,
-    expectedUsdc: balance > 0 ? usdcForNgn(balance, rate) : 0,
+    expectedUsdc: balanceKobo > 0 ? usdcForKobo(balanceKobo, rate) : 0,
     ngnPerUsd: rate,
     rateTimestamp: fetchedAt,
     rateStale: stale,
@@ -130,8 +135,9 @@ async function issueAddress({ userId, debtId, chainId, address, derivationIndex,
   }
 
   const [withTotals] = await attachTotals(userId, [debt]);
-  const balance = withTotals.balance != null ? withTotals.balance : debt.amount;
-  if (balance <= 0) throw httpError(400, "This invoice has nothing outstanding.");
+  const balanceKobo = withTotals.balanceKobo;
+  const balance = koboToNaira(balanceKobo);
+  if (balanceKobo <= 0) throw httpError(400, "This invoice has nothing outstanding.");
 
   const { rate, fetchedAt, stale } = await getNgnRate();
 
@@ -171,14 +177,14 @@ async function issueAddress({ userId, debtId, chainId, address, derivationIndex,
       tokenContract: token.address,
       tokenDecimals: decimals,
       invoiceBalanceNgn: balance,
-      expectedUsdc: usdcForNgn(balance, rate),
+      expectedUsdc: usdcForKobo(balanceKobo, rate),
       ngnPerUsd: rate,
       rateTimestamp: fetchedAt,
       rateIsFallback: Boolean(stale),
 
       quote: {
         invoiceBalanceNgn: balance,
-        expectedUsdc: usdcForNgn(balance, rate),
+        expectedUsdc: usdcForKobo(balanceKobo, rate),
         ngnPerUsd: rate,
         rateTimestamp: fetchedAt,
         rateIsFallback: Boolean(stale),
@@ -227,17 +233,19 @@ async function resyncActivePaymentAddress(debtId) {
     const debt = await Debt.findById(debtId);
     if (!debt) return { updated: false };
 
-    const paid = await paidForDebt(pa.debtId);
-    const remainingNgn = Math.max(0, (debt.amount || 0) - paid);
+    const paidKobo = await paidKoboForDebt(pa.debtId);
+    const amountKobo = koboOf(debt);
+    const remainingKobo = Math.max(0, amountKobo - paidKobo);
+    const remainingNgn = koboToNaira(remainingKobo);
 
-    if (remainingNgn <= toleratedShortfallNgn(debt.amount) || remainingNgn <= 0) {
+    if (remainingKobo <= 0 || remainingKobo <= toleratedShortfallKobo(amountKobo)) {
       pa.expectedUsdc = 0;
       pa.status = "paid";
       await pa.save();
       return { updated: true, expectedUsdc: 0, remainingNgn: 0, closed: true };
     }
 
-    const expectedUsdc = usdcForNgn(remainingNgn, pa.ngnPerUsd);
+    const expectedUsdc = usdcForKobo(remainingKobo, pa.ngnPerUsd);
     if (expectedUsdc === pa.expectedUsdc) return { updated: false, expectedUsdc, remainingNgn };
 
     const quotedBefore = pa.quote ? pa.quote.expectedUsdc : undefined;
@@ -247,11 +255,12 @@ async function resyncActivePaymentAddress(debtId) {
     await pa.save();
 
     if (pa.quote && pa.quote.expectedUsdc !== quotedBefore) {
-      console.error(
-        `[paymentAddress] INVARIANT BROKEN on ${pa.address}: the issuance quote changed during a ` +
-          `resync (${quotedBefore} -> ${pa.quote.expectedUsdc}). ARCHITECTURE.md invariant 6 says ` +
-          "quote.* is immutable after issuance. This is LW-005 returning."
-      );
+      const line =
+        `INVARIANT BROKEN on ${pa.address}: the issuance quote changed during a ` +
+        `resync (${quotedBefore} -> ${pa.quote.expectedUsdc}). ARCHITECTURE.md invariant 6 says ` +
+        "quote.* is immutable after issuance. This is LW-005 returning.";
+      console.error(`[paymentAddress] ${line}`);
+      require("./opsAlert.service").reportProblem({ area: "payment addresses", message: line, severity: "critical" });
     }
     return { updated: true, expectedUsdc, remainingNgn, closed: false };
   } catch (err) {
@@ -265,6 +274,7 @@ module.exports = {
   issueAddress,
   getNgnRate,
   usdcForNgn,
+  usdcForKobo,
   quoteForInvoice,
   resyncActivePaymentAddress,
   pickStablecoin,

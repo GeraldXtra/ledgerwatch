@@ -4,7 +4,7 @@ const ul = (items) => ({ type: "ul", items });
 
 export const PRIVACY = {
   title: "Privacy policy",
-  meta: "Last updated 5 September 2026. Written by Eberechukwu Uchechukwu Gerald, who built and runs LedgerWatch.",
+  meta: "Last updated 25 October 2026. Written by Eberechukwu Uchechukwu Gerald, who built and runs LedgerWatch.",
   blocks: [
     p(
       "I built LedgerWatch on my own, and I run it on my own. So this is not a document a law firm wrote for me. It is me telling you, as plainly as I can, what the product knows about you, what it does with that, and what it will never do. If anything here is unclear, write to me through the Contact page and I will answer you myself."
@@ -27,6 +27,12 @@ export const PRIVACY = {
       "**Your payout details.** The account name, account number and bank name you type in Settings. They exist for one purpose, which is to appear inside the reminders you send, so your customers know where to pay you.",
       "**Your ledger.** The debts you record and everything about them: the customer's name, phone number and email address if you give one, the amount, the due date, notes, the payments recorded against it, and the reminders that were generated and where they were sent.",
       "**Your wallet's public side.** Your wallet's public address, the transactions you send from it, the tokens you add, the tokens that arrive at it, and the payment addresses issued for your invoices. All of this is public on the blockchain anyway. I keep it so the wallet can show you your own history.",
+      "**Your other networks.** The public addresses of your Bitcoin, Litecoin, Dogecoin, TRON, Solana and TON accounts, so that money arriving at them can be shown to you and announced. Like everything on a blockchain, they are public already.",
+      "**Profits.** When a sale makes a profit, a record of it: the coin, the amounts, the profit worked out, and whether you moved it to your profit account.",
+      "**Naira purchases and sales.** If you buy or sell crypto with naira, the state of each order that Transak reports back to me: the amounts, the currencies, the network, the wallet address and whether it completed. Your identity checks and your card or bank details stay with Transak and never reach me.",
+      "**Payment pages and email choices.** The private link for each invoice's payment page, and, if a customer of yours asks to stop receiving reminder emails, their email address on a list attached to your account, so no more are sent to them.",
+      "**Two step sign in.** If you turn it on, an encrypted copy of the secret your authenticator app uses, and your backup codes stored in a scrambled form I cannot read back.",
+      "**Problem reports.** When something breaks on the server or in your browser, a short description of the error, the page it happened on and the kind of browser is emailed to me so I can fix it. Anything that looks like a recovery phrase, a key or a session token is removed before it is sent.",
       "**Market Watch.** The coins you watch, the conditions you set, the alerts raised, your paper trades, and a record of each live swap you sign.",
       "**Notifications.** If you enable them, the subscription your browser gives me so I can reach that device. It includes the kind of browser it is.",
       "**Messages you send me.** Anything you write through the Contact page, with your name and email so I can reply. Each message is stored with two further facts about how it was sent: which page of the site you were on when you wrote it, and the identification string your browser sends, which names the browser, its version and the kind of device. They are there so a report about something not working can be reproduced. They are kept with the message for as long as the message is kept, and they are not used for anything else.",
@@ -64,7 +70,8 @@ export const PRIVACY = {
     ul([
       "**Hosting.** The application runs on Render and the website is served by Vercel. The database is hosted by MongoDB Atlas. Your data sits on their machines, encrypted in transit and at rest by them.",
       "**Prices and coin information** come from CoinGecko. It sees which coins are asked about, not who asked.",
-      "**Blockchain reads and writes** go through node providers such as Alchemy and public nodes, and through mempool.space for Bitcoin. They see the addresses and transactions involved, which are public by nature. They do not see your keys, because nothing does.",
+      "**Blockchain reads and writes** go through node providers such as Alchemy and public nodes, through mempool.space for Bitcoin, litecoinspace.org for Litecoin, BlockCypher and Blockchair for Dogecoin, TronGrid for TRON, Solana nodes, and Toncenter for TON. They see the addresses and transactions involved, which are public by nature. They do not see your keys, because nothing does.",
+      "**Buying and selling with naira**, if you use it, is done by Transak. Transak checks your identity and handles your bank or card payment under its own privacy policy, and tells me how your order went.",
       "**Sign in with Google**, if you use it. Google sees that you signed into LedgerWatch.",
       "**Cloudflare Turnstile** checks that the sign in, sign up and contact forms were used by a person. It is built to do that without tracking you.",
       "**Email** is sent through an email provider, which sees the message and the address it goes to.",
@@ -85,6 +92,9 @@ export const PRIVACY = {
     p(
       "When you record a debt, you are giving me information about someone else: their name, their number, sometimes their email. You are responsible for having a proper reason to hold it, which for an invoice you issued you almost certainly do. I use it only to keep your ledger and to send the reminders you tell me to send, and I do not contact your customers for any other reason. If a customer asks you what LedgerWatch holds about them, the customer statement on their profile is a complete answer, and you can delete their debts at any time."
     ),
+    p(
+      "Each invoice can have a payment page. Anyone who has its link can open it and see your business name, the customer's name, the amounts, the due date, the invoice's note and how to pay, but not the customer's phone number or email. Share the link only with that customer. You can replace it at any time, and the old link stops working at once. Every reminder email carries a link that lets the customer stop reminder emails from you, and replies to a reminder go to your own email address, not to me."
+    ),
 
     h2("Cookies and storage"),
     p(
@@ -94,15 +104,16 @@ export const PRIVACY = {
     h2("How long I keep it"),
     ul([
       "Your account and everything in it, for as long as the account exists.",
-      "**Clear all my data** in Settings deletes every debt, payment, reminder, watch, alert and trade at once and keeps only your login and profile.",
+      "**Clear all my data** in Settings deletes every debt, payment, reminder, watch, alert, trade, profit record, naira order and reminder email choice at once and keeps only your login and profile.",
       "**Delete my account** deletes everything, including the account itself, right away.",
       "Messages sent through the Contact page, until I have dealt with them and for a reasonable time after in case you write back.",
+      "Problem reports, in my mailbox only for as long as it takes to fix the problem.",
       "Backups of the database exist so that a failure does not lose everyone's ledger. Deleted data leaves those backups as they expire, which takes a few weeks.",
     ]),
 
     h2("Security"),
     p(
-      "Passwords are hashed. Traffic is encrypted. Sign in is protected by a human check and by limits on repeated attempts. The page refuses to run scripts from anywhere but its own address, so a stray script cannot read the sign in form. Changing your password signs out every other device. Sessions expire after seven days."
+      "Passwords are hashed. Traffic is encrypted. Sign in is protected by a human check and by limits on repeated attempts. The page refuses to run scripts from anywhere but its own address, so a stray script cannot read the sign in form. Changing your password signs out every other device. Sessions expire after seven days. You can also turn on two step sign in, so that signing in needs a code from an app on your phone as well as your password, and changing your sign in email needs a code sent to the new address."
     ),
     p(
       "What I cannot promise is that nothing will ever go wrong. No one honestly can. What I can promise is that the thing that matters most, your wallet's keys, is not on my server to be stolen in the first place, and that if I ever learn of a breach affecting your data I will tell you as soon as I know."
@@ -134,7 +145,7 @@ export const PRIVACY = {
 
 export const TERMS = {
   title: "Terms and conditions",
-  meta: "Last updated 5 September 2026. Written by Eberechukwu Uchechukwu Gerald, who built and runs LedgerWatch.",
+  meta: "Last updated 25 October 2026. Written by Eberechukwu Uchechukwu Gerald, who built and runs LedgerWatch.",
   blocks: [
     p(
       "These are the terms between you and me for using LedgerWatch. I have written them myself, in ordinary language, because I want you to actually read them. They matter more than most terms do, because this product can move real money, and some of what it does cannot be undone by anyone."
@@ -142,10 +153,10 @@ export const TERMS = {
 
     h2("Who I am and what this is"),
     p(
-      "LedgerWatch is made and run by me, Eberechukwu Uchechukwu Gerald, from Nigeria, at useledgerwatch.co. It is a tool for a business that sells on credit: it records what you are owed, reminds your customers, settles invoices paid in stablecoin, watches coin prices for you, and gives you a wallet that lives in your own browser."
+      "LedgerWatch is made and run by me, Eberechukwu Uchechukwu Gerald, from Nigeria, at useledgerwatch.co. It is a tool for a business that sells on credit: it records what you are owed, reminds your customers, gives each invoice a payment page, settles invoices paid in stablecoin, watches coin prices for you, and gives you a wallet that lives in your own browser."
     ),
     p(
-      "It is a tool, not a bank. I do not hold your money, I do not hold your keys, I am not an exchange, a broker, a custodian or a financial adviser, and I am not licensed as any of those. Please keep that in mind throughout."
+      "It is a tool, not a bank. I do not hold your money, I do not hold your keys, I am not an exchange, a broker, a custodian or a financial adviser, and I am not licensed as any of those. Please keep that in mind throughout. Nothing in LedgerWatch is investment, financial, tax or legal advice."
     ),
 
     h2("Agreeing to these terms"),
@@ -159,6 +170,7 @@ export const TERMS = {
       "Keep your password to yourself and choose a good one. Everything done from your account is treated as done by you.",
       "One person, one account. Do not share an account or sign in as somebody else.",
       "Tell me quickly if you think somebody else has your password. Changing it signs every other device out.",
+      "Turn on two step sign in if you can. If you do, keep your backup codes somewhere safe: without your phone and without them, I can only help you back in after checking that the account is yours, which takes time.",
     ]),
 
     h2("Your wallet is yours, and so is the risk"),
@@ -167,6 +179,7 @@ export const TERMS = {
       "The wallet's keys are created in your browser, encrypted with a password you choose, and kept on your device. I never receive them. That is the design, and it is what makes it impossible for me, or anyone who breaks into my server, to take your funds.",
       "The same design means I cannot recover your funds if you lose your recovery phrase and your device, cannot reset a wallet password, cannot reverse a transaction, and cannot freeze or move anything. Nobody can. Please write your recovery phrase down before you deposit anything.",
       "A transaction sent to the wrong address, with the wrong token, or on the wrong network is permanent. The product warns you at every step, names the network on every screen, and refuses the mistakes it can recognise, but it cannot catch all of them. Checking the address and the network before you sign is your job.",
+      "One recovery phrase holds your accounts on every network the wallet supports, including Bitcoin, Litecoin, Dogecoin, TRON, Solana and TON. Each network has its own addresses and its own tokens. Sending a token on the wrong network is permanent.",
       "Test networks exist so you can practise with worthless coins. Real networks use real money. The product tells you which you are on. If you choose to use a real network, the consequences are yours.",
       "Every transaction pays a network fee that goes to the network, not to me, and is not refundable, including for a transaction that fails.",
     ]),
@@ -178,6 +191,14 @@ export const TERMS = {
       "Prices come from a third party and can be delayed or wrong. Alerts are raised from those prices. The agent's suggestion to buy, sell or hold is a rule applied to your own condition. It is not advice, it knows nothing about your circumstances, and it can be wrong. You decide, every time.",
       "The spending caps in the product exist to catch a mistyped amount. They are not a promise, they can be changed, and they do not protect you from a bad decision or a bad market.",
       "Coin prices can fall to nothing. Never trade with money you cannot afford to lose. Any loss from a trade you signed is yours.",
+      "When a sale makes a profit, the profit agent works it out against what you paid for the coin. In paper trading it moves the profit to a separate balance. In live trading it only offers: each move to your profit account, which is a second account from your own recovery phrase, waits for you to confirm it and pays a network fee like any other transaction. A sale with no recorded purchase has no profit figure, and the agent does not invent one.",
+    ]),
+
+    h2("Buying and selling with naira"),
+    ul([
+      "Buying or selling crypto with naira is done by Transak, a separate company. You deal with Transak directly: it checks your identity, takes your payment or pays your bank, sets its own prices and fees, and may refuse, hold or reverse an order under its own terms.",
+      "LedgerWatch only opens Transak's page with your wallet address filled in, and shows you what Transak reports about your order. I never hold your naira or your crypto, and I cannot change, speed up or reverse an order.",
+      "Questions and complaints about an order go to Transak. I will help you find what you need to ask them.",
     ]),
 
     h2("Crypto payments on invoices"),
@@ -194,6 +215,8 @@ export const TERMS = {
       "Check your payout details. If a customer pays into the wrong account because the details you saved were wrong, that is not something I can fix.",
       "Delivery over WhatsApp and email depends on WhatsApp, on email providers and on the customer's own settings. A message can be delayed, land in spam or fail, and the product tells you what it knows.",
       "When the writing assistant is on, the wording is produced by a language model. Read a reminder before you send it.",
+      "Each invoice's payment page shows your payment details to anyone who has its link. Share it only with the customer it is for, and replace it if it reaches the wrong person.",
+      "A customer can ask to stop receiving reminder emails from you, and from then on none are sent to them from your account. Respect that choice, and do not try to get round it.",
     ]),
 
     h2("What you agree not to do"),
@@ -218,7 +241,7 @@ export const TERMS = {
 
     h2("Other people's services"),
     p(
-      "The product relies on CoinGecko, blockchain node providers, mempool.space, Uniswap, Google, Cloudflare, an email provider, and the WhatsApp providers you may configure. Each has its own terms and its own reliability. When one of them fails, the product says so where it can, but I cannot control them and I am not responsible for what they do."
+      "The product relies on CoinGecko, blockchain node providers, mempool.space and the other network data services named in the privacy policy, Uniswap, Transak, Google, Cloudflare, an email provider, and the WhatsApp providers you may configure. Each has its own terms and its own reliability. When one of them fails, the product says so where it can, but I cannot control them and I am not responsible for what they do."
     ),
 
     h2("Your data"),

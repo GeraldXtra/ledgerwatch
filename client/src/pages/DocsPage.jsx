@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, List } from "lucide-react";
 import PublicShell from "../components/PublicShell";
 import { Blocks, slugify } from "../docs/Blocks";
 import { GUIDE, GROUPS } from "../docs/guide";
+import usePageMeta, { plainText } from "../components/usePageMeta";
 
 export default function DocsPage() {
   const { slug } = useParams();
@@ -13,6 +14,12 @@ export default function DocsPage() {
   const index = GUIDE.findIndex((p) => p.slug === wanted);
   const page = index >= 0 ? GUIDE[index] : null;
   const [contentsOpen, setContentsOpen] = useState(false);
+
+  usePageMeta({
+    title: page ? `${page.title} · LedgerWatch guide` : undefined,
+    description: page ? plainText(page.intro) : undefined,
+    path: page ? (index === 0 ? "/docs" : `/docs/${page.slug}`) : undefined,
+  });
 
   useEffect(() => {
     setContentsOpen(false);
@@ -25,13 +32,10 @@ export default function DocsPage() {
 
   useEffect(() => {
     if (!page) return;
-    document.title = `${page.title} · LedgerWatch guide`;
     const target = hash ? document.getElementById(hash.slice(1)) : null;
     if (!target) {
       window.scrollTo(0, 0);
-      return () => {
-        document.title = "LedgerWatch: Automated receivables and market monitoring";
-      };
+      return undefined;
     }
     let cancelled = false;
     const stop = () => {
@@ -50,7 +54,6 @@ export default function DocsPage() {
       window.removeEventListener("wheel", stop);
       window.removeEventListener("touchstart", stop);
       window.removeEventListener("keydown", stop);
-      document.title = "LedgerWatch: Automated receivables and market monitoring";
     };
   }, [page, hash]);
 

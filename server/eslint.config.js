@@ -18,6 +18,22 @@ module.exports = [
     },
   },
   {
+    files: ["src/controllers/**/*.js"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.name='require'][arguments.0.value=/\\/models\\//]",
+          message: "Controllers reach the database through src/repositories, which scope every query to the signed-in account (P2-5).",
+        },
+        {
+          selector: "ImportDeclaration[source.value=/\\/models\\//]",
+          message: "Controllers reach the database through src/repositories, which scope every query to the signed-in account (P2-5).",
+        },
+      ],
+    },
+  },
+  {
     files: ["src/__tests__/**/*.js", "**/*.test.js"],
     languageOptions: { globals: { ...globals.node, ...globals.vitest } },
   },

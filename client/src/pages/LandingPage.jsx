@@ -12,6 +12,7 @@ import {
   Wallet,
 } from "lucide-react";
 import LogoMark from "../components/LogoMark";
+import usePageMeta from "../components/usePageMeta";
 
 const ROWS = [
   { who: "Dangote Cement", amount: "85,000", state: "Overdue 6 days", tone: "overdue" },
@@ -47,6 +48,12 @@ function LedgerPanel() {
 
 export default function LandingPage() {
   const [menuOpen, setMenuOpen] = useState(false);
+  usePageMeta({
+    title: "LedgerWatch: Automated receivables and market monitoring",
+    description:
+      "LedgerWatch chases the money you are owed and watches the markets you cannot, so nothing slips while you run your business.",
+    path: "/",
+  });
 
   return (
     <div className="site">
@@ -65,6 +72,12 @@ export default function LandingPage() {
               </a>
               <Link className="site-nav-link hide-sm" to="/docs">
                 Guide
+              </Link>
+              <Link className="site-nav-link hide-sm" to="/articles">
+                Articles
+              </Link>
+              <Link className="site-nav-link hide-sm" to="/pricing">
+                Pricing
               </Link>
               <Link className="site-nav-link hide-sm" to="/contact">
                 Contact
@@ -121,7 +134,7 @@ export default function LandingPage() {
             <div className="site-section-head">
               <h2>What is inside</h2>
               <p>
-                Four sections, each doing one job. Use the ones you need and ignore the rest.
+                Six parts, each doing one job. Use the ones you need and ignore the rest.
               </p>
             </div>
             <div className="site-grid">
@@ -133,7 +146,8 @@ export default function LandingPage() {
                 <p>
                   Record what you sold on credit, take part payments as they arrive, and let the
                   reminders go out on a schedule you set, over WhatsApp or email, with your bank
-                  details already in them.
+                  details already in them. Every invoice gets a number, a PDF and a payment page
+                  your customer can open from the reminder.
                 </p>
                 <Link to="/docs/receivables" className="site-feature-link">
                   How receivables work
@@ -159,7 +173,9 @@ export default function LandingPage() {
                 <h3>Market Watch</h3>
                 <p>
                   Watch coin prices against conditions you set. When one is met you get an alert
-                  with an explanation, and you decide whether to buy, sell or ignore it.
+                  with an explanation, and you decide whether to buy, sell or ignore it. Practise
+                  with paper money, or trade live and buy or sell with naira. When a sale makes a
+                  profit, the agent offers to set it aside for you.
                 </p>
                 <Link to="/docs/market-watch" className="site-feature-link">
                   How Market Watch works
@@ -171,9 +187,9 @@ export default function LandingPage() {
                 </span>
                 <h3>Wallet</h3>
                 <p>
-                  A wallet for Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Chain, Avalanche
-                  and Bitcoin, created and encrypted in your browser and unlocked only by your
-                  password.
+                  One recovery phrase for Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Chain,
+                  Avalanche, Bitcoin, Litecoin, Dogecoin, TRON, Solana and TON, created and
+                  encrypted in your browser and unlocked only by your password.
                 </p>
                 <Link to="/docs/wallet" className="site-feature-link">
                   How the wallet works
@@ -185,8 +201,9 @@ export default function LandingPage() {
                 </span>
                 <h3>Notifications</h3>
                 <p>
-                  Reminders ready to send, payments received and price alerts reach you as push
-                  notifications on your phone or computer, with the action one tap away.
+                  Payments received, money arriving in your wallet, trades, profits and price
+                  alerts reach every phone and computer you sign in on, with the action one tap
+                  away, and an email when money moves.
                 </p>
                 <Link to="/docs/settings" className="site-feature-link">
                   Setting up notifications
@@ -198,8 +215,9 @@ export default function LandingPage() {
                 </span>
                 <h3>Security</h3>
                 <p>
-                  Email verification, sign in with Google, password reset by emailed code, and a
-                  wallet the server can never spend from. Every transaction needs your password.
+                  Two-step sign-in with an authenticator app, sign in with Google, password reset
+                  by emailed code, and a wallet the server can never spend from. Every transaction
+                  needs your password.
                 </p>
                 <Link to="/docs/safety" className="site-feature-link">
                   Keeping your money safe
@@ -265,7 +283,10 @@ export default function LandingPage() {
       <footer className="site-wrap site-foot">
         <span>LedgerWatch, by Eberechukwu Uchechukwu Gerald. All rights reserved.</span>
         <span className="site-nav-links" style={{ margin: 0 }}>
+          <Link to="/about">About</Link>
+          <Link to="/pricing">Pricing</Link>
           <Link to="/docs">Guide</Link>
+          <Link to="/articles">Articles</Link>
           <Link to="/docs/safety">Safety</Link>
           <Link to="/privacy">Privacy</Link>
           <Link to="/terms">Terms</Link>

@@ -15,7 +15,7 @@ const seqno = async (req, res) => reply(res, await ton.getSeqno(req.query.addres
 const history = async (req, res) => reply(res, await ton.getHistory(req.query.address, req.query.network), "history");
 
 async function send(req, res) {
-  const { boc, network } = req.body || {};
+  const { boc, network } = req.body;
   if (network === "mainnet" && String(process.env.ENABLE_MAINNET).toLowerCase() !== "true") {
     return res.status(403).json({ error: "TON mainnet is switched off on this server.", kind: "invalid" });
   }

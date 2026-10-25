@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const axios = require("axios");
+const { serverBase, clientBase } = require("../utils/links");
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -12,20 +13,6 @@ function googleConfigured() {
     String(process.env.GOOGLE_CLIENT_ID || "").trim() &&
       String(process.env.GOOGLE_CLIENT_SECRET || "").trim()
   );
-}
-
-function serverBase() {
-  return String(process.env.SERVER_URL || "")
-    .trim()
-    .replace(/\/+$/, "");
-}
-
-function clientBase() {
-  const first = String(process.env.CLIENT_URL || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)[0];
-  return (first || "http://localhost:5173").replace(/\/+$/, "");
 }
 
 function redirectUri() {

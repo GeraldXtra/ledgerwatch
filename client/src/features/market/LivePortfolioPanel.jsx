@@ -30,7 +30,9 @@ export default function LivePortfolioPanel({
   const [loadError, setLoadError] = useState(null);
   const [txError, setTxError] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const [qr, setQr] = useState("");
+  const [qrFailed, setQrFailed] = useState(false);
 
   const load = useCallback(async () => {
     if (!chain || !address) return;
@@ -90,9 +92,10 @@ export default function LivePortfolioPanel({
   useEffect(() => {
     let active = true;
     if (!address) return;
+    setQrFailed(false);
     QRCode.toDataURL(address, { width: 180, margin: 1, color: { dark: "#0A1428", light: "#FFFFFF" } })
       .then((u) => active && setQr(u))
-      .catch(() => {});
+      .catch(() => active && setQrFailed(true));
     return () => {
       active = false;
     };
@@ -101,9 +104,11 @@ export default function LivePortfolioPanel({
   async function copyAddress() {
     try {
       await navigator.clipboard.writeText(address);
+      setCopyFailed(false);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
+      setCopyFailed(true);
     }
   }
 
@@ -265,6 +270,7 @@ export default function LivePortfolioPanel({
 
           <div className="live-deposit">
             {qr && <img src={qr} alt="Wallet address QR code" className="live-qr" />}
+            {!qr && qrFailed && <p className="error-text">The QR code could not be drawn. Copy the address instead.</p>}
             <div className="grow">
               <span className="overline">Your address on {chain.name}</span>
               <code className="wallet-address">{address}</code>
@@ -272,6 +278,7 @@ export default function LivePortfolioPanel({
                 {copied ? <Check size={14} /> : <Copy size={14} />}
                 {copied ? "Copied" : "Copy address"}
               </Button>
+              {copyFailed && <p className="error-text">Your browser blocked copying. Select the address and copy it by hand.</p>}
             </div>
           </div>
         </div>

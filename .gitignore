@@ -41,3 +41,6 @@ _audit_*.js
 /docs/
 /[c]laude-project/
 /design-handoff/
+
+# Phone screenshots shared for debugging; local only.
+/screenshots/

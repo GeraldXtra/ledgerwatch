@@ -1,11 +1,11 @@
-const Watch = require("../models/Watch");
+const { scopedRepo } = require("../repositories/scoped");
 const { createWatch, updateWatchCondition } = require("../services/market.service");
 const { requestedMode } = require("../utils/tradingMode");
 const { assertCanTradeLive } = require("./trading.controller");
 
 async function create(req, res) {
   try {
-    const { symbol, type, value, coinId } = req.body || {};
+    const { symbol, type, value, coinId } = req.body;
     if ((!symbol && !coinId) || !type || value === undefined) {
       return res
         .status(400)
@@ -24,7 +24,7 @@ async function create(req, res) {
 
 async function update(req, res) {
   try {
-    const { type, value } = req.body || {};
+    const { type, value } = req.body;
     const watch = await updateWatchCondition(req.user._id, req.params.id, {
       type,
       value,
@@ -40,7 +40,7 @@ async function update(req, res) {
 async function list(req, res) {
   try {
     const mode = requestedMode(req);
-    const watches = await Watch.find({ userId: req.user._id, mode }).sort({ createdAt: -1 });
+    const watches = await scopedRepo(req.user._id).watches.find({ mode }).sort({ createdAt: -1 });
     return res.json({ watches, mode });
   } catch (err) {
     console.error("list watches error:", err.message);
@@ -50,7 +50,7 @@ async function list(req, res) {
 
 async function remove(req, res) {
   try {
-    const watch = await Watch.findOne({ _id: req.params.id, userId: req.user._id });
+    const watch = await scopedRepo(req.user._id).watches.findById(req.params.id);
     if (!watch) return res.status(404).json({ error: "Watch not found" });
     await watch.deleteOne();
     return res.json({ ok: true });

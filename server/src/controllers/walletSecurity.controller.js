@@ -1,5 +1,5 @@
 const bcrypt = require("bcryptjs");
-const User = require("../models/User");
+const { scopedRepo } = require("../repositories/scoped");
 
 const MAX_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;
@@ -20,7 +20,7 @@ function normalizeAnswer(a) {
 
 async function get(req, res) {
   try {
-    const user = await User.findById(req.user._id).select("walletSecurity").lean();
+    const user = await scopedRepo(req.user._id).self.get("walletSecurity").lean();
     const sec = (user && user.walletSecurity) || {};
     return res.json({
       enabled: Boolean(sec.enabled),
@@ -58,16 +58,14 @@ async function announceChange(userId, event) {
 
 async function set(req, res) {
   try {
-    const { enabled, answers } = req.body || {};
+    const { enabled, answers } = req.body;
+    const self = scopedRepo(req.user._id).self;
 
-    const before = await User.findById(req.user._id).select("walletSecurity.enabled").lean();
+    const before = await self.get("walletSecurity.enabled").lean();
     const wasEnabled = Boolean(before && before.walletSecurity && before.walletSecurity.enabled);
 
     if (!enabled) {
-      await User.updateOne(
-        { _id: req.user._id },
-        { $set: { "walletSecurity.enabled": false, "walletSecurity.questions": [] } }
-      );
+      await self.updateOne({ $set: { "walletSecurity.enabled": false, "walletSecurity.questions": [] } });
       if (wasEnabled) await announceChange(req.user._id, "disabled");
       return res.json({ enabled: false, questions: [] });
     }
@@ -96,8 +94,7 @@ async function set(req, res) {
       });
     }
 
-    await User.updateOne(
-      { _id: req.user._id },
+    await self.updateOne(
       {
         $set: {
           "walletSecurity.enabled": true,
@@ -117,7 +114,8 @@ async function set(req, res) {
 
 async function verify(req, res) {
   try {
-    const user = await User.findById(req.user._id).select("walletSecurity");
+    const self = scopedRepo(req.user._id).self;
+    const user = await self.get("walletSecurity");
     const sec = (user && user.walletSecurity) || {};
 
     if (!sec.enabled || !(sec.questions || []).length) {
@@ -132,9 +130,7 @@ async function verify(req, res) {
       });
     }
 
-    const supplied = Array.isArray(req.body && req.body.answers)
-      ? req.body.answers.slice(0, MAX_QUESTIONS)
-      : [];
+    const supplied = Array.isArray(req.body.answers) ? req.body.answers.slice(0, MAX_QUESTIONS) : [];
 
     let allMatch = supplied.length === sec.questions.length;
     for (const q of sec.questions) {
@@ -146,8 +142,7 @@ async function verify(req, res) {
     if (!allMatch) {
       const failed = (sec.failedAttempts || 0) + 1;
       const locked = failed >= MAX_ATTEMPTS;
-      await User.updateOne(
-        { _id: req.user._id },
+      await self.updateOne(
         {
           $set: {
             "walletSecurity.failedAttempts": locked ? 0 : failed,
@@ -167,10 +162,7 @@ async function verify(req, res) {
       });
     }
 
-    await User.updateOne(
-      { _id: req.user._id },
-      { $set: { "walletSecurity.failedAttempts": 0, "walletSecurity.lockedUntil": null } }
-    );
+    await self.updateOne({ $set: { "walletSecurity.failedAttempts": 0, "walletSecurity.lockedUntil": null } });
     return res.json({ verified: true });
   } catch (err) {
     console.error("wallet security verify error:", err.message);

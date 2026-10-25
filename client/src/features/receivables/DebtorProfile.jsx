@@ -60,6 +60,8 @@ export default function DebtorProfile({ debtorKey, onClose }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [statement, setStatement] = useState(null);
+  const [statementError, setStatementError] = useState("");
+  const [statementBusy, setStatementBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -73,10 +75,15 @@ export default function DebtorProfile({ debtorKey, onClose }) {
   }, [debtorKey]);
 
   async function openStatement() {
+    setStatementBusy(true);
+    setStatementError("");
     try {
       const { data } = await http.get(`/api/debtors/${encodeURIComponent(debtorKey)}/statement`);
       setStatement(data.statement);
-    } catch {
+    } catch (err) {
+      setStatementError(err?.response?.data?.error || "The statement could not be prepared just now. Try again in a moment.");
+    } finally {
+      setStatementBusy(false);
     }
   }
 
@@ -131,11 +138,12 @@ export default function DebtorProfile({ debtorKey, onClose }) {
           <Card
             title="Payment behaviour"
             action={
-              <Button size="sm" onClick={openStatement}>
+              <Button size="sm" onClick={openStatement} disabled={statementBusy}>
                 <FileText size={14} /> Statement
               </Button>
             }
           >
+            {statementError && <p className="error-text">{statementError}</p>}
             <BehaviourChart timeline={data.timeline} />
           </Card>
 

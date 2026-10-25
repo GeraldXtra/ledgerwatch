@@ -1,5 +1,7 @@
 User-agent: *
 Allow: /
 Disallow: /app/
+Disallow: /pay/
+Disallow: /unsubscribe/
 
 Sitemap: https://www.useledgerwatch.co/sitemap.xml

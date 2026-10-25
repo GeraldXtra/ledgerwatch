@@ -3,6 +3,7 @@ require("dotenv").config();
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const connectDB = require("../config/db");
+const { nairaToKobo } = require("../domain/money");
 
 const User = require("../models/User");
 const Debt = require("../models/Debt");
@@ -193,6 +194,7 @@ async function main() {
       debtorPhone: d.debtorPhone,
       debtorEmail: debtorEmails[d.debtorName] || undefined,
       amount: d.amount,
+      amountKobo: nairaToKobo(d.amount),
       currency: "NGN",
       dueDate: rel(d.dueDays),
       note: d.note,
@@ -207,6 +209,7 @@ async function main() {
         debtId: debt._id,
         userId,
         amount: p.amount,
+        amountKobo: nairaToKobo(p.amount),
         method: p.method || "transfer",
         paidAt: rel(p.days),
         createdAt: rel(p.days),

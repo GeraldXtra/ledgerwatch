@@ -1,5 +1,5 @@
-const PaymentAddress = require("../models/PaymentAddress");
-const Debt = require("../models/Debt");
+const { scopedRepo } = require("../repositories/scoped");
+const { decimalToUnits, unitsToNumber } = require("../domain/money");
 const { getChain, listChains } = require("../config/chains");
 const {
   confirmationsFor,
@@ -12,7 +12,7 @@ const {
   quoteForInvoice,
   stablecoinsFor,
 } = require("../services/paymentAddress.service");
-const { tokenBalance, TOLERANCE } = require("../services/paymentWatch.service");
+const { tokenBalanceUnits, confirmedUnsweptUnits, TOLERANCE } = require("../services/paymentWatch.service");
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const HASH_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -20,8 +20,7 @@ const OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
 
 function readDebtId(value) {
   if (value === undefined || value === null || value === "") return null;
-  if (typeof value !== "string") return false;
-  return OBJECT_ID_RE.test(value) ? value : false;
+  return OBJECT_ID_RE.test(String(value)) ? String(value) : false;
 }
 
 async function quote(req, res) {
@@ -50,7 +49,7 @@ async function allocate(req, res) {
   try {
     requireCryptoEnabled(req.user);
 
-    const chainId = Number(req.body && req.body.chainId);
+    const chainId = Number(req.body.chainId);
     const chain = getChain(chainId);
     if (!chain) return res.status(400).json({ error: "Unknown or disabled chain" });
 
@@ -84,7 +83,7 @@ async function allocate(req, res) {
 async function create(req, res) {
   try {
     requireCryptoEnabled(req.user);
-    const { debtId, chainId, address, derivationIndex, tokenSymbol } = req.body || {};
+    const { debtId, chainId, address, derivationIndex, tokenSymbol } = req.body;
     if (!ADDRESS_RE.test(address || "")) {
       return res.status(400).json({ error: "Invalid address" });
     }
@@ -121,33 +120,25 @@ async function create(req, res) {
   }
 }
 
-function unsweptAt(pa) {
-  const decimals = pa.tokenDecimals || 6;
-  const seen = (pa.observed || [])
-    .filter((o) => o.status === "confirmed")
-    .reduce((sum, o) => sum + Number(o.value || 0) / 10 ** decimals, 0);
-  const swept = (pa.sweeps || []).reduce((sum, s) => sum + (Number(s.amountUsdc) || 0), 0);
-  return seen - swept > 1 / 10 ** decimals ? seen - swept : 0;
-}
-
 const PAGE_SIZE = 100;
 const HOLDING_SCAN = 500;
 
 async function list(req, res) {
   try {
-    const query = { userId: req.user._id };
+    const repo = scopedRepo(req.user._id);
+    const query = {};
     const debtId = readDebtId(req.query.debtId);
     if (debtId === false) return res.status(400).json({ error: "That is not a valid invoice id" });
     if (debtId) query.debtId = debtId;
 
-    const page = await PaymentAddress.find(query).sort({ createdAt: -1 }).limit(PAGE_SIZE);
-    const total = await PaymentAddress.countDocuments(query);
+    const page = await repo.paymentAddresses.find(query).sort({ createdAt: -1 }).limit(PAGE_SIZE);
+    const total = await repo.paymentAddresses.countDocuments(query);
 
     let addresses = page;
     let holdingBeyondPage = 0;
     if (total > page.length) {
       const seen = new Set(page.map((a) => String(a._id)));
-      const older = await PaymentAddress.find({
+      const older = await repo.paymentAddresses.find({
         ...query,
         _id: { $nin: page.map((a) => a._id) },
         "observed.0": { $exists: true },
@@ -155,20 +146,18 @@ async function list(req, res) {
         .sort({ createdAt: -1 })
         .limit(HOLDING_SCAN);
 
-      const holding = older.filter((pa) => !seen.has(String(pa._id)) && unsweptAt(pa) > 0);
+      const holding = older.filter((pa) => !seen.has(String(pa._id)) && confirmedUnsweptUnits(pa) > 1n);
       holdingBeyondPage = holding.length;
       addresses = [...page, ...holding];
     }
 
-    const debts = await Debt.find({
-      _id: { $in: addresses.map((a) => a.debtId) },
-      userId: req.user._id,
-    }).select("debtorName");
+    const debts = await repo.debts.find({ _id: { $in: addresses.map((a) => a.debtId) } }).select("debtorName");
     const nameById = new Map(debts.map((d) => [String(d._id), d.debtorName]));
 
     const rows = addresses.map((a) => ({
       ...a.toObject(),
       debtorName: nameById.get(String(a.debtId)) || null,
+      confirmationsRequired: confirmationsFor(a.chainId, req.user),
     }));
 
     const live = await getNgnRate();
@@ -192,7 +181,7 @@ async function list(req, res) {
 
 async function revoke(req, res) {
   try {
-    const record = await PaymentAddress.findOne({ _id: req.params.id, userId: req.user._id });
+    const record = await scopedRepo(req.user._id).paymentAddresses.findById(req.params.id);
     if (!record) return res.status(404).json({ error: "Payment address not found" });
     if (record.status !== "active") {
       return res.status(409).json({ error: `Address is already ${record.status}` });
@@ -208,7 +197,7 @@ async function revoke(req, res) {
 
 async function recordSweep(req, res) {
   try {
-    const { txHash, destination, amountUsdc, gasFundedTxHash } = req.body || {};
+    const { txHash, destination, amountUsdc, gasFundedTxHash } = req.body;
     if (!HASH_RE.test(txHash || "")) {
       return res.status(400).json({ error: "Invalid transaction hash" });
     }
@@ -223,7 +212,7 @@ async function recordSweep(req, res) {
       return res.status(400).json({ error: "Invalid swept amount" });
     }
 
-    const record = await PaymentAddress.findOne({ _id: req.params.id, userId: req.user._id });
+    const record = await scopedRepo(req.user._id).paymentAddresses.findById(req.params.id);
     if (!record) return res.status(404).json({ error: "Payment address not found" });
 
     if (!record.sweeps.some((s) => s.txHash === txHash)) {
@@ -241,16 +230,11 @@ async function recordSweep(req, res) {
     if (["paid", "expired", "revoked"].includes(record.status)) {
       const chain = getChain(record.chainId);
       if (chain && record.tokenContract) {
-        const onChain = await tokenBalance(
-          chain,
-          record.tokenContract,
-          record.address,
-          record.tokenDecimals
-        );
+        const onChain = await tokenBalanceUnits(chain, record.tokenContract, record.address);
         if (onChain != null) {
           balanceChecked = true;
-          residual = onChain;
-          if (onChain <= TOLERANCE) {
+          residual = unitsToNumber(onChain, record.tokenDecimals);
+          if (onChain <= decimalToUnits(TOLERANCE, record.tokenDecimals)) {
             record.status = "swept";
             sweptNow = true;
           }

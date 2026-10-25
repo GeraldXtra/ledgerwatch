@@ -97,25 +97,25 @@ export default function ProfitPanel({ mode, chains = [], mainAddress, paperProfi
           : "Every sale is checked against what you paid. Profit is moved out of your trading cash into your profit balance straight away."
       }
     >
-      <div className="kpi-row">
+      <div className="figure-pair">
         {isLive ? (
           <>
-            <div className="hero-figure">
+            <div>
               <span className="overline">Waiting to move</span>
               <span className="num mono-strong">{money(totals.pendingLive)}</span>
             </div>
-            <div className="hero-figure">
+            <div>
               <span className="overline">Moved to profit wallet</span>
               <span className="num mono-strong">{money(totals.movedLive)}</span>
             </div>
           </>
         ) : (
           <>
-            <div className="hero-figure">
+            <div>
               <span className="overline">Profit balance</span>
               <span className="num mono-strong">{money(paperProfitBalance)}</span>
             </div>
-            <div className="hero-figure">
+            <div>
               <span className="overline">Profit recorded</span>
               <span className="num mono-strong">{money(totals.paper)}</span>
             </div>

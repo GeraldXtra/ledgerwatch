@@ -111,8 +111,13 @@ async function onInvoiceSettled({
       return { emailed: false, reason: "debounced" };
     }
 
-    const owner = await User.findById(debt.userId).select("name companyName bankDetails");
+    const owner = await User.findById(debt.userId).select("name email companyName bankDetails");
     const logo = getLogoAttachment();
+    const unsubscribe = require("./unsubscribe.service").unsubscribeLinks({
+      kind: "debtor",
+      userId: debt.userId,
+      email: debt.debtorEmail,
+    });
 
     const { html, text } = buildPaymentReceiptEmail({
       businessName: owner && (owner.companyName || owner.name),
@@ -131,13 +136,20 @@ async function onInvoiceSettled({
       payToAddress: activeAddress ? activeAddress.address : null,
       payToChainName: activeAddress && receiptChain ? receiptChain.name : null,
       hasLogo: Boolean(logo),
+      unsubscribeUrl: unsubscribe.page,
     });
 
     const res = await sendEmail(
       debt.debtorEmail,
       fullyPaid ? "Payment received in full. Thank you" : "Payment received. Thank you",
       html,
-      { text, attachments: logo ? [logo] : [] }
+      {
+        text: `${text}\n\nStop payment reminder emails: ${unsubscribe.page}`,
+        attachments: logo ? [logo] : [],
+        category: "receipt",
+        unsubscribe,
+        replyTo: owner && owner.email,
+      }
     );
     if (!res.ok) console.error(`[settlement] receipt email failed: ${res.error}`);
     return { emailed: Boolean(res.ok), reason: res.ok ? null : res.error };

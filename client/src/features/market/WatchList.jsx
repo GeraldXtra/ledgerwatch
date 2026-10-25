@@ -4,7 +4,7 @@ import { conditionText, price as fmtPrice } from "./format";
 import { Button, Card, EmptyState } from "../../components/ui";
 import WatchEditRow from "./WatchEditRow";
 
-export default function WatchList({ watches, onEdit, onRemove }) {
+export default function WatchList({ watches, failed, onEdit, onRemove }) {
   const [editingId, setEditingId] = useState(null);
 
   return (
@@ -15,7 +15,11 @@ export default function WatchList({ watches, onEdit, onRemove }) {
       subtitle="Conditions the agent checks every pass."
       className="card-flush"
     >
-      {watches.length === 0 ? (
+      {watches.length === 0 && failed ? (
+        <p className="error-text">
+          Your watches could not be loaded, so this does not mean you have none. Use Refresh to try again.
+        </p>
+      ) : watches.length === 0 ? (
         <EmptyState
           icon={<Eye size={20} />}
           title="Nothing being watched"

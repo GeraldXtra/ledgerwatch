@@ -5,6 +5,7 @@ import { useAuth } from "../../context/AuthContext";
 import { ngn, shortDate } from "./format";
 import PaymentPanel, { PaymentSummary } from "./PaymentPanel";
 import ReminderPanel from "./ReminderPanel";
+import InvoiceCard from "./InvoiceCard";
 
 const CryptoPaymentPanel = lazy(() => import("./CryptoPaymentPanel"));
 
@@ -37,7 +38,12 @@ export default function DebtDetailModal({
     >
       <PageHeader
         title={debt.debtorName}
-        support={<StatusPill status={debt.displayStatus} />}
+        support={
+          <span className="row tight">
+            {debt.invoiceNumber && <span className="muted small num">{debt.invoiceNumber}</span>}
+            <StatusPill status={debt.displayStatus} />
+          </span>
+        }
         action={
           <div className="row wrap detail-actions no-print">
             <Button variant="danger" onClick={() => onDelete(debt)}>
@@ -122,6 +128,8 @@ export default function DebtDetailModal({
           inline
         />
       )}
+
+      <InvoiceCard debt={debt} />
 
       <PaymentPanel debt={debt} onChange={onChanged} />
 

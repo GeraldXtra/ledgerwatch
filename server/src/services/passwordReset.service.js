@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
+const accounts = require("../repositories/accounts");
 const { sendEmail, getLogoAttachment } = require("./notify.service");
 
 const CODE_LENGTH = 6;
@@ -142,6 +143,7 @@ async function issueResetCode(user, { force = false } = {}) {
   const res = await sendEmail(user.email, "Reset your LedgerWatch password", html, {
     text,
     attachments: logo ? [logo] : [],
+    category: "transactional",
   });
 
   if (!res.ok) {
@@ -168,7 +170,8 @@ async function checkResetCode(user, submitted) {
       error: "That code has expired. Please ask for a new one.",
     };
   }
-  if ((v.attempts || 0) >= MAX_ATTEMPTS) {
+  const reserved = await accounts.reserveCodeAttempt(user._id, "passwordReset", v.codeHash, MAX_ATTEMPTS);
+  if (!reserved) {
     return {
       ok: false,
       reason: "too-many-attempts",
@@ -179,9 +182,7 @@ async function checkResetCode(user, submitted) {
 
   const match = await bcrypt.compare(String(submitted || "").trim(), v.codeHash);
   if (!match) {
-    user.passwordReset.attempts = (v.attempts || 0) + 1;
-    await user.save();
-    const left = MAX_ATTEMPTS - user.passwordReset.attempts;
+    const left = MAX_ATTEMPTS - ((reserved.passwordReset && reserved.passwordReset.attempts) || MAX_ATTEMPTS);
     return {
       ok: false,
       reason: "mismatch",

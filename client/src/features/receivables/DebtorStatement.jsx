@@ -58,7 +58,10 @@ export default function DebtorStatement({ statement, onClose }) {
         {debts.map((d) => (
           <div key={d._id} className="statement-debt">
             <div className="row space-between">
-              <span className="mono-strong">{d.note || "Debt"}</span>
+              <span className="mono-strong">
+                {d.invoiceNumber ? `${d.invoiceNumber}, ` : ""}
+                {d.note || "Debt"}
+              </span>
               <StatusPill status={d.displayStatus} />
             </div>
             <div className="muted caption num">

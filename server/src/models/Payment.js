@@ -4,6 +4,7 @@ const paymentSchema = new mongoose.Schema({
   debtId: { type: mongoose.Schema.Types.ObjectId, ref: "Debt", required: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   amount: { type: Number, required: true },
+  amountKobo: { type: Number },
   paidAt: { type: Date, default: Date.now },
   method: {
     type: String,

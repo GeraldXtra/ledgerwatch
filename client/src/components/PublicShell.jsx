@@ -4,7 +4,7 @@ import { Menu } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import LogoMark from "./LogoMark";
 
-export default function PublicShell({ children, wide = false }) {
+export default function PublicShell({ children, wide = false, bare = false }) {
   const { user } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const linkCls = ({ isActive }) =>
@@ -20,10 +20,17 @@ export default function PublicShell({ children, wide = false }) {
               Ledger<em>Watch</em>
             </span>
           </Link>
+          {!bare && (
           <nav className="site-nav-links" aria-label="Site">
             <div className="site-nav-more" id="site-nav-more" onClick={() => setMenuOpen(false)}>
               <NavLink className={linkCls} to="/docs">
                 Guide
+              </NavLink>
+              <NavLink className={linkCls} to="/articles">
+                Articles
+              </NavLink>
+              <NavLink className={linkCls} to="/pricing">
+                Pricing
               </NavLink>
               <NavLink className={linkCls} to="/contact">
                 Contact
@@ -44,6 +51,8 @@ export default function PublicShell({ children, wide = false }) {
               </Link>
             )}
           </nav>
+          )}
+          {!bare && (
           <button
             type="button"
             className="menu-btn"
@@ -54,6 +63,7 @@ export default function PublicShell({ children, wide = false }) {
           >
             <Menu size={20} />
           </button>
+          )}
         </div>
       </header>
 
@@ -62,7 +72,10 @@ export default function PublicShell({ children, wide = false }) {
       <footer className="site-wrap site-foot">
         <span>LedgerWatch, by Eberechukwu Uchechukwu Gerald. All rights reserved.</span>
         <span className="site-nav-links" style={{ margin: 0 }}>
+          <Link to="/about">About</Link>
+          <Link to="/pricing">Pricing</Link>
           <Link to="/docs">Guide</Link>
+          <Link to="/articles">Articles</Link>
           <Link to="/docs/safety">Safety</Link>
           <Link to="/privacy">Privacy</Link>
           <Link to="/terms">Terms</Link>

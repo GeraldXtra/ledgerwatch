@@ -1,7 +1,6 @@
-const PushSubscription = require("../models/PushSubscription");
-const User = require("../models/User");
-const Alert = require("../models/Alert");
-const Debt = require("../models/Debt");
+const { scopedRepo } = require("../repositories/scoped");
+const accounts = require("../repositories/accounts");
+const devicesRepo = require("../repositories/devices");
 const {
   publicKey,
   verifyActionToken,
@@ -49,37 +48,37 @@ function subscriptionProblem(sub) {
 }
 
 async function bindDevice(userId, sub, userAgent) {
-  await PushSubscription.deleteMany({ endpoint: sub.endpoint, userId: { $ne: userId } });
-  const row = { userId, endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } };
+  const subscriptions = scopedRepo(userId).pushSubscriptions;
+  const row = { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } };
   if (userAgent) row.userAgent = String(userAgent).slice(0, 400);
-  try {
-    return await PushSubscription.findOneAndUpdate({ endpoint: sub.endpoint, userId }, row, {
+  const upsert = () =>
+    subscriptions.findOneAndUpdate({ endpoint: sub.endpoint }, { $set: row }, {
       upsert: true,
       new: true,
       setDefaultsOnInsert: true,
     });
+  await devicesRepo.releaseFromOtherAccounts(sub.endpoint, userId);
+  try {
+    return await upsert();
   } catch (err) {
     if (err.code !== 11000) throw err;
-    await PushSubscription.deleteMany({ endpoint: sub.endpoint, userId: { $ne: userId } });
-    return PushSubscription.findOneAndUpdate({ endpoint: sub.endpoint, userId }, row, {
-      upsert: true,
-      new: true,
-      setDefaultsOnInsert: true,
-    });
+    await devicesRepo.releaseFromOtherAccounts(sub.endpoint, userId);
+    return upsert();
   }
 }
 
 async function subscribe(req, res) {
   try {
-    const sub = req.body && req.body.subscription;
+    const sub = req.body.subscription;
     const problem = subscriptionProblem(sub);
     if (problem) return res.status(400).json({ error: problem });
-    const replaces = req.body && typeof req.body.replaces === "string" ? req.body.replaces : null;
+    const subscriptions = scopedRepo(req.user._id).pushSubscriptions;
+    const replaces = typeof req.body.replaces === "string" ? req.body.replaces : null;
     if (replaces && replaces !== sub.endpoint) {
-      await PushSubscription.deleteOne({ endpoint: replaces, userId: req.user._id });
+      await subscriptions.deleteOne({ endpoint: replaces });
     }
     await bindDevice(req.user._id, sub, req.headers["user-agent"]);
-    const devices = await PushSubscription.countDocuments({ userId: req.user._id });
+    const devices = await subscriptions.countDocuments({});
     return res.status(201).json({ ok: true, devices });
   } catch (err) {
     console.error("push subscribe error:", err.message);
@@ -89,18 +88,17 @@ async function subscribe(req, res) {
 
 async function resubscribe(req, res) {
   try {
-    const oldEndpoint = req.body && req.body.oldEndpoint;
-    const sub = req.body && req.body.subscription;
+    const oldEndpoint = req.body.oldEndpoint;
+    const sub = req.body.subscription;
     if (typeof oldEndpoint !== "string" || !oldEndpoint || oldEndpoint.length > 2048) {
       return res.status(400).json({ error: "oldEndpoint required" });
     }
     const problem = subscriptionProblem(sub);
     if (problem) return res.status(400).json({ error: problem });
 
-    const previous = await PushSubscription.find({ endpoint: oldEndpoint }).select("userId").lean();
-    if (!previous.length) return res.status(404).json({ error: "That subscription is not known" });
-    const owner = previous[0].userId;
-    await PushSubscription.deleteMany({ endpoint: oldEndpoint });
+    const owner = await devicesRepo.ownerOfEndpoint(oldEndpoint);
+    if (!owner) return res.status(404).json({ error: "That subscription is not known" });
+    await devicesRepo.forgetEndpoint(oldEndpoint);
     await bindDevice(owner, sub, req.headers["user-agent"]);
     return res.json({ ok: true });
   } catch (err) {
@@ -111,7 +109,7 @@ async function resubscribe(req, res) {
 
 async function devices(req, res) {
   try {
-    const rows = await PushSubscription.find({ userId: req.user._id })
+    const rows = await scopedRepo(req.user._id).pushSubscriptions.find({})
       .select("endpoint userAgent createdAt")
       .sort({ createdAt: -1 })
       .lean();
@@ -130,9 +128,9 @@ async function devices(req, res) {
 
 async function unsubscribe(req, res) {
   try {
-    const endpoint = req.body && req.body.endpoint;
+    const endpoint = req.body.endpoint;
     if (!endpoint) return res.status(400).json({ error: "endpoint required" });
-    await PushSubscription.deleteOne({ endpoint, userId: req.user._id });
+    await scopedRepo(req.user._id).pushSubscriptions.deleteOne({ endpoint });
     return res.json({ ok: true });
   } catch (err) {
     console.error("push unsubscribe error:", err.message);
@@ -182,7 +180,7 @@ function spendToken(token) {
 
 async function action(req, res) {
   try {
-    const { token } = req.body || {};
+    const { token } = req.body;
     if (!token) return res.status(400).json({ error: "token required" });
 
     let claims;
@@ -192,7 +190,7 @@ async function action(req, res) {
       return res.status(401).json({ error: "Invalid or expired action token" });
     }
 
-    const requested = req.body && req.body.action;
+    const requested = req.body.action;
     if (requested && String(requested) !== claims.act) {
       return res.status(400).json({ error: "That button does not match its token" });
     }
@@ -201,19 +199,20 @@ async function action(req, res) {
       return res.status(409).json({ error: "That notification action has already been used." });
     }
 
-    const user = await User.findById(claims.sub).select("-passwordHash");
+    const user = await accounts.findById(claims.sub).select("-passwordHash");
     if (!user) return res.status(401).json({ error: "User no longer exists" });
+    const repo = scopedRepo(user._id);
 
     if (claims.act === "dismiss_alert") {
-      await Alert.updateOne(
-        { _id: claims.ref, userId: user._id, status: "pending" },
-        { status: "dismissed", userAction: "dismiss", actedAt: new Date() }
+      await repo.alerts.updateOne(
+        { _id: claims.ref, status: "pending" },
+        { $set: { status: "dismissed", userAction: "dismiss", actedAt: new Date() } }
       );
       return res.json({ ok: true, act: claims.act });
     }
 
     if (claims.act === "send_whatsapp" || claims.act === "send_email") {
-      const debt = await Debt.findOne({ _id: claims.ref, userId: user._id });
+      const debt = await repo.debts.findById(claims.ref);
       if (!debt) return res.status(404).json({ error: "Debt not found" });
       const channel = claims.act === "send_whatsapp" ? "whatsapp" : "email";
       const generated = await generateReminderForDebt(debt, user);

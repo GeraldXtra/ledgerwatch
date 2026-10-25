@@ -110,6 +110,50 @@ function cgConfig() {
       };
 }
 
+const BUDGET_WINDOW_MS = 60 * 1000;
+const BUDGETS = {
+  none: { total: 8, lookups: 3 },
+  demo: { total: 25, lookups: 10 },
+  pro: { total: 250, lookups: 100 },
+};
+const CORE_PATHS = new Set(["/coins/markets", "/simple/price"]);
+let recentCalls = [];
+
+function planName() {
+  if (!cgConfig().keyed) return "none";
+  return String(process.env.COINGECKO_PLAN || "").trim().toLowerCase() === "pro" ? "pro" : "demo";
+}
+
+function pruneCalls(now) {
+  recentCalls = recentCalls.filter((call) => now - call.at < BUDGET_WINDOW_MS);
+}
+
+function budgetUse(now = Date.now()) {
+  pruneCalls(now);
+  const budget = BUDGETS[planName()];
+  const lookupsUsed = recentCalls.filter((call) => call.lookup).length;
+  return { ...budget, used: recentCalls.length, lookupsUsed };
+}
+
+function reserveCall(path) {
+  const now = Date.now();
+  const use = budgetUse(now);
+  const lookup = !CORE_PATHS.has(path);
+  const full = use.used >= use.total || (lookup && use.lookupsUsed >= use.lookups);
+  if (!full) {
+    recentCalls.push({ at: now, lookup });
+    return;
+  }
+  const blocking = lookup && use.lookupsUsed >= use.lookups ? recentCalls.filter((call) => call.lookup) : recentCalls;
+  const waitMs = Math.max(1000, BUDGET_WINDOW_MS - (now - blocking[0].at));
+  const err = new Error(
+    `the shared allowance for ${lookup ? "coin lookups" : "price calls"} is used up for the next ${Math.ceil(waitMs / 1000)}s`
+  );
+  err.cgPaused = true;
+  err.cgBudget = true;
+  throw err;
+}
+
 const MIN_BACKOFF_MS = 15 * 1000;
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
 let blockedUntil = 0;
@@ -150,6 +194,7 @@ function cgStatus() {
     configured: keyed,
     plan: keyed ? String(process.env.COINGECKO_PLAN || "demo").trim().toLowerCase() : "none",
     pausedForMs: paused,
+    budget: { windowSeconds: BUDGET_WINDOW_MS / 1000, ...budgetUse() },
     cachedCoins: marketsCache.size,
     cachedCharts: chartCache.size,
     lastUpstream,
@@ -179,6 +224,7 @@ async function cgGet(path, params) {
     err.cgPaused = true;
     throw err;
   }
+  reserveCall(path);
   const { base, headers } = cgConfig();
   try {
     const { data } = await axios.get(`${base}${path}`, { params, headers, timeout: TIMEOUT });
@@ -676,6 +722,7 @@ function _resetForTests() {
   platformsCache = null;
   blockedUntil = 0;
   backoffMs = 0;
+  recentCalls = [];
   lastUpstream = null;
 }
 

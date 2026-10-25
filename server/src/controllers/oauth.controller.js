@@ -1,9 +1,10 @@
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
-const User = require("../models/User");
-const Portfolio = require("../models/Portfolio");
+const accounts = require("../repositories/accounts");
+const { scopedRepo } = require("../repositories/scoped");
 const signToken = require("../utils/token");
 const google = require("../services/googleAuth.service");
+const tf = require("../services/twoFactor.service");
 
 function bounce(res, params) {
   const hash = new URLSearchParams(params).toString();
@@ -19,13 +20,13 @@ async function googleStart(req, res) {
       error: "SERVER_URL is not set on the server, so Google has nowhere to send you back to.",
     });
   }
-  const n = String((req.query && req.query.n) || "");
+  const n = String(req.query.n || "");
   return res.redirect(google.authorizationUrl(google.NONCE_RE.test(n) ? n : ""));
 }
 
 async function googleCallback(req, res) {
   try {
-    const { code, state, error } = req.query || {};
+    const { code, state, error } = req.query;
     if (error) return bounce(res, { error: "Google sign in was cancelled." });
     const verified = google.verifyState(state);
     if (!verified.ok) {
@@ -45,12 +46,12 @@ async function googleCallback(req, res) {
     }
 
     const email = String(profile.email).toLowerCase().trim();
-    let user = await User.findOne({ $or: [{ googleId: profile.sub }, { email }] });
+    let user = await accounts.findByGoogleIdOrEmail(profile.sub, email);
 
     if (!user) {
       const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
       try {
-        user = await User.create({
+        user = await accounts.create({
           name: String(profile.name || email.split("@")[0]).trim(),
           email,
           passwordHash,
@@ -58,9 +59,9 @@ async function googleCallback(req, res) {
           googleId: profile.sub,
           authProvider: "google",
         });
-        await Portfolio.create({ userId: user._id });
+        await scopedRepo(user._id).portfolios.create({});
       } catch (err) {
-        if (err && err.code === 11000) user = await User.findOne({ email });
+        if (err && err.code === 11000) user = await accounts.findByEmail(email);
         else throw err;
       }
     } else {
@@ -89,6 +90,9 @@ async function googleCallback(req, res) {
     }
 
     if (!user) return bounce(res, { error: "Could not sign you in. Please try again." });
+    if (user.twoFactor && user.twoFactor.enabled) {
+      return bounce(res, { challenge: tf.issueChallenge(user), n: verified.nonce });
+    }
     return bounce(res, { token: signToken(user._id, user.tokenVersion), n: verified.nonce });
   } catch (err) {
     console.error("google callback error:", err.message);

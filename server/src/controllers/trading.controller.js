@@ -1,4 +1,4 @@
-const User = require("../models/User");
+const { scopedRepo } = require("../repositories/scoped");
 const publicUser = require("../utils/publicUser");
 const { getChain, tokensFor } = require("../config/chains");
 const { resolveCoinOnChain } = require("../services/tokenResolver.service");
@@ -24,17 +24,13 @@ function assertCanTradeLive(user) {
 
 async function setMode(req, res) {
   try {
-    const mode = req.body && req.body.mode;
+    const mode = req.body.mode;
     if (!["paper", "live"].includes(mode)) {
       return res.status(400).json({ error: "mode must be 'paper' or 'live'" });
     }
     if (mode === "live") assertCanTradeLive(req.user);
 
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      { tradingMode: mode },
-      { new: true }
-    ).select("-passwordHash");
+    const user = await scopedRepo(req.user._id).self.update({ $set: { tradingMode: mode } }).select("-passwordHash");
 
     return res.json({ user: publicUser(user) });
   } catch (err) {
@@ -47,7 +43,7 @@ async function setMode(req, res) {
 async function listTokens(req, res) {
   try {
     const chainId = Number(req.query.chainId);
-    const user = await User.findById(req.user._id).select("customTokens").lean();
+    const user = await scopedRepo(req.user._id).self.get("customTokens").lean();
     const custom = (user.customTokens || []).filter((t) => !chainId || t.chainId === chainId);
     return res.json({ tokens: custom });
   } catch (err) {
@@ -60,7 +56,7 @@ const MAX_CUSTOM_TOKENS = 50;
 
 async function addToken(req, res) {
   try {
-    const { chainId, address, symbol, decimals } = req.body || {};
+    const { chainId, address, symbol, decimals } = req.body;
     const chain = getChain(chainId);
     if (!chain) {
       return res.status(400).json({ error: "Unknown or disabled chain" });
@@ -76,7 +72,7 @@ async function addToken(req, res) {
       return res.status(400).json({ error: "Invalid token decimals" });
     }
 
-    const user = await User.findById(req.user._id).select("customTokens");
+    const user = await scopedRepo(req.user._id).self.get("customTokens");
     const lower = address.toLowerCase();
     const exists = (user.customTokens || []).some(
       (t) => t.chainId === Number(chainId) && t.address.toLowerCase() === lower
@@ -140,8 +136,8 @@ async function addToken(req, res) {
 
 async function removeToken(req, res) {
   try {
-    const { chainId, address } = req.body || {};
-    const user = await User.findById(req.user._id).select("customTokens");
+    const { chainId, address } = req.body;
+    const user = await scopedRepo(req.user._id).self.get("customTokens");
     user.customTokens = (user.customTokens || []).filter(
       (t) =>
         !(t.chainId === Number(chainId) && t.address.toLowerCase() === String(address).toLowerCase())
@@ -156,8 +152,8 @@ async function removeToken(req, res) {
 
 async function resolveToken(req, res) {
   try {
-    const coinId = String((req.query && req.query.coinId) || "").trim().toLowerCase();
-    const chainId = Number((req.query && req.query.chainId) || NaN);
+    const coinId = String(req.query.coinId || "").trim().toLowerCase();
+    const chainId = Number(req.query.chainId || NaN);
 
     if (!/^[a-z0-9][a-z0-9._-]{0,80}$/.test(coinId)) {
       return res.status(400).json({ error: "That is not a valid coin id." });

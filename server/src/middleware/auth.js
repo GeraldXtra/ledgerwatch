@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-const User = require("../models/User");
+const accounts = require("../repositories/accounts");
 
 async function requireAuth(req, res, next) {
   const header = req.headers.authorization || "";
@@ -21,7 +21,7 @@ async function requireAuth(req, res, next) {
   }
 
   try {
-    const user = await User.findById(decoded.id).select("-passwordHash -avatarUrl");
+    const user = await accounts.findById(decoded.id).select("-passwordHash -avatarUrl");
     if (!user) {
       return res.status(401).json({ error: "User no longer exists" });
     }

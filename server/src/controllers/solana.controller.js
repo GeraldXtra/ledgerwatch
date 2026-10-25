@@ -17,7 +17,7 @@ const status = async (req, res) => reply(res, await solana.getStatus(req.query.s
 const history = async (req, res) => reply(res, await solana.getHistory(req.query.address, req.query.network), "history");
 
 async function send(req, res) {
-  const { transaction, network } = req.body || {};
+  const { transaction, network } = req.body;
   if (network === "mainnet" && String(process.env.ENABLE_MAINNET).toLowerCase() !== "true") {
     return res.status(403).json({ error: "Solana mainnet is switched off on this server.", kind: "invalid" });
   }

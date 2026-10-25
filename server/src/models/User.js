@@ -28,6 +28,32 @@ const emailVerificationSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const emailChangeSchema = new mongoose.Schema(
+  {
+    newEmail: { type: String, default: null },
+    codeHash: { type: String, default: null },
+    expiresAt: { type: Date, default: null },
+    attempts: { type: Number, default: 0 },
+    lastSentAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+const twoFactorSchema = new mongoose.Schema(
+  {
+    enabled: { type: Boolean, default: false },
+    secretEnc: { type: String, default: null },
+    pendingSecretEnc: { type: String, default: null },
+    pendingCreatedAt: { type: Date, default: null },
+    backupCodeHashes: { type: [String], default: [] },
+    lastUsedStep: { type: Number, default: 0 },
+    failedAttempts: { type: Number, default: 0 },
+    lockedUntil: { type: Date, default: null },
+    enabledAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
@@ -38,6 +64,9 @@ const userSchema = new mongoose.Schema({
   googleId: { type: String, default: null, index: true, sparse: true },
   authProvider: { type: String, enum: ["password", "google"], default: "password" },
   tokenVersion: { type: Number, default: 0 },
+  emailChange: { type: emailChangeSchema, default: () => ({}) },
+  twoFactor: { type: twoFactorSchema, default: () => ({}) },
+  invoiceSeq: { type: Number, default: 0 },
   bankDetails: { type: bankDetailsSchema, default: {} },
   autoSend: { type: autoSendSchema, default: () => ({}) },
   walletAddress: { type: String, default: null },

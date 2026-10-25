@@ -1,4 +1,5 @@
 import axios from "axios";
+import { API_BASE } from "./base";
 
 const TOKEN_KEY = "ledgerwatch_token";
 
@@ -12,7 +13,7 @@ export function setToken(token) {
 }
 
 const http = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000",
+  baseURL: API_BASE,
 });
 
 http.interceptors.request.use((config) => {

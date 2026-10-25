@@ -73,6 +73,7 @@ export default function DebtsPanel({ onLedgerChanged }) {
   const [cryptoDebt, setCryptoDebt] = useState(null);
   const [cryptoIds, setCryptoIds] = useState(() => new Map());
   const [cryptoKey, setCryptoKey] = useState(0);
+  const [cryptoIdsFailed, setCryptoIdsFailed] = useState(false);
   const [remindAfterAddress, setRemindAfterAddress] = useState(null);
 
   const debounceRef = useRef(null);
@@ -115,9 +116,10 @@ export default function DebtsPanel({ onLedgerChanged }) {
           .filter((a) => a.status === "active")
           .map((a) => [String(a.debtId), a.tokenSymbol || null]);
         setCryptoIds(new Map(ids));
+        setCryptoIdsFailed(false);
       })
       .catch(() => {
-        if (active) setCryptoIds(new Map());
+        if (active) setCryptoIdsFailed(true);
       });
     return () => {
       active = false;
@@ -348,6 +350,11 @@ export default function DebtsPanel({ onLedgerChanged }) {
         </div>
 
         {error && <p className="error-text">{error}</p>}
+        {cryptoIdsFailed && (
+          <p className="error-text">
+            Which invoices already have a crypto payment address could not be checked, so their markers may be missing below.
+          </p>
+        )}
         {loading ? (
           <SkeletonLines count={4} />
         ) : (

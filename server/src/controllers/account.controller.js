@@ -1,15 +1,6 @@
 const bcrypt = require("bcryptjs");
-const User = require("../models/User");
-const Debt = require("../models/Debt");
-const Payment = require("../models/Payment");
-const Reminder = require("../models/Reminder");
-const Watch = require("../models/Watch");
-const Alert = require("../models/Alert");
-const SimTrade = require("../models/SimTrade");
-const Portfolio = require("../models/Portfolio");
-const PaymentAddress = require("../models/PaymentAddress");
-const WalletTx = require("../models/WalletTx");
-const PushSubscription = require("../models/PushSubscription");
+const { scopedRepo, TENANT_MODELS } = require("../repositories/scoped");
+const accounts = require("../repositories/accounts");
 const publicUser = require("../utils/publicUser");
 const signToken = require("../utils/token");
 
@@ -28,7 +19,7 @@ function decodedByteLength(b64) {
 
 async function setAvatar(req, res) {
   try {
-    const dataUrl = (req.body && req.body.dataUrl) || "";
+    const dataUrl = req.body.dataUrl || "";
     const match = DATA_URL_RE.exec(dataUrl);
     if (!match) {
       return res
@@ -39,11 +30,7 @@ async function setAvatar(req, res) {
       return res.status(413).json({ error: "Image must be 2MB or smaller" });
     }
 
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      { avatarUrl: dataUrl },
-      { new: true }
-    ).select("-passwordHash");
+    const user = await scopedRepo(req.user._id).self.update({ $set: { avatarUrl: dataUrl } }).select("-passwordHash");
 
     return res.json({ user: publicUser(user) });
   } catch (err) {
@@ -54,11 +41,7 @@ async function setAvatar(req, res) {
 
 async function removeAvatar(req, res) {
   try {
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      { avatarUrl: null },
-      { new: true }
-    ).select("-passwordHash");
+    const user = await scopedRepo(req.user._id).self.update({ $set: { avatarUrl: null } }).select("-passwordHash");
     return res.json({ user: publicUser(user) });
   } catch (err) {
     console.error("removeAvatar error:", err.message);
@@ -68,11 +51,14 @@ async function removeAvatar(req, res) {
 
 async function changePassword(req, res) {
   try {
-    const { currentPassword, newPassword } = req.body || {};
+    if (String(req.user.email).toLowerCase() === PROTECTED_EMAIL) {
+      return res.status(403).json({ error: "The shared demo account's password cannot be changed." });
+    }
+    const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: "Current and new password are required" });
     }
-    const user = await User.findById(req.user._id);
+    const user = await accounts.findById(req.user._id);
     if (!user) return res.status(401).json({ error: "User no longer exists" });
 
     const weak = passwordProblem(newPassword, { email: user.email, name: user.name });
@@ -93,28 +79,17 @@ async function changePassword(req, res) {
 }
 
 async function wipeUserData(userId) {
+  const repo = scopedRepo(userId);
   await Promise.all([
-    Debt.deleteMany({ userId }),
-    Payment.deleteMany({ userId }),
-    Reminder.deleteMany({ userId }),
-    Watch.deleteMany({ userId }),
-    Alert.deleteMany({ userId }),
-    SimTrade.deleteMany({ userId }),
-    Portfolio.deleteMany({ userId }),
-    PaymentAddress.deleteMany({ userId }),
-    WalletTx.deleteMany({ userId }),
-    PushSubscription.deleteMany({ userId }),
-    User.updateOne(
-      { _id: userId },
-      { $set: { walletHistoryCursors: [], discoveredTokens: [] } }
-    ),
+    ...Object.keys(TENANT_MODELS).map((name) => repo[name].deleteMany({})),
+    repo.self.updateOne({ $set: { walletHistoryCursors: [], discoveredTokens: [] } }),
   ]);
 }
 
 async function clearData(req, res) {
   try {
     await wipeUserData(req.user._id);
-    await Portfolio.create({ userId: req.user._id });
+    await scopedRepo(req.user._id).portfolios.create({});
     return res.json({ ok: true });
   } catch (err) {
     console.error("clearData error:", err.message);
@@ -128,7 +103,7 @@ async function deleteAccount(req, res) {
       return res.status(403).json({ error: "The shared demo account cannot be deleted." });
     }
     await wipeUserData(req.user._id);
-    await User.findByIdAndDelete(req.user._id);
+    await accounts.deleteById(req.user._id);
     return res.json({ ok: true });
   } catch (err) {
     console.error("deleteAccount error:", err.message);
@@ -136,4 +111,4 @@ async function deleteAccount(req, res) {
   }
 }
 
-module.exports = { setAvatar, removeAvatar, changePassword, clearData, deleteAccount };
+module.exports = { setAvatar, removeAvatar, changePassword, clearData, deleteAccount, wipeUserData };

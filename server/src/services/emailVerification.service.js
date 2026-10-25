@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
+const accounts = require("../repositories/accounts");
 const { sendEmail, getLogoAttachment } = require("./notify.service");
 
 const CODE_LENGTH = 6;
@@ -151,6 +152,7 @@ async function issueCode(user, { force = false } = {}) {
   const res = await sendEmail(user.email, "Confirm your LedgerWatch email", html, {
     text,
     attachments: logo ? [logo] : [],
+    category: "transactional",
   });
 
   if (!res.ok) {
@@ -173,7 +175,8 @@ async function checkCode(user, submitted) {
       error: "That code has expired. Please ask for a new one.",
     };
   }
-  if ((v.attempts || 0) >= MAX_ATTEMPTS) {
+  const reserved = await accounts.reserveCodeAttempt(user._id, "emailVerification", v.codeHash, MAX_ATTEMPTS);
+  if (!reserved) {
     return {
       ok: false,
       reason: "too-many-attempts",
@@ -184,9 +187,7 @@ async function checkCode(user, submitted) {
 
   const match = await bcrypt.compare(String(submitted || "").trim(), v.codeHash);
   if (!match) {
-    user.emailVerification.attempts = (v.attempts || 0) + 1;
-    await user.save();
-    const left = MAX_ATTEMPTS - user.emailVerification.attempts;
+    const left = MAX_ATTEMPTS - ((reserved.emailVerification && reserved.emailVerification.attempts) || MAX_ATTEMPTS);
     return {
       ok: false,
       reason: "mismatch",

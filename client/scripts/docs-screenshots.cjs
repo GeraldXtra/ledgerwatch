@@ -13,6 +13,7 @@ const SECTIONS = String(process.env.SECTIONS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 const WALLET_PW = "docs-screenshots-only-1";
+const TOKEN2_PASSWORD = process.env.TOKEN2_PASSWORD || "";
 const PAGE = ".aw-pages > .pv:not([hidden])";
 const results = { ok: [], failed: [] };
 
@@ -208,6 +209,31 @@ async function cardWith(page, text) {
     await waitPage(page);
     await sleep(2500);
     await shot(page, "debt-detail");
+
+    const invoiceCard = await cardWith(page, "Copy payment page link");
+    if (invoiceCard) {
+      await invoiceCard.evaluate((e) => e.scrollIntoView({ block: "center" }));
+      await sleep(500);
+      await shot(invoiceCard, "debt-invoice");
+      await clickText(page, `${PAGE} button`, "Copy payment page link");
+      await page.waitForFunction(
+        () => Array.from(document.querySelectorAll("code.wallet-address")).some((c) => c.textContent.includes("/pay/")),
+        { timeout: 20000 }
+      );
+      const payUrl = await page.evaluate(
+        () => Array.from(document.querySelectorAll("code.wallet-address")).find((c) => c.textContent.includes("/pay/")).textContent
+      );
+      const payPage = await newPage(browser, { token: TOKEN });
+      await payPage.goto(payUrl, { waitUntil: "networkidle2" });
+      await payPage.waitForSelector(".pay-page .card", { timeout: 20000 });
+      await sleep(1500);
+      await shot(payPage, "pay-page", { fullPage: true });
+      await payPage.close();
+      await page.bringToFront();
+      await page.evaluate(() => window.scrollTo(0, 0));
+    } else {
+      results.failed.push("debt-invoice: no Invoice card on the open invoice");
+    }
 
     try {
       await clickText(page, `${PAGE} button`, "Record payment");
@@ -409,6 +435,17 @@ async function cardWith(page, text) {
     await clickText(page, ".mm-actions button", "Send");
     await sleep(3500);
     await shot(page, "wallet-bitcoin-send");
+    await goBack(page).catch(() => {});
+
+    await page.click(".net-trigger");
+    await sleep(800);
+    await clickText(page, ".net-item", "TRON", { exact: false, index: 0 });
+    await sleep(1500);
+    await typeInto(page, ".aw-view input[type=password]", WALLET_PW);
+    await clickText(page, ".aw-view button", "Set up Tron");
+    await page.waitForSelector(".mm-actions", { timeout: 60000 });
+    await sleep(5000);
+    await shot(page, "wallet-tron");
     await page.close();
   });
 
@@ -431,6 +468,9 @@ async function cardWith(page, text) {
     const live = await cardWith(page, "Live positions");
     if (live) await shot(live, "market-live");
     else results.failed.push("market-live: no Live positions card");
+    const profit = await cardWith(page, "Profit agent");
+    if (profit) await shot(profit, "market-profit");
+    else results.failed.push("market-profit: no Profit agent card in live mode");
     await clickText(page, ".mode-btn", "Paper trading");
     await sleep(1500);
     await page.close();
@@ -473,6 +513,28 @@ async function cardWith(page, text) {
       await goto(page, `/app/settings?section=${s}`, 2500);
       await shot(page, `settings-${s}`);
     }
+    if (!TOKEN2 || !TOKEN2_PASSWORD) throw new Error("TOKEN2 and TOKEN2_PASSWORD are needed for the two-step sign-in picture");
+    const second = await newPage(browser, { token: TOKEN2 });
+    await goto(second, "/app/settings?section=security", 2500);
+    await clickText(second, "button", "Set up two-step sign-in");
+    await sleep(500);
+    const twoStepPassword = await second.evaluateHandle(() => {
+      const heading = Array.from(document.querySelectorAll(".aw-view h3")).find((h) => h.textContent.includes("Two-step sign-in"));
+      const block = heading && heading.closest(".settings-head") && heading.closest(".settings-head").parentElement;
+      return block ? block.querySelector("input[type=password]") : null;
+    });
+    await twoStepPassword.asElement().type(TOKEN2_PASSWORD);
+    await clickText(second, ".aw-view button", "Continue");
+    await second.waitForSelector(".aw-view img.receive-qr", { timeout: 20000 });
+    await second.addStyleTag({ content: ".aw-view img.receive-qr, .aw-view code.wallet-address { filter: blur(6px); }" });
+    await sleep(800);
+    const twoStep = await second.$(".aw-view img.receive-qr");
+    await twoStep.evaluate((e) => e.scrollIntoView({ block: "center" }));
+    await sleep(400);
+    await shot(second, "settings-two-step");
+    await clickText(second, ".aw-view button", "Cancel");
+    await second.close();
+    await page.bringToFront();
     await goto(page, "/app/settings?section=wallet-backup", 2500);
     await shot(page, "settings-backup");
     await clickText(page, ".backup-option", "Reveal secret recovery phrase");

@@ -1,7 +1,6 @@
 import { ethers } from "ethers";
 import { getToken } from "../../api/http";
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { API_BASE } from "../../api/base";
 
 export function getProvider(chainId) {
   const req = new ethers.FetchRequest(`${API_BASE}/api/wallet/rpc/${chainId}`);
