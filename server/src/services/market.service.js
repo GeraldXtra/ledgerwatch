@@ -169,6 +169,9 @@ async function runPricePass({ userId } = {}) {
 
   const coinIds = [...new Set(watches.map((w) => w.coinId))];
   const prices = await getPrices(coinIds);
+  const ownerIds = [...new Set(watches.map((w) => String(w.userId)))];
+  const owners = await User.find({ _id: { $in: ownerIds } }).select("tradingMode").lean();
+  const ownerMode = new Map(owners.map((u) => [String(u._id), u.tradingMode === "live" ? "live" : "paper"]));
 
   const now = Date.now();
   let alertsCreated = 0;
@@ -237,28 +240,34 @@ async function runPricePass({ userId } = {}) {
       await watch.save();
       alertsCreated++;
 
-      try {
-        await notifyUser(
-          watch.userId,
-          {
-            title: `${watch.symbol.toUpperCase()} alert — agent suggests ${suggestion}`,
-            body: message.slice(0, 140),
-            tag: `alert-${alert._id}`,
-            type: "alert",
-            icon: watch.image || (await require("./activity.service").iconFor({ coinId: watch.coinId })) || undefined,
-            url: `/app/market?alert=${alert._id}`,
-            actions: [
-              { action: "buy", title: "Buy" },
-              { action: "sell", title: "Sell" },
-              { action: "dismiss", title: "Dismiss" },
-            ],
-            tokens: { dismiss: signActionToken(watch.userId, "dismiss_alert", alert._id) },
-            alertId: String(alert._id),
-          },
-          "marketAlerts"
-        );
-      } catch (err) {
-        console.error(`Push for alert ${alert._id} failed:`, err.message);
+      const inOtherMode = (watch.mode || "paper") !== (ownerMode.get(String(watch.userId)) || "paper");
+      if (inOtherMode) {
+        console.log(`[alerts] ${watch.mode || "paper"} alert ${alert._id} kept without a notification: the account is in the other mode`);
+      }
+      if (!inOtherMode) {
+        try {
+          await notifyUser(
+            watch.userId,
+            {
+              title: `${watch.symbol.toUpperCase()} alert — agent suggests ${suggestion}`,
+              body: message.slice(0, 140),
+              tag: `alert-${alert._id}`,
+              type: "alert",
+              icon: watch.image || (await require("./activity.service").iconFor({ coinId: watch.coinId })) || undefined,
+              url: `/app/market?alert=${alert._id}`,
+              actions: [
+                { action: "buy", title: "Buy" },
+                { action: "sell", title: "Sell" },
+                { action: "dismiss", title: "Dismiss" },
+              ],
+              tokens: { dismiss: signActionToken(watch.userId, "dismiss_alert", alert._id) },
+              alertId: String(alert._id),
+            },
+            "marketAlerts"
+          );
+        } catch (err) {
+          console.error(`Push for alert ${alert._id} failed:`, err.message);
+        }
       }
 
     } catch (err) {

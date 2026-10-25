@@ -5,7 +5,7 @@ import { Button, Card, Input } from "../../components/ui";
 
 const SUGGESTIONS = ["watch BTC drop 5%", "watch ETH, SOL", "how is my portfolio?"];
 
-export default function ChatBox({ onAction }) {
+export default function ChatBox({ onAction, mode }) {
   const [messages, setMessages] = useState([
     {
       role: "agent",
@@ -22,7 +22,7 @@ export default function ChatBox({ onAction }) {
     setInput("");
     setBusy(true);
     try {
-      const { data } = await http.post("/api/ai/chat", { message });
+      const { data } = await http.post("/api/ai/chat", { message, mode });
       setMessages((m) => [...m, { role: "agent", text: data.reply }]);
       if (onAction) onAction();
     } catch (err) {

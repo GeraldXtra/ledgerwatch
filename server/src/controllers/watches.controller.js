@@ -1,5 +1,7 @@
 const Watch = require("../models/Watch");
 const { createWatch, updateWatchCondition } = require("../services/market.service");
+const { requestedMode } = require("../utils/tradingMode");
+const { assertCanTradeLive } = require("./trading.controller");
 
 async function create(req, res) {
   try {
@@ -9,7 +11,9 @@ async function create(req, res) {
         .status(400)
         .json({ error: "symbol (or coinId), type and value are required" });
     }
-    const watch = await createWatch(req.user._id, { symbol, type, value, coinId }, req.user.tradingMode === "live" ? "live" : "paper");
+    const mode = requestedMode(req);
+    if (mode === "live") assertCanTradeLive(req.user);
+    const watch = await createWatch(req.user._id, { symbol, type, value, coinId }, mode);
     return res.status(201).json({ watch });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
@@ -35,9 +39,9 @@ async function update(req, res) {
 
 async function list(req, res) {
   try {
-    const mode = req.user.tradingMode === "live" ? "live" : "paper";
+    const mode = requestedMode(req);
     const watches = await Watch.find({ userId: req.user._id, mode }).sort({ createdAt: -1 });
-    return res.json({ watches });
+    return res.json({ watches, mode });
   } catch (err) {
     console.error("list watches error:", err.message);
     return res.status(500).json({ error: "Failed to list watches" });

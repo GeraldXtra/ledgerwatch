@@ -1,15 +1,16 @@
 const Alert = require("../models/Alert");
 const { approveAlert, actOnAlert } = require("../services/market.service");
+const { requestedMode } = require("../utils/tradingMode");
 
 async function list(req, res) {
   try {
-    const mode = req.user.tradingMode === "live" ? "live" : "paper";
+    const mode = requestedMode(req);
     const alerts = await Alert.find({
       mode,
       userId: req.user._id,
       status: "pending",
     }).sort({ createdAt: -1 });
-    return res.json({ alerts });
+    return res.json({ alerts, mode });
   } catch (err) {
     console.error("list alerts error:", err.message);
     return res.status(500).json({ error: "Failed to list alerts" });
@@ -18,7 +19,7 @@ async function list(req, res) {
 
 async function history(req, res) {
   try {
-    const mode = req.user.tradingMode === "live" ? "live" : "paper";
+    const mode = requestedMode(req);
     const alerts = await Alert.find({
       mode,
       userId: req.user._id,
@@ -26,7 +27,7 @@ async function history(req, res) {
     })
       .sort({ createdAt: -1 })
       .limit(50);
-    return res.json({ alerts });
+    return res.json({ alerts, mode });
   } catch (err) {
     console.error("alert history error:", err.message);
     return res.status(500).json({ error: "Failed to list alert history" });
