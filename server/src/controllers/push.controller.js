@@ -10,12 +10,65 @@ const {
 
 async function key(req, res) {
   const status = pushStatus();
-  return res.json({ publicKey: status.publicKey, configured: status.configured, problem: status.problem });
+  return res.json({
+    publicKey: status.publicKey,
+    configured: status.web.configured,
+    problem: status.problem,
+    native: status.native,
+  });
 }
 
 async function vapid(req, res) {
   const status = pushStatus();
-  return res.json({ publicKey: status.publicKey, configured: status.configured });
+  return res.json({ publicKey: status.publicKey, configured: status.web.configured });
+}
+
+const TOKEN_RE = /^[A-Za-z0-9_:.-]{20,4096}$/;
+
+async function registerNative(req, res) {
+  try {
+    const token = String(req.body.token || "");
+    const platform = req.body.platform === "ios" ? "ios" : "android";
+    if (!TOKEN_RE.test(token)) return res.status(400).json({ error: "That is not a valid device token" });
+    const status = pushStatus();
+    if (!status.native.configured) {
+      return res.status(503).json({
+        error: `App notifications are not set up on the server: ${status.native.problem}. The device was not registered.`,
+        code: "not_configured",
+      });
+    }
+    const devices = scopedRepo(req.user._id).nativeDevices;
+    const replaces = typeof req.body.replaces === "string" ? req.body.replaces : null;
+    if (replaces && replaces !== token) await devices.deleteOne({ token: replaces });
+    await devicesRepo.releaseTokenFromOtherAccounts(token, req.user._id);
+    const row = { token, platform, lastSeenAt: new Date() };
+    if (req.headers["user-agent"]) row.userAgent = String(req.headers["user-agent"]).slice(0, 400);
+    const upsert = () => devices.findOneAndUpdate({ token }, { $set: row }, { upsert: true, new: true, setDefaultsOnInsert: true });
+    try {
+      await upsert();
+    } catch (err) {
+      if (err.code !== 11000) throw err;
+      await devicesRepo.releaseTokenFromOtherAccounts(token, req.user._id);
+      await upsert();
+    }
+    const count = (await devices.countDocuments({})) + (await scopedRepo(req.user._id).pushSubscriptions.countDocuments({}));
+    return res.status(201).json({ ok: true, devices: count });
+  } catch (err) {
+    console.error("push registerNative error:", err.message);
+    return res.status(500).json({ error: "Failed to register this device" });
+  }
+}
+
+async function forgetNative(req, res) {
+  try {
+    const token = String(req.body.token || "");
+    if (!token) return res.status(400).json({ error: "token required" });
+    await scopedRepo(req.user._id).nativeDevices.deleteOne({ token });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("push forgetNative error:", err.message);
+    return res.status(500).json({ error: "Failed to forget this device" });
+  }
 }
 
 function subscriptionProblem(sub) {
@@ -111,16 +164,28 @@ async function resubscribe(req, res) {
 
 async function devices(req, res) {
   try {
-    const rows = await scopedRepo(req.user._id).pushSubscriptions.find({})
+    const repo = scopedRepo(req.user._id);
+    const rows = await repo.pushSubscriptions.find({})
       .select("endpoint userAgent createdAt")
       .sort({ createdAt: -1 })
       .lean();
+    const phones = await repo.nativeDevices.find({}).select("token platform userAgent createdAt").sort({ createdAt: -1 }).lean();
     return res.json({
-      devices: rows.map((r) => ({
-        endpoint: r.endpoint,
-        userAgent: r.userAgent || null,
-        createdAt: r.createdAt,
-      })),
+      devices: [
+        ...rows.map((r) => ({
+          kind: "browser",
+          endpoint: r.endpoint,
+          userAgent: r.userAgent || null,
+          createdAt: r.createdAt,
+        })),
+        ...phones.map((p) => ({
+          kind: "app",
+          platform: p.platform,
+          token: p.token,
+          userAgent: p.userAgent || null,
+          createdAt: p.createdAt,
+        })),
+      ],
     });
   } catch (err) {
     console.error("push devices error:", err.message);
@@ -188,7 +253,8 @@ async function test(req, res) {
     const status = pushStatus();
     if (!status.configured) return notConfigured(res, status.problem);
 
-    const mine = typeof req.body.endpoint === "string" && req.body.endpoint ? req.body.endpoint : null;
+    const mineToken = typeof req.body.token === "string" && req.body.token ? req.body.token : null;
+    const mine = (typeof req.body.endpoint === "string" && req.body.endpoint ? req.body.endpoint : null) || mineToken;
     const testId = crypto.randomBytes(8).toString("hex");
     const result = await notifyUser(
       req.user._id,
@@ -201,7 +267,7 @@ async function test(req, res) {
         testId,
       },
       null,
-      { thisEndpoint: mine }
+      { thisEndpoint: mine, thisToken: mineToken }
     );
     if (result.skipped) return notConfigured(res, result.problem);
     if (result.devices === null) {
@@ -298,4 +364,4 @@ async function action(req, res) {
   }
 }
 
-module.exports = { key, vapid, subscribe, resubscribe, devices, unsubscribe, test, action, bindDevice };
+module.exports = { key, vapid, subscribe, resubscribe, devices, unsubscribe, test, action, bindDevice, registerNative, forgetNative };

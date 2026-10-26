@@ -18,5 +18,14 @@
     "backgroundColor": "#F7F7F7",
     "appendUserAgent": "LedgerWatchApp/1.0.0",
     "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "PushNotifications": {
+      "presentationOptions": [
+        "badge",
+        "sound",
+        "alert"
+      ]
+    }
   }
 }

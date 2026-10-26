@@ -3,7 +3,18 @@ const requireAuth = require("../middleware/auth");
 const { pushAction } = require("../middleware/rateLimit");
 const { validate } = require("../middleware/validate");
 const schemas = require("../validation/push.schemas");
-const { key, vapid, subscribe, resubscribe, devices, unsubscribe, test, action } = require("../controllers/push.controller");
+const {
+  key,
+  vapid,
+  subscribe,
+  resubscribe,
+  devices,
+  unsubscribe,
+  test,
+  action,
+  registerNative,
+  forgetNative,
+} = require("../controllers/push.controller");
 
 const router = express.Router();
 
@@ -16,5 +27,7 @@ router.post("/subscribe", requireAuth, validate(schemas.subscribe), subscribe);
 router.get("/devices", requireAuth, validate(schemas.none), devices);
 router.post("/unsubscribe", requireAuth, validate(schemas.unsubscribe), unsubscribe);
 router.post("/test", requireAuth, validate(schemas.test), test);
+router.post("/native", requireAuth, validate(schemas.native), registerNative);
+router.post("/native/forget", requireAuth, validate(schemas.nativeForget), forgetNative);
 
 module.exports = router;

@@ -1,7 +1,9 @@
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const PushSubscription = require("../models/PushSubscription");
+const NativeDevice = require("../models/NativeDevice");
 const User = require("../models/User");
+const { fcmConfig, fcmStatus, sendToDevices } = require("./fcm.service");
 
 const DEFAULT_SUBJECT = "mailto:admin@ledgerwatch.app";
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
@@ -89,10 +91,13 @@ const publicKey = () => {
 
 function pushStatus() {
   const config = vapidConfig();
+  const native = fcmStatus();
   return {
-    configured: config.ok,
+    configured: config.ok || native.configured,
     publicKey: config.ok ? config.publicKey : null,
     problem: config.ok ? null : config.problem,
+    web: { configured: config.ok, problem: config.ok ? null : config.problem },
+    native,
   };
 }
 
@@ -251,33 +256,44 @@ function sendOptions(config, payload, opts) {
 
 async function notifyUser(userId, payload, category, opts = {}) {
   const config = vapidConfig();
-  if (!config.ok) {
+  const native = fcmConfig();
+  if (!config.ok && !native.ok) {
     return { sent: 0, pruned: 0, devices: 0, results: [], skipped: true, reason: "not-configured", problem: config.problem };
   }
-  const wp = require("web-push");
 
   if (category && !(await wantsCategory(userId, category))) {
     return { sent: 0, pruned: 0, devices: 0, results: [], skipped: true, reason: "category-off" };
   }
 
-  let subs;
+  let subs = [];
+  let phones = [];
   try {
-    subs = await PushSubscription.find({ userId }).lean();
+    if (config.ok) subs = await PushSubscription.find({ userId }).lean();
+    if (native.ok) phones = await NativeDevice.find({ userId }).lean();
   } catch (err) {
     console.error("[push] failed to load subscriptions:", err.message);
     return { sent: 0, pruned: 0, devices: null, results: [], error: "The devices for this account could not be read." };
   }
 
-  if (subs.length === 0) {
+  if (subs.length === 0 && phones.length === 0) {
     console.log(`[push] no subscriptions for user ${userId}, nothing to deliver`);
     return { sent: 0, pruned: 0, devices: 0, results: [] };
   }
 
   const body = JSON.stringify(payload);
-  const options = sendOptions(config, payload, opts);
+  const options = config.ok ? sendOptions(config, payload, opts) : null;
   const mine = typeof opts.thisEndpoint === "string" && opts.thisEndpoint ? opts.thisEndpoint : null;
+  const mineToken = typeof opts.thisToken === "string" && opts.thisToken ? opts.thisToken : null;
+  const wp = subs.length ? require("web-push") : null;
 
-  const results = await Promise.all(
+  const nativeResults = sendToDevices({
+    devices: phones,
+    payload,
+    ttlSeconds: Number.isFinite(opts.ttl) ? opts.ttl : DEFAULT_PUSH_TTL,
+    thisToken: mineToken,
+  });
+
+  const webResults = await Promise.all(
     subs.map(async (sub) => {
       const base = {
         id: String(sub._id),
@@ -308,16 +324,18 @@ async function notifyUser(userId, payload, category, opts = {}) {
     })
   );
 
+  const results = [...webResults, ...(await nativeResults)];
   const sent = results.filter((r) => r.delivered).length;
   const pruned = results.filter((r) => r.removed).length;
-  if (pruned) console.log(`[push] removed ${pruned} refused subscription(s) for user ${userId}`);
-  console.log(`[push] delivered ${sent}/${subs.length} for user ${userId}`);
+  if (pruned) console.log(`[push] removed ${pruned} refused device(s) for user ${userId}`);
+  console.log(`[push] delivered ${sent}/${results.length} for user ${userId}`);
 
-  return { sent, pruned, devices: subs.length, results };
+  return { sent, pruned, devices: results.length, results };
 }
 
 function initPush() {
   const config = vapidConfig();
+  const native = fcmStatus();
   if (config.ok) {
     console.log("[push] Web Push configured and ready.");
   } else {
@@ -328,7 +346,17 @@ function initPush() {
         .catch(() => {});
     }
   }
-  return config.ok;
+  if (native.configured) {
+    console.log(`[push] Firebase messaging ready for the apps (project ${native.projectId}).`);
+  } else {
+    console.log(`[push] App notifications off (${native.problem}).`);
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      require("./opsAlert.service")
+        .reportProblem({ area: "push", message: `App notifications are off: ${native.problem}.` })
+        .catch(() => {});
+    }
+  }
+  return config.ok || native.configured;
 }
 
 module.exports = {

@@ -228,7 +228,7 @@ export default function NotificationsSection() {
 
         {push && push.supported && (
           <div className="row space-between perm-row">
-            <span className="muted small">Browser permission</span>
+            <span className="muted small">{push.native ? "App permission" : "Browser permission"}</span>
             <span
               className={`pill ${
                 push.permission === "granted"
