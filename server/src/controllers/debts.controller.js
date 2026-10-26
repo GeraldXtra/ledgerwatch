@@ -13,7 +13,7 @@ const {
 const { resyncActivePaymentAddress } = require("../services/paymentAddress.service");
 const { onInvoiceSettled } = require("../services/settlement.service");
 const {
-  nextInvoiceNumber,
+  withInvoiceNumber,
   ensureInvoiceNumber,
   ensurePublicToken,
   rotatePublicToken,
@@ -89,19 +89,21 @@ async function create(req, res) {
     if (errors.length) return res.status(400).json({ error: errors.join("; ") });
 
     const amountKobo = nairaToKobo(body.amount);
-    const invoiceNumber = await nextInvoiceNumber(req.user._id);
-    const debt = await scopedRepo(req.user._id).debts.create({
-      invoiceNumber,
-      debtorName: body.debtorName,
-      debtorPhone: body.debtorPhone,
-      debtorEmail: body.debtorEmail,
-      amount: koboToNaira(amountKobo),
-      amountKobo,
-      dueDate: new Date(body.dueDate),
-      note: body.note,
-      ...(has(body, "reminderCadenceDays") ? { reminderCadenceDays: Number(body.reminderCadenceDays) } : {}),
-      history: [{ event: "created" }],
-    });
+    const debts = scopedRepo(req.user._id).debts;
+    const debt = await withInvoiceNumber(req.user._id, (invoiceNumber) =>
+      debts.create({
+        invoiceNumber,
+        debtorName: body.debtorName,
+        debtorPhone: body.debtorPhone,
+        debtorEmail: body.debtorEmail,
+        amount: koboToNaira(amountKobo),
+        amountKobo,
+        dueDate: new Date(body.dueDate),
+        note: body.note,
+        ...(has(body, "reminderCadenceDays") ? { reminderCadenceDays: Number(body.reminderCadenceDays) } : {}),
+        history: [{ event: "created" }],
+      })
+    );
 
     return res.status(201).json({ debt });
   } catch (err) {

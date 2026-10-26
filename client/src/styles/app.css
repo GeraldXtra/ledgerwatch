@@ -744,6 +744,17 @@
   .aw-nav.show {
     transform: none;
     visibility: visible;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.aw-nav-open {
+    touch-action: none;
+  }
+
+  body.aw-nav-open .aw-nav.show {
+    touch-action: pan-y;
   }
 
   .aw-nav a:not(.aw-nav-head) {
@@ -762,6 +773,8 @@
     inset: 48px 0 0;
     z-index: 44;
     background: var(--overlay);
+    touch-action: none;
+    overscroll-behavior: contain;
   }
 
   .aw-main {
@@ -4909,5 +4922,115 @@ button.coin-result:focus-visible {
   .figure-pair > div + div {
     border-left: 0;
     border-top: 1px solid var(--line);
+  }
+}
+
+.live-head-tools {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-balance {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.live-balance-figure {
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.live-balance-figure.unread {
+  font-size: 22px;
+  color: var(--muted);
+}
+
+.live-deposit-line {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--soft);
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.live-address-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.live-address {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.currency-picker {
+  display: inline-grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.currency-picker.compact .currency-select {
+  width: auto;
+  min-width: 92px;
+}
+
+.currency-picker-error {
+  font-size: 13px;
+}
+
+.currency-setting {
+  max-width: 420px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 600px) {
+  .live-balance-figure {
+    font-size: 28px;
+  }
+
+  .currency-setting {
+    max-width: none;
+  }
+}
+
+.swap-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: end;
+}
+
+.swap-pair > .btn {
+  margin-bottom: 2px;
+}
+
+@media (max-width: 600px) {
+  .swap-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .swap-pair > .btn {
+    justify-self: center;
+    margin-bottom: 0;
   }
 }

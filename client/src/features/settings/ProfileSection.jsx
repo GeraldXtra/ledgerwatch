@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button, Field, Input, useToast } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import AvatarUpload from "./AvatarUpload";
+import CurrencyPicker from "../currency/CurrencyPicker";
 
 export default function ProfileSection() {
   const { user, updateProfile } = useAuth();
@@ -61,6 +62,16 @@ export default function ProfileSection() {
           </Button>
         </div>
       </form>
+
+      <div className="stack currency-setting">
+        <Field label="Currency for balances" htmlFor="display-currency">
+          <CurrencyPicker id="display-currency" />
+        </Field>
+        <p className="muted small">
+          Live balances and wallet values are shown in this currency, on every device you sign in on.
+          It is saved as soon as you pick it. Paper trading stays in US dollars.
+        </p>
+      </div>
     </div>
   );
 }

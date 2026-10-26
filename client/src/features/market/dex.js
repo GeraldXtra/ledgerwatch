@@ -9,7 +9,12 @@ const ROUTER_ABI = [
   "function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)",
   "function exactInput((bytes path,address recipient,uint256 amountIn,uint256 amountOutMinimum)) payable returns (uint256 amountOut)",
   "function multicall(uint256 deadline, bytes[] data) payable returns (bytes[] results)",
+  "function unwrapWETH9(uint256 amountMinimum, address recipient) payable",
 ];
+
+const WETH9_ABI = ["function deposit() payable", "function withdraw(uint256 wad)"];
+
+export const ADDRESS_THIS = "0x0000000000000000000000000000000000000002";
 
 const DEADLINE_SECONDS = Number(import.meta.env?.VITE_SWAP_DEADLINE_SECONDS) || 1200;
 
@@ -138,7 +143,17 @@ export async function bestQuote({ provider, chain, tokenIn, tokenOut, amountIn }
   };
 }
 
-export function buildSwapTx({ chain, quote, amountIn, amountOutMinimum, recipient, tokenIn, tokenOut }) {
+export function buildSwapTx({
+  chain,
+  quote,
+  amountIn,
+  amountOutMinimum,
+  recipient,
+  tokenIn,
+  tokenOut,
+  nativeIn = false,
+  nativeOut = false,
+}) {
   const route = quote && quote.route;
   if (!route || !Array.isArray(route.tokens) || !Array.isArray(route.fees)) {
     throw new Error("A swap cannot be built without the route its price came from.");
@@ -153,8 +168,16 @@ export function buildSwapTx({ chain, quote, amountIn, amountOutMinimum, recipien
   if (tokenOut && !same(last, tokenOut)) {
     throw new Error("This price was quoted for a different token than the one being bought.");
   }
+  const wrapped = chain.wrappedNative && chain.wrappedNative.address;
+  if (nativeIn && !(wrapped && same(first, wrapped))) {
+    throw new Error("A swap paid in the native coin must start from its wrapped token.");
+  }
+  if (nativeOut && !(wrapped && same(last, wrapped))) {
+    throw new Error("A swap paid out in the native coin must end at its wrapped token.");
+  }
 
   const iface = new ethers.Interface(ROUTER_ABI);
+  const swapRecipient = nativeOut ? ADDRESS_THIS : recipient;
   const inner =
     route.fees.length === 1
       ? iface.encodeFunctionData("exactInputSingle", [
@@ -162,7 +185,7 @@ export function buildSwapTx({ chain, quote, amountIn, amountOutMinimum, recipien
             tokenIn: route.tokens[0],
             tokenOut: route.tokens[1],
             fee: route.fees[0],
-            recipient,
+            recipient: swapRecipient,
             amountIn,
             amountOutMinimum,
             sqrtPriceLimitX96: 0n,
@@ -171,18 +194,43 @@ export function buildSwapTx({ chain, quote, amountIn, amountOutMinimum, recipien
       : iface.encodeFunctionData("exactInput", [
           {
             path: encodePath(route.tokens, route.fees),
-            recipient,
+            recipient: swapRecipient,
             amountIn,
             amountOutMinimum,
           },
         ]);
+  const calls = [inner];
+  if (nativeOut) calls.push(iface.encodeFunctionData("unwrapWETH9", [amountOutMinimum, recipient]));
 
   const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS);
   return {
     to: chain.dex.router,
-    data: iface.encodeFunctionData("multicall", [deadline, [inner]]),
+    data: iface.encodeFunctionData("multicall", [deadline, calls]),
     deadline,
+    value: nativeIn ? amountIn : 0n,
+    nativeIn,
+    nativeOut,
   };
+}
+
+function wrappedCoinOf(chain) {
+  const weth = chain && chain.wrappedNative;
+  if (!weth || !weth.address) {
+    throw new Error(`${(chain && chain.name) || "This network"} has no verified wrapped coin.`);
+  }
+  return weth;
+}
+
+export function buildWrapTx({ chain, amount }) {
+  const weth = wrappedCoinOf(chain);
+  const iface = new ethers.Interface(WETH9_ABI);
+  return { to: weth.address, data: iface.encodeFunctionData("deposit", []), value: amount, deadline: null };
+}
+
+export function buildUnwrapTx({ chain, amount }) {
+  const weth = wrappedCoinOf(chain);
+  const iface = new ethers.Interface(WETH9_ABI);
+  return { to: weth.address, data: iface.encodeFunctionData("withdraw", [amount]), value: 0n, deadline: null };
 }
 
 export function minOut(amountOut, slippagePct) {

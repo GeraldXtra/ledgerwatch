@@ -27,7 +27,7 @@ async function backfillInvoiceNumbers({ apply = false } = {}) {
         const res = await Debt.updateOne({ _id: row._id, invoiceNumber: null }, { $set: { invoiceNumber: row.invoiceNumber } });
         written += res.modifiedCount || 0;
       }
-      await User.updateOne({ _id: userId, invoiceSeq: { $lt: next } }, { $set: { invoiceSeq: next } });
+      await User.updateOne({ _id: userId }, { $max: { invoiceSeq: next } });
     }
     report.push({
       userId: String(userId),

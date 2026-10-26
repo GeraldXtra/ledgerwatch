@@ -62,23 +62,27 @@ self.addEventListener("push", (event) => {
 
   event.waitUntil(
     (async () => {
-      const clientList = await self.clients.matchAll({
-        type: "window",
-        includeUncontrolled: true,
-      });
-      clientList.forEach((c) => c.postMessage({ type: "push", payload, shown: true }));
-
-      console.info("[sw] showing OS notification:", payload.title);
+      const title = payload.title || "LedgerWatch";
+      let shown = false;
+      let error = null;
+      console.info("[sw] showing OS notification:", title);
       try {
-        await self.registration.showNotification(payload.title || "LedgerWatch", options);
+        await self.registration.showNotification(title, options);
+        shown = true;
       } catch (err) {
         console.warn("[sw] notification with icon failed, retrying plain:", err && err.message);
-        await self.registration.showNotification(payload.title || "LedgerWatch", {
-          ...options,
-          icon: "/icon-192.png",
-          actions: [],
-        });
+        try {
+          await self.registration.showNotification(title, { ...options, icon: "/icon-192.png", actions: [] });
+          shown = true;
+        } catch (plainErr) {
+          error = (plainErr && (plainErr.name ? `${plainErr.name}: ${plainErr.message}` : plainErr.message)) || "showNotification failed";
+          console.warn("[sw] the notification could not be shown:", error);
+        }
       }
+      if (!shown && self.Notification && self.Notification.permission !== "granted") {
+        error = `notification permission is ${self.Notification.permission}${error ? ` (${error})` : ""}`;
+      }
+      await postToClients({ type: "push", payload, shown, error, at: Date.now() });
     })()
   );
 });
@@ -91,6 +95,16 @@ function keyBytes(base64) {
   return out;
 }
 
+async function currentServerKey() {
+  try {
+    const res = await fetch(`${API_BASE}/api/push/vapid`, { cache: "no-store" });
+    const body = await res.json().catch(() => ({}));
+    return body && body.configured && body.publicKey ? keyBytes(body.publicKey) : null;
+  } catch {
+    return null;
+  }
+}
+
 self.addEventListener("pushsubscriptionchange", (event) => {
   event.waitUntil(
     (async () => {
@@ -98,12 +112,7 @@ self.addEventListener("pushsubscriptionchange", (event) => {
       let next = event.newSubscription || null;
       try {
         if (!next) {
-          let key = old && old.options ? old.options.applicationServerKey : null;
-          if (!key) {
-            const res = await fetch(`${API_BASE}/api/push/vapid`);
-            const body = await res.json().catch(() => ({}));
-            key = body.publicKey ? keyBytes(body.publicKey) : null;
-          }
+          const key = (await currentServerKey()) || (old && old.options ? old.options.applicationServerKey : null);
           if (!key) return;
           next = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
         }
@@ -117,8 +126,10 @@ self.addEventListener("pushsubscriptionchange", (event) => {
           body: JSON.stringify({ oldEndpoint: old.endpoint, subscription: next.toJSON() }),
         });
         console.info("[sw] subscription renewed:", res.status);
+        if (!res.ok) await postToClients({ type: "push-resubscribed", endpoint: next.endpoint });
       } catch (err) {
         console.warn("[sw] could not renew the subscription:", err && err.message);
+        await postToClients({ type: "push-resubscribed", endpoint: next ? next.endpoint : null });
       }
     })()
   );

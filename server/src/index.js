@@ -57,6 +57,7 @@ connectDB()
     await normalizeCryptoSettings();
 
     initPush();
+    require("./services/ramp.service").logStartup();
 
     verifyEmail().catch(() => {});
 

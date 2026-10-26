@@ -116,7 +116,7 @@ const BUDGETS = {
   demo: { total: 25, lookups: 10 },
   pro: { total: 250, lookups: 100 },
 };
-const CORE_PATHS = new Set(["/coins/markets", "/simple/price"]);
+const CORE_PATHS = new Set(["/coins/markets", "/simple/price", "/exchange_rates"]);
 let recentCalls = [];
 
 function planName() {
@@ -710,7 +710,50 @@ async function getNgnPrice(coinId = "usd-coin") {
   };
 }
 
+const BASE_FIAT_TTL = 10 * 60 * 1000;
+const fiatTtl = () => BASE_FIAT_TTL * ttlFactor();
+let fiatCache = null;
+
+function fiatRatesFrom(data) {
+  const rates = data && data.rates;
+  const usd = rates && rates.usd && Number(rates.usd.value);
+  if (!rates || !Number.isFinite(usd) || usd <= 0) return null;
+  const out = {};
+  for (const [code, row] of Object.entries(rates)) {
+    if (!row || row.type !== "fiat") continue;
+    const value = Number(row.value);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    out[code.toUpperCase()] = value / usd;
+  }
+  out.USD = 1;
+  return out;
+}
+
+async function getFiatRates() {
+  const now = Date.now();
+  if (!fiatCache || now - fiatCache.ts > fiatTtl()) {
+    await singleFlight("fiat-rates", async () => {
+      try {
+        console.log("CoinGecko GET exchange_rates");
+        const data = await cgGet("/exchange_rates");
+        const rates = fiatRatesFrom(data);
+        if (rates) fiatCache = { rates, ts: Date.now() };
+      } catch (err) {
+        logError("exchange_rates", err);
+      }
+    });
+  }
+  if (!fiatCache) return { rates: { USD: 1 }, stale: true, updatedAt: null, available: false };
+  return {
+    rates: { ...fiatCache.rates },
+    stale: Date.now() - fiatCache.ts > fiatTtl(),
+    updatedAt: fiatCache.ts,
+    available: true,
+  };
+}
+
 function _resetForTests() {
+  fiatCache = null;
   marketsCache.clear();
   chartCache.clear();
   searchCache.clear();
@@ -742,6 +785,7 @@ module.exports = {
   getAssetPlatforms,
   getCoinPlatforms,
   getNgnPrice,
+  getFiatRates,
   cgStatus,
   MARKETS_TTL,
   CHART_TTL,

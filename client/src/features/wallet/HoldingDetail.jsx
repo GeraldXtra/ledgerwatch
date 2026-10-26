@@ -5,8 +5,10 @@ import { Button, Modal, SkeletonLines, PageHeader } from "../../components/ui";
 import TokenLogo from "../../components/TokenLogo";
 import CoinDetailModal from "../market/CoinDetailModal";
 import { coinIdForSymbol, stableUsdPrice, isVerifiedRow } from "./usdValue";
+import useDisplayCurrency from "../currency/useDisplayCurrency";
 
 export default function HoldingDetail({ balance, chain, price, onRemove, onClose }) {
+  const money = useDisplayCurrency();
   const symbol = balance.symbol;
   const verified = isVerifiedRow(balance);
   const coinId = verified ? coinIdForSymbol(symbol) : null;
@@ -102,7 +104,7 @@ export default function HoldingDetail({ balance, chain, price, onRemove, onClose
             <dt>Value</dt>
             <dd className="num">
               {holding && holding.value != null
-                ? `$${holding.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}`
+                ? money.format(holding.value)
                 : "No price"}
             </dd>
           </div>

@@ -19,6 +19,11 @@ function config() {
   return { apiKey, secret, env, hosts: HOSTS[env], configured: Boolean(apiKey && secret) };
 }
 
+function webhookUrl() {
+  const base = String(process.env.SERVER_URL || "").trim().replace(/\/+$/, "");
+  return base ? `${base}/api/ramp/webhook` : null;
+}
+
 function rampStatus() {
   const c = config();
   return {
@@ -27,12 +32,26 @@ function rampStatus() {
     environment: c.env,
     fiat: "NGN",
     cryptos: CRYPTOS,
+    referrerDomain: referrerDomain(),
+    webhookUrl: webhookUrl(),
     reason: c.configured ? null : "Buying and selling with naira is not switched on yet on this server.",
   };
 }
 
 let token = null;
 let previousToken = null;
+let lastSessionProblem = null;
+
+function upstreamMessage(res, json) {
+  const fromBody =
+    json &&
+    ((json.error && typeof json.error === "object" && json.error.message) ||
+      (typeof json.error === "string" && json.error) ||
+      json.message);
+  const denyReason = res.headers && typeof res.headers.get === "function" ? res.headers.get("x-deny-reason") : null;
+  const said = String(fromBody || denyReason || `HTTP ${res.status}`).slice(0, 200);
+  return { said, status: res.status };
+}
 
 async function post(url, headers, body) {
   let res;
@@ -50,10 +69,32 @@ async function post(url, headers, body) {
     return { ok: false, kind: "unreachable", reason: `The payment provider could not be reached (${code || "error"}).` };
   }
   if (!res.ok || !json) {
-    const message = (json && ((json.error && json.error.message) || json.message)) || `HTTP ${res.status}`;
-    return { ok: false, kind: res.status >= 500 ? "upstream" : "rejected", reason: `The payment provider refused the request: ${String(message).slice(0, 200)}` };
+    const { said, status } = upstreamMessage(res, json);
+    return {
+      ok: false,
+      kind: status >= 500 ? "upstream" : "rejected",
+      status,
+      said,
+      reason: `The payment provider refused the request: ${said}`,
+    };
   }
   return { ok: true, value: json };
+}
+
+const KEY_REFUSALS = /api[_ -]?key|unauthori[sz]ed|forbidden/i;
+
+function explainSessionRefusal(r, c) {
+  const code = String(r.said || "");
+  if ((r.status === 401 || r.status === 403) && (KEY_REFUSALS.test(code) || code === `HTTP ${r.status}`)) {
+    const which = c.env === "staging" ? "staging" : "production";
+    return (
+      `Transak refused to open a ${which} payment page for this server (${code}). Its ${which} gateway accepts a partner's ` +
+      `requests only from the backend IP addresses listed on the partner's security form in the Transak dashboard, and only ` +
+      `with the domain ${referrerDomain() || "named in CLIENT_URL"} whitelisted there. The API keys themselves were accepted, ` +
+      `so this is the dashboard side: add this server's outbound IP addresses and the domain, or ask Transak support to.`
+    );
+  }
+  return r.reason;
 }
 
 async function accessToken() {
@@ -113,8 +154,22 @@ async function createSession({ user, mode, cryptoCurrencyCode, fiatAmount }) {
   if (amount && mode === "BUY") widgetParams.fiatAmount = amount;
   if (user.email && user.emailVerified) widgetParams.email = user.email;
 
-  const r = await post(`${c.hosts.gateway}/api/v2/auth/session`, { "access-token": t.token }, { widgetParams });
-  if (!r.ok) return r;
+  const session = (accessTokenValue) =>
+    post(`${c.hosts.gateway}/api/v2/auth/session`, { "access-token": accessTokenValue, "x-api-key": c.apiKey }, { widgetParams });
+
+  let r = await session(t.token);
+  if (!r.ok && r.status === 401) {
+    token = token ? { ...token, expiresAt: 0 } : null;
+    const fresh = await accessToken();
+    if (fresh.ok && fresh.token !== t.token) r = await session(fresh.token);
+  }
+  if (!r.ok) {
+    const reason = explainSessionRefusal(r, c);
+    lastSessionProblem = { at: new Date().toISOString(), status: r.status || null, said: r.said || null, reason };
+    console.error(`[ramp] ${reason}`);
+    return { ...r, reason };
+  }
+  lastSessionProblem = null;
   const widgetUrl = r.value.data && r.value.data.widgetUrl;
   let parsed;
   try {
@@ -164,10 +219,50 @@ function outcomeOf(status) {
   return "in-progress";
 }
 
+async function rampStatusChecked() {
+  const base = rampStatus();
+  if (!base.configured) return base;
+  const t = await accessToken();
+  const keysAccepted = t.ok;
+  const problem = !t.ok
+    ? `Transak did not accept the keys on this server for its ${base.environment} environment (${t.said || t.reason}). ` +
+      (base.environment === "production"
+        ? "Staging keys need TRANSAK_ENV=staging; otherwise paste the production keys from the Transak dashboard."
+        : "Production keys need TRANSAK_ENV unset or production.")
+    : lastSessionProblem
+      ? lastSessionProblem.reason
+      : null;
+  return { ...base, keysAccepted, problem, lastSessionProblem };
+}
+
+function logStartup() {
+  const s = rampStatus();
+  if (!s.configured) {
+    console.log("[ramp] Naira buy and sell is off: TRANSAK_API_KEY and TRANSAK_API_SECRET are not set.");
+    return;
+  }
+  console.log(
+    `[ramp] Transak ${s.environment}: referrer domain ${s.referrerDomain || "(CLIENT_URL not set)"}, ` +
+      `webhook ${s.webhookUrl || "(SERVER_URL not set)"}. Both must be registered with Transak, with this server's outbound IP addresses.`
+  );
+}
+
 function _resetForTests() {
   lastForcedRefresh = 0;
   token = null;
   previousToken = null;
+  lastSessionProblem = null;
 }
 
-module.exports = { CRYPTOS, rampStatus, accessToken, createSession, verifyWebhook, verifyWebhookFresh, outcomeOf, _resetForTests };
+module.exports = {
+  CRYPTOS,
+  rampStatus,
+  rampStatusChecked,
+  logStartup,
+  accessToken,
+  createSession,
+  verifyWebhook,
+  verifyWebhookFresh,
+  outcomeOf,
+  _resetForTests,
+};

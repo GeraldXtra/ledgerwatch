@@ -251,7 +251,11 @@ export async function executeSwap({ plan, password, side, alertId, onStep = () =
   const signer = master.connect(provider);
 
   onStep("Signing");
-  const { signed, hash } = await signForBroadcast(signer, { to: plan.swapTx.to, data: plan.swapTx.data });
+  const { signed, hash } = await signForBroadcast(signer, {
+    to: plan.swapTx.to,
+    data: plan.swapTx.data,
+    value: plan.swapTx.value || 0n,
+  });
   if (planExpired(plan)) throw new Error(EXPIRED);
 
   const amountOutDisplay = ethers.formatUnits(plan.quote.amountOut, plan.tokenOut.decimals);
@@ -264,7 +268,7 @@ export async function executeSwap({ plan, password, side, alertId, onStep = () =
       chainId: plan.chain.chainId,
       hash,
       from: master.address,
-      to: plan.chain.dex.router,
+      to: plan.swapTx.to,
       value: String(plan.amountInDisplay),
       symbol: plan.tokenIn.symbol,
       tokenAddress: plan.tokenIn.address,
@@ -275,9 +279,11 @@ export async function executeSwap({ plan, password, side, alertId, onStep = () =
       amountOut: amountOutDisplay,
       minAmountOut: ethers.formatUnits(plan.amountOutMinimum, plan.tokenOut.decimals),
       feeTier: plan.quote.fee,
-      route: plan.quote.via
-        ? `${plan.tokenIn.symbol} > ${plan.quote.via} > ${plan.tokenOut.symbol} (${plan.quote.fees.join("/")})`
-        : `${plan.tokenIn.symbol} > ${plan.tokenOut.symbol} (${plan.quote.fee})`,
+      route:
+        plan.routeLabel ||
+        (plan.quote.via
+          ? `${plan.tokenIn.symbol} > ${plan.quote.via} > ${plan.tokenOut.symbol} (${plan.quote.fees.join("/")})`
+          : `${plan.tokenIn.symbol} > ${plan.tokenOut.symbol} (${plan.quote.fee})`),
       priceImpactPct: Number(plan.quote.impactPct.toFixed(4)),
       side,
       alertId: alertId || null,

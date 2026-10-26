@@ -6,6 +6,8 @@ const { confirmationsFor } = require("../services/cryptoSettings.service");
 const rpcService = require("../services/rpc.service");
 const { sanitizeText } = require("../services/walletHistory.service");
 const { limitsFor } = require("../config/tradingLimits");
+const { getPrices } = require("../services/coingecko.service");
+const { resolveSymbol } = require("../services/coinMap");
 
 const ALLOWED_METHODS = new Set([
   "eth_chainId",
@@ -208,6 +210,7 @@ async function recordTx(req, res) {
       }
     }
 
+    let cashValue = null;
     if (kind === "swap") {
       const verdict = await checkSwapLimits({
         user: req.user,
@@ -219,9 +222,11 @@ async function recordTx(req, res) {
         amountOut,
       });
       if (!verdict.ok) return res.status(409).json({ error: verdict.error, code: verdict.code });
+      cashValue = Number(verdict.cash.toFixed(6));
     }
 
     const tx = await repo.walletTxs.create({
+      cashValue,
       profitId: profitRow ? profitRow._id : null,
       chainId: Number(chainId),
       hash,
@@ -363,9 +368,68 @@ async function updateTxStatus(req, res) {
 
 const CASH_RE = /^(USDC|USDT|USD₮0|USDT0|USDt)$/i;
 
+const PRICE_IDS = {
+  ETH: "ethereum",
+  WETH: "ethereum",
+  "WETH.E": "ethereum",
+  BNB: "binancecoin",
+  WBNB: "binancecoin",
+  POL: "matic-network",
+  WPOL: "matic-network",
+  MATIC: "matic-network",
+  WMATIC: "matic-network",
+  AVAX: "avalanche-2",
+  WAVAX: "avalanche-2",
+  BTC: "bitcoin",
+  WBTC: "bitcoin",
+  CBBTC: "bitcoin",
+  BTCB: "bitcoin",
+  "BTC.B": "bitcoin",
+  LINK: "chainlink",
+  ARB: "arbitrum",
+  OP: "optimism",
+  UNI: "uniswap",
+  AAVE: "aave",
+  CAKE: "pancakeswap-token",
+  DAI: "dai",
+};
+
 function swapCashValue({ side, symbol, value, tokenOutSymbol, amountOut }) {
+  if (CASH_RE.test(symbol || "") && value != null) return Number(value) || 0;
+  if (CASH_RE.test(tokenOutSymbol || "") && amountOut != null) return Number(amountOut) || 0;
   if (side === "buy" && CASH_RE.test(symbol || "")) return Number(value) || 0;
   if (side === "sell" && CASH_RE.test(tokenOutSymbol || "")) return Number(amountOut) || 0;
+  return null;
+}
+
+async function usdPriceOf(symbol) {
+  const s = String(symbol || "").trim().toUpperCase();
+  if (!s) return null;
+  if (CASH_RE.test(s)) return 1;
+  const id = PRICE_IDS[s] || (resolveSymbol(s) || {}).coinId;
+  if (!id) return null;
+  try {
+    const prices = await getPrices([id]);
+    const usd = prices[id] && Number(prices[id].usd);
+    return Number.isFinite(usd) && usd > 0 ? usd : null;
+  } catch {
+    return null;
+  }
+}
+
+async function swapUsdValue(t) {
+  const cash = swapCashValue(t);
+  if (cash != null) return cash;
+  const amountIn = Number(t.value);
+  if (Number.isFinite(amountIn) && amountIn > 0) {
+    const pIn = await usdPriceOf(t.symbol);
+    if (pIn != null) return amountIn * pIn;
+  }
+  const amountOut = Number(t.amountOut);
+  if (Number.isFinite(amountOut) && amountOut > 0) {
+    const pOut = await usdPriceOf(t.tokenOutSymbol);
+    if (pOut != null) return amountOut * pOut;
+  }
   return null;
 }
 
@@ -376,13 +440,13 @@ async function spentInLast24h(userId) {
     status: { $ne: "failed" },
     createdAt: { $gte: since },
   })
-    .select("side symbol value tokenOutSymbol amountOut")
+    .select("side symbol value tokenOutSymbol amountOut cashValue")
     .lean();
 
   let spent = 0;
   let unpriced = 0;
   for (const t of rows) {
-    const cash = swapCashValue(t);
+    const cash = Number.isFinite(t.cashValue) ? t.cashValue : swapCashValue(t);
     if (cash == null) unpriced += 1;
     else spent += cash;
   }
@@ -390,7 +454,7 @@ async function spentInLast24h(userId) {
 }
 
 async function checkSwapLimits({ user, chain, side, symbol, value, tokenOutSymbol, amountOut }) {
-  const cash = swapCashValue({ side, symbol, value, tokenOutSymbol, amountOut });
+  const cash = await swapUsdValue({ side, symbol, value, tokenOutSymbol, amountOut });
   if (cash == null) {
     return {
       ok: false,

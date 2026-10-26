@@ -48,6 +48,11 @@ async function getNgnRate() {
   return { rate: fallback, fetchedAt: new Date(), stale: true };
 }
 
+async function expireLapsedAddress(userId, debtId) {
+  const { expireDueAddresses } = require("./paymentWatch.service");
+  return expireDueAddresses({ userId, debtId });
+}
+
 function usdcForKobo(kobo, ngnPerUsd) {
   if (!(ngnPerUsd > 0)) throw httpError(500, "Invalid NGN/USD rate");
   return koboToUsdCents(kobo, ngnPerUsd) / 100;
@@ -97,7 +102,8 @@ async function quoteForInvoice({ userId, debtId, chainId, tokenSymbol }) {
   const user = await User.findById(userId).select("crypto");
   const expiryHours = Math.min(720, Math.max(1, user?.crypto?.expiryHours || 72));
 
-  const active = await PaymentAddress.findOne({ debtId, status: "active" });
+  await expireLapsedAddress(userId, debt._id);
+  const active = await PaymentAddress.findOne({ debtId: debt._id, status: "active" });
 
   return {
     balanceNgn: balance,
@@ -129,7 +135,8 @@ async function issueAddress({ userId, debtId, chainId, address, derivationIndex,
     throw httpError(429, "Too many payment addresses generated recently. Try again later.");
   }
 
-  const existing = await PaymentAddress.findOne({ debtId, status: "active" });
+  await expireLapsedAddress(userId, debt._id);
+  const existing = await PaymentAddress.findOne({ debtId: debt._id, status: "active" });
   if (existing) {
     throw httpError(409, "This invoice already has an active payment address.");
   }

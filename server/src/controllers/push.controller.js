@@ -1,19 +1,21 @@
+const crypto = require("crypto");
 const { scopedRepo } = require("../repositories/scoped");
 const accounts = require("../repositories/accounts");
 const devicesRepo = require("../repositories/devices");
-const {
-  publicKey,
-  verifyActionToken,
-  notifyUser,
-  pushConfigured,
-} = require("../services/push.service");
+const { pushStatus, verifyActionToken, notifyUser } = require("../services/push.service");
 const {
   generateReminderForDebt,
   dispatchReminder,
 } = require("../services/reminder.service");
 
 async function key(req, res) {
-  return res.json({ publicKey: publicKey(), configured: pushConfigured() });
+  const status = pushStatus();
+  return res.json({ publicKey: status.publicKey, configured: status.configured, problem: status.problem });
+}
+
+async function vapid(req, res) {
+  const status = pushStatus();
+  return res.json({ publicKey: status.publicKey, configured: status.configured });
 }
 
 function subscriptionProblem(sub) {
@@ -138,26 +140,91 @@ async function unsubscribe(req, res) {
   }
 }
 
+function notConfigured(res, problem) {
+  return res.status(503).json({
+    error: `Push is not set up on the server: ${problem || "the VAPID keys are missing"}. Nothing was sent.`,
+    code: "not_configured",
+    problem: problem || null,
+  });
+}
+
+function reportOf(result, testId, mine) {
+  const results = result.results.map((r) => ({
+    id: r.id,
+    device: r.device,
+    host: r.host,
+    thisDevice: r.thisDevice,
+    delivered: r.delivered,
+    status: r.status,
+    reason: r.reason,
+    removed: r.removed,
+    renew: r.renew,
+  }));
+  const own = results.find((r) => r.thisDevice);
+  let thisDevice = null;
+  if (mine) {
+    thisDevice = own
+      ? { registered: true, ...own }
+      : {
+          registered: false,
+          delivered: false,
+          renew: true,
+          reason: "This device is not registered for notifications on this account, so it was not sent here.",
+        };
+  }
+  return {
+    testId,
+    devices: result.devices,
+    delivered: result.sent,
+    refused: result.devices - result.sent,
+    removed: result.pruned,
+    results,
+    thisDevice,
+  };
+}
+
 async function test(req, res) {
   try {
-    const result = await notifyUser(req.user._id, {
-      title: "LedgerWatch test notification",
-      body: "If you can see this, notifications are working on this device.",
-      tag: "test",
-      type: "test",
-      url: "/app/settings",
-    });
-    if (result.skipped) {
-      return res
-        .status(503)
-        .json({ error: "Push is not configured on the server (no VAPID keys)." });
+    const status = pushStatus();
+    if (!status.configured) return notConfigured(res, status.problem);
+
+    const mine = typeof req.body.endpoint === "string" && req.body.endpoint ? req.body.endpoint : null;
+    const testId = crypto.randomBytes(8).toString("hex");
+    const result = await notifyUser(
+      req.user._id,
+      {
+        title: "LedgerWatch test notification",
+        body: "If you can see this, notifications are working on this device.",
+        tag: "test",
+        type: "test",
+        url: "/app/settings?section=notifications",
+        testId,
+      },
+      null,
+      { thisEndpoint: mine }
+    );
+    if (result.skipped) return notConfigured(res, result.problem);
+    if (result.devices === null) {
+      return res.status(500).json({ error: result.error || "The devices for this account could not be read.", code: "devices_unreadable" });
+    }
+
+    const report = reportOf(result, testId, mine);
+    if (result.devices === 0) {
+      return res.status(404).json({
+        error:
+          "No device is registered for notifications on this account, so nothing was sent. Press Enable notifications on the device that should receive them.",
+        code: "no_devices",
+        ...report,
+      });
     }
     if (result.sent === 0) {
-      return res
-        .status(404)
-        .json({ error: "No push subscriptions for this account. Enable notifications first." });
+      return res.status(502).json({
+        error: `The push service refused every registered device (${result.devices}), so nothing was sent.`,
+        code: "all_refused",
+        ...report,
+      });
     }
-    return res.json({ ok: true, sent: result.sent });
+    return res.json({ ok: true, ...report });
   } catch (err) {
     console.error("push test error:", err.message);
     return res.status(500).json({ error: "Failed to send test notification" });
@@ -231,4 +298,4 @@ async function action(req, res) {
   }
 }
 
-module.exports = { key, subscribe, resubscribe, devices, unsubscribe, test, action, bindDevice };
+module.exports = { key, vapid, subscribe, resubscribe, devices, unsubscribe, test, action, bindDevice };
