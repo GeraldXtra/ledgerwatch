@@ -8,6 +8,7 @@ import { TrailProvider, WorkspaceProvider, useWorkspace } from "../components/ui
 import LogoMark from "../components/LogoMark";
 import ThemeToggle from "../components/ThemeToggle";
 import { ensureServiceWorker, onForegroundPush, releaseDeviceOnSignOut, syncPush } from "../api/push";
+import { nativePushAvailable, onNativeMessage, startNativeListening } from "../api/nativePush";
 
 const NAV_ITEMS = [
   { id: "receivables", label: "Receivables", to: "/app/receivables" },
@@ -94,8 +95,35 @@ function depthOf(location) {
 
 function PushBridge() {
   const toast = useToast();
+  const navigate = useNavigate();
 
   useEffect(() => {
+    if (nativePushAvailable()) {
+      const stopListening = startNativeListening();
+      const stopMessages = onNativeMessage((message) => {
+        if (message.kind === "push") {
+          const payload = message.payload || {};
+          toast(payload.title ? `${payload.title}. ${payload.body || ""}`.trim() : payload.body || "", {
+            type: payload.type === "alert" ? "info" : "success",
+          });
+          window.dispatchEvent(new CustomEvent("ledgerwatch:push", { detail: payload }));
+        } else if (message.kind === "open") {
+          const url = (message.payload && message.payload.url) || "/app";
+          if (url.startsWith("/app")) navigate(url);
+        }
+      });
+      syncPush({ force: true });
+      const onVisibleNative = () => {
+        if (document.visibilityState === "visible") syncPush();
+      };
+      document.addEventListener("visibilitychange", onVisibleNative);
+      return () => {
+        document.removeEventListener("visibilitychange", onVisibleNative);
+        stopMessages();
+        stopListening();
+      };
+    }
+
     ensureServiceWorker().then(() => syncPush({ force: true }));
     const onVisible = () => {
       if (document.visibilityState === "visible") syncPush();
@@ -134,7 +162,7 @@ function PushBridge() {
       document.removeEventListener("visibilitychange", onVisible);
       stop();
     };
-  }, [toast]);
+  }, [toast, navigate]);
 
   return null;
 }

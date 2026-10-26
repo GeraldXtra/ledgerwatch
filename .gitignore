@@ -10,6 +10,11 @@ dist/
 .env.local
 build/
 resume-session.txt
+
+# Firebase: the phone's config and the server's service account key are never committed.
+mobile/android/app/google-services.json
+mobile/ios/App/App/GoogleService-Info.plist
+**/*service-account*.json
 *resume-session.txt
 
 # Wallet seed phrases / private keys - NEVER commit.

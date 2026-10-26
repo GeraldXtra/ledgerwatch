@@ -12,5 +12,13 @@ module.exports = {
   resubscribe: { body: z.object({ oldEndpoint: text(2048).optional(), subscription: subscription.optional() }) },
   subscribe: { body: z.object({ subscription: subscription.optional(), replaces: text(2048).nullable().optional() }) },
   unsubscribe: { body: z.object({ endpoint: text(2048).optional() }) },
-  test: { body: z.object({ endpoint: text(2048).optional() }) },
+  test: { body: z.object({ endpoint: text(2048).optional(), token: text(4096).optional() }) },
+  native: {
+    body: z.object({
+      platform: z.enum(["android", "ios"]).optional(),
+      token: text(4096).optional(),
+      replaces: text(4096).nullable().optional(),
+    }),
+  },
+  nativeForget: { body: z.object({ token: text(4096).optional() }) },
 };

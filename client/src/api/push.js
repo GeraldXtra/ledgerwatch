@@ -1,5 +1,13 @@
 import http from "./http";
 import { API_BASE } from "./base";
+import {
+  forgetNative,
+  nativePermission,
+  nativePushAvailable,
+  onNativeMessage,
+  registerNative,
+  storedNativeToken,
+} from "./nativePush";
 
 const log = (stage, detail) =>
   console.info(`[push] ${stage}${detail !== undefined ? ": " : ""}`, detail ?? "");
@@ -23,6 +31,7 @@ export function appShell() {
 
 export function unsupportedReason() {
   if (typeof window === "undefined") return "Not running in a browser.";
+  if (nativePushAvailable()) return null;
   if (!window.isSecureContext) {
     return "Push needs a secure context. Use https, or localhost for development.";
   }
@@ -215,6 +224,8 @@ export async function getPushState() {
     };
   }
 
+  if (nativePushAvailable()) return nativePushState();
+
   let configured = false;
   let problem = null;
   let publicKey = null;
@@ -263,12 +274,63 @@ export async function getPushState() {
   };
 }
 
+async function nativeServerStatus() {
+  const { data } = await http.get("/api/push/key");
+  const native = (data && data.native) || {};
+  return { configured: Boolean(native.configured), problem: native.problem || null };
+}
+
+async function nativePushState() {
+  const key = await nativeServerStatus();
+  const token = storedNativeToken();
+  let registered = null;
+  let deviceCount = null;
+  try {
+    const { data } = await http.get("/api/push/devices");
+    const list = (data && data.devices) || [];
+    deviceCount = list.length;
+    registered = token ? list.some((d) => d.token === token) : false;
+  } catch (err) {
+    warn("could not read the registered devices", err);
+  }
+  return {
+    supported: true,
+    native: true,
+    configured: key.configured,
+    problem: key.problem,
+    subscribed: Boolean(token),
+    keyMatches: null,
+    registered,
+    deviceCount,
+    permission: await nativePermission(),
+    device: deviceKind(),
+    maxActions: 0,
+  };
+}
+
+async function enableNative() {
+  let key;
+  try {
+    key = await nativeServerStatus();
+  } catch (err) {
+    return failure("not-configured", err, { detail: "Could not reach the server." });
+  }
+  if (!key.configured) return { ok: false, reason: "not-configured", detail: key.problem || "App notifications are not set up on the server." };
+  const out = await registerNative({ ask: true });
+  if (out.ok) {
+    writeStore(OFF_KEY, null);
+    lastSyncAt = Date.now();
+  }
+  return out;
+}
+
 export async function enablePush() {
   const reason = unsupportedReason();
   if (reason) {
     log("unsupported", reason);
     return { ok: false, reason: "unsupported", detail: reason };
   }
+  if (nativePushAvailable()) return enableNative();
 
   let key;
   try {
@@ -293,6 +355,15 @@ export async function enablePush() {
 }
 
 async function doSync(force, renew) {
+  if (nativePushAvailable()) {
+    if (pushTurnedOffHere()) return { ok: false, reason: "off-here" };
+    const permission = await nativePermission();
+    if (permission !== "granted") return { ok: false, reason: "no-permission", permission };
+    if (!force && Date.now() - lastSyncAt < SYNC_EVERY_MS) return { ok: true, reason: "recent", token: storedNativeToken() };
+    const out = await registerNative({ ask: false });
+    if (out.ok) lastSyncAt = Date.now();
+    return out.ok ? { ...out, endpoint: out.token, renewed: renew || out.renewed } : out;
+  }
   if (!pushSupported() || unsupportedReason()) return { ok: false, reason: "unsupported" };
   if (Notification.permission !== "granted") return { ok: false, reason: "no-permission", permission: Notification.permission };
   if (pushTurnedOffHere()) return { ok: false, reason: "off-here" };
@@ -330,6 +401,12 @@ export function renewPush() {
 }
 
 export async function releaseDeviceOnSignOut() {
+  if (nativePushAvailable()) {
+    const token = storedNativeToken();
+    if (token) await http.post("/api/push/native/forget", { token }).catch((err) => warn("could not release this phone on sign out", err));
+    lastSyncAt = 0;
+    return;
+  }
   if (!pushSupported()) return;
   try {
     const reg = await navigator.serviceWorker.getRegistration();
@@ -344,6 +421,11 @@ export async function releaseDeviceOnSignOut() {
 }
 
 export async function disablePush() {
+  if (nativePushAvailable()) {
+    const out = await forgetNative();
+    if (out.ok) writeStore(OFF_KEY, "1");
+    return out;
+  }
   if (!pushSupported()) return { ok: true };
   try {
     const reg = await navigator.serviceWorker.getRegistration();
@@ -384,7 +466,8 @@ export async function disablePush() {
 
 export async function sendTestNotification(endpoint) {
   try {
-    const { data } = await http.post("/api/push/test", endpoint ? { endpoint } : {});
+    const body = endpoint ? (nativePushAvailable() ? { token: endpoint } : { endpoint }) : {};
+    const { data } = await http.post("/api/push/test", body);
     return { ok: true, ...data };
   } catch (err) {
     const data = err && err.response && err.response.data;
@@ -398,7 +481,8 @@ export async function sendTestNotification(endpoint) {
 function watchForTests() {
   const seen = new Map();
   const waiters = new Map();
-  const stop = onForegroundPush((message) => {
+  const subscribe = nativePushAvailable() ? onNativeMessage : onForegroundPush;
+  const stop = subscribe((message) => {
     if (message.kind !== "push") return;
     const payload = message.payload || {};
     if (payload.type !== "test" || !payload.testId) return;

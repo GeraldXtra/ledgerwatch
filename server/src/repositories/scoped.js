@@ -13,8 +13,10 @@ const PushSubscription = require("../models/PushSubscription");
 const ProfitRecord = require("../models/ProfitRecord");
 const RampOrder = require("../models/RampOrder");
 const EmailOptOut = require("../models/EmailOptOut");
+const NativeDevice = require("../models/NativeDevice");
 
 const TENANT_MODELS = {
+  nativeDevices: NativeDevice,
   debts: Debt,
   payments: Payment,
   paymentAddresses: PaymentAddress,
