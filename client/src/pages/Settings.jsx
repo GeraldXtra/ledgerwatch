@@ -1,5 +1,5 @@
 import { useSearchParams } from "react-router-dom";
-import { PageHeader, ToastProvider } from "../components/ui";
+import { Field, PageHeader, Select, ToastProvider } from "../components/ui";
 import { Tabs } from "../components/ui/Tabs";
 import ProfileSection from "../features/settings/ProfileSection";
 import PayoutSection from "../features/settings/PayoutSection";
@@ -45,13 +45,26 @@ function SettingsInner() {
       />
 
       <div className="settings-view">
-        <Tabs
-          tabs={SECTIONS}
-          value={active}
-          onChange={choose}
-          label="Settings sections"
-          idPrefix="settings"
-        />
+        <div className="settings-tabs">
+          <Tabs
+            tabs={SECTIONS}
+            value={active}
+            onChange={choose}
+            label="Settings sections"
+            idPrefix="settings"
+          />
+        </div>
+        <div className="settings-picker">
+          <Field label="Section" htmlFor="settings-section">
+            <Select id="settings-section" value={active} onChange={(e) => choose(e.target.value)}>
+              {SECTIONS.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
 
         <section
           key={active}

@@ -49,3 +49,6 @@ _audit_*.js
 
 # Phone screenshots shared for debugging; local only.
 /screenshots/
+
+# Editor settings
+.vscode/
