@@ -5034,3 +5034,17 @@ button.coin-result:focus-visible {
     margin-bottom: 0;
   }
 }
+
+.settings-picker {
+  display: none;
+}
+
+@media (max-width: 759px) {
+  .settings-tabs {
+    display: none;
+  }
+
+  .settings-picker {
+    display: block;
+  }
+}
