@@ -206,6 +206,7 @@ function WalletInner() {
   const toast = useToast();
   const [discovered, setDiscovered] = useState(null);
   const [discoverySyncFailed, setDiscoverySyncFailed] = useState(false);
+  const [discoverySyncLimited, setDiscoverySyncLimited] = useState(false);
   const [discoveredBusy, setDiscoveredBusy] = useState(null);
   const [discoveredError, setDiscoveredError] = useState("");
 
@@ -413,10 +414,12 @@ function WalletInner() {
       if (!stillCurrent(run)) return;
       setDiscovered(tokens);
       setDiscoverySyncFailed(Boolean(sync && sync.failed));
+      setDiscoverySyncLimited(Boolean(sync && !sync.failed && sync.limited));
     } catch {
       if (!stillCurrent(run)) return;
       setDiscovered([]);
       setDiscoverySyncFailed(true);
+      setDiscoverySyncLimited(false);
     }
   }, [address, chain]);
 
@@ -882,6 +885,7 @@ function WalletInner() {
               chain={chain}
               tokens={discovered}
               syncFailed={discoverySyncFailed}
+              syncLimited={discoverySyncLimited}
               busyAddress={discoveredBusy}
               error={discoveredError}
               onAdd={(t) => decideDiscovered(t, "add")}

@@ -144,7 +144,7 @@ export default function AvatarUpload() {
           onChange={(e) => handleFile(e.target.files && e.target.files[0])}
         />
 
-        <div className="row" style={{ marginTop: 12 }}>
+        <div className="row wrap" style={{ marginTop: 12 }}>
           <Button size="sm" disabled={busy} onClick={pick}>
             <Upload size={14} /> {busy ? "Uploading…" : "Choose image"}
           </Button>

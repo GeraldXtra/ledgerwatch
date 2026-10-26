@@ -32,6 +32,7 @@ export default function NewTokensCard({
   chain,
   tokens,
   syncFailed = false,
+  syncLimited = false,
   busyAddress = null,
   error = "",
   onAdd,
@@ -42,15 +43,27 @@ export default function NewTokensCard({
   const fresh = (tokens || []).filter((t) => t.status === "new");
   const ignored = (tokens || []).filter((t) => t.status === "ignored");
 
-  if (fresh.length === 0 && ignored.length === 0 && !syncFailed) return null;
+  const name = chain ? chain.name : "this network";
+  const limitedNote = (
+    <p className="mm-found-note">
+      The public nodes for {name} answer only for tokens this wallet already lists, so a token
+      nobody added is not found here. Add one by its contract address if you expect it.
+    </p>
+  );
+
+  if (fresh.length === 0 && ignored.length === 0 && !syncFailed && !syncLimited) return null;
 
   if (fresh.length === 0 && ignored.length === 0) {
     return (
       <div className="mm-found" role="region" aria-label="New tokens">
-        <p className="mm-found-note warn">
-          Could not check {chain ? chain.name : "this network"} for new tokens just now. It is
-          checked again each time the wallet opens.
-        </p>
+        {syncFailed ? (
+          <p className="mm-found-note warn">
+            Could not check {name} for new tokens just now. It is checked again each time the
+            wallet opens.
+          </p>
+        ) : (
+          limitedNote
+        )}
       </div>
     );
   }
@@ -85,6 +98,7 @@ export default function NewTokensCard({
           behind. It is checked again each time the wallet opens.
         </p>
       )}
+      {!syncFailed && syncLimited && limitedNote}
 
       {error && <p className="mm-found-note warn">{error}</p>}
 
