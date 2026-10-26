@@ -45,6 +45,73 @@ function addressTopic(address) {
   return "0x" + address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 }
 
+const MIN_DISCOVERY_SPAN = 100;
+const DISCOVERY_RETRY_MS = 10 * 60 * 1000;
+const discoverySpan = new Map();
+const discoveryRefusedAt = new Map();
+
+function attemptsOf(res) {
+  return Array.isArray(res && res.attempts) ? res.attempts : [];
+}
+
+function refusedByNode(res) {
+  if (!res || res.ok) return false;
+  if (/^(rpc error|HTTP 4)/i.test(String(res.reason || ""))) return true;
+  const attempts = attemptsOf(res);
+  return attempts.length > 0 && attempts.every((a) => a.status >= 400 && a.status < 500);
+}
+
+function worthSplitting(res) {
+  if (!refusedByNode(res)) return false;
+  const reasons = [res.reason, ...attemptsOf(res).map((a) => a.reason)].filter(Boolean).join(" | ");
+  return /range|span|block|too many|too large|limit|exceed|413|payload|-32614|-32005/i.test(reasons);
+}
+
+function rememberSpan(chainId, span) {
+  const current = discoverySpan.get(chainId);
+  if (!current || span < current) discoverySpan.set(chainId, span);
+}
+
+async function discoveryLogs(chain, address, from, to) {
+  const size = to - from + 1;
+  const cap = discoverySpan.get(chain.chainId);
+  if (cap && size > cap) return splitDiscovery(chain, address, from, to, cap);
+  const res = await rpcService.rpcCallTyped(chain, "eth_getLogs", [
+    { topics: [TRANSFER_TOPIC, null, addressTopic(address)], fromBlock: "0x" + from.toString(16), toBlock: "0x" + to.toString(16) },
+  ]);
+  if (res && res.ok && Array.isArray(res.result)) return { ok: true, logs: res.result, queries: 1 };
+  const refused = refusedByNode(res);
+  if (!worthSplitting(res) || size <= MIN_DISCOVERY_SPAN) return { ok: false, refused, queries: 1 };
+  const out = await splitDiscovery(chain, address, from, to, Math.ceil(size / 2));
+  return { ...out, queries: out.queries + 1 };
+}
+
+async function splitDiscovery(chain, address, from, to, piece) {
+  const logs = [];
+  let queries = 0;
+  for (let start = from; start <= to; start += piece) {
+    const part = await discoveryLogs(chain, address, start, Math.min(to, start + piece - 1));
+    queries += part.queries;
+    if (!part.ok) return { ok: false, refused: part.refused, queries };
+    logs.push(...part.logs);
+  }
+  rememberSpan(chain.chainId, Math.max(piece, MIN_DISCOVERY_SPAN));
+  return { ok: true, logs, queries };
+}
+
+async function discoverWindow(chain, address, from, to) {
+  const refusedAt = discoveryRefusedAt.get(chain.chainId) || 0;
+  if (Date.now() - refusedAt < DISCOVERY_RETRY_MS) return { ok: false, refused: true, queries: 0 };
+  const out = await discoveryLogs(chain, address, from, to);
+  if (!out.ok && out.refused) discoveryRefusedAt.set(chain.chainId, Date.now());
+  return out;
+}
+
+function _resetDiscoveryForTests() {
+  discoverySpan.clear();
+  discoveryRefusedAt.clear();
+}
+
 function unitsToDecimalString(raw, decimals) {
   const v = BigInt(raw || 0);
   const d = BigInt(decimals);
@@ -215,13 +282,11 @@ async function doSync({ userId, chainId, address }) {
   const unknown = new Map();
 
   for (const w of windows) {
-    queries++;
     const range = { fromBlock: "0x" + w.from.toString(16), toBlock: "0x" + w.to.toString(16) };
-    const first = await rpcService.rpcCallTyped(chain, "eth_getLogs", [
-      { topics: [TRANSFER_TOPIC, null, addressTopic(address)], ...range },
-    ]);
-    let logs = first && first.ok ? first.result : null;
-    const refused = Boolean(first && !first.ok && /^rpc error/i.test(String(first.reason || "")));
+    const first = await discoverWindow(chain, address, w.from, w.to);
+    queries += first.queries;
+    let logs = first.ok ? first.logs : null;
+    const refused = !first.ok && first.refused;
 
     if (!Array.isArray(logs) && refused && known.size) {
       queries++;
@@ -454,6 +519,9 @@ module.exports = {
   decodeAbiString,
   sanitizeText,
   spanFor,
+  discoverWindow,
+  _resetDiscoveryForTests,
+  MIN_DISCOVERY_SPAN,
   MAX_DISCOVERED_PER_CHAIN,
   MAX_LOOKUP_ATTEMPTS,
 };

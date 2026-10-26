@@ -185,11 +185,11 @@ async function rpcCallTyped(chain, method, params, opts = {}) {
   const res = await sendToChain(chain, { jsonrpc: "2.0", id: 1, method, params }, opts);
   if (!res.ok) {
     const summary = res.attempts.map((a) => `${a.host}: ${a.reason}`).join(" | ");
-    return { ok: false, reason: `all ${res.total} endpoint(s) failed: ${summary}` };
+    return { ok: false, reason: `all ${res.total} endpoint(s) failed: ${summary}`, attempts: res.attempts };
   }
   try {
     const json = JSON.parse(res.text);
-    if (json.error) return { ok: false, reason: `rpc error: ${json.error.message}` };
+    if (json.error) return { ok: false, reason: `rpc error: ${json.error.message}`, attempts: res.attempts };
     return { ok: true, result: json.result === undefined ? null : json.result };
   } catch {
     return { ok: false, reason: `${res.host} returned unparseable JSON` };

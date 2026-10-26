@@ -5048,3 +5048,23 @@ button.coin-result:focus-visible {
     display: block;
   }
 }
+
+@media (max-width: 599px) {
+  .avatar-upload {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .avatar-upload > .avatar {
+    align-self: center;
+  }
+
+  .avatar-upload .grow {
+    width: 100%;
+  }
+
+  .avatar-drop {
+    min-width: 0;
+  }
+}

@@ -27,7 +27,10 @@ const {
   decodeAbiString,
   sanitizeText,
   spanFor,
+  _resetDiscoveryForTests,
 } = require("../services/walletHistory.service");
+
+beforeEach(() => _resetDiscoveryForTests());
 
 const CHAIN_ID = 84532;
 const WALLET = "0x1111111111111111111111111111111111111111";
