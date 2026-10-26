@@ -1,0 +1,66 @@
+{
+  "name": "ledgerwatch-desktop",
+  "productName": "LedgerWatch",
+  "version": "1.0.0",
+  "description": "LedgerWatch for Windows, macOS and Linux",
+  "private": true,
+  "main": "main.js",
+  "license": "MIT",
+  "author": "LedgerWatch",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --x64",
+    "dist:mac": "electron-builder --mac dmg",
+    "dist:linux": "electron-builder --linux AppImage"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "co.useledgerwatch.desktop",
+    "productName": "LedgerWatch",
+    "copyright": "LedgerWatch",
+    "directories": {
+      "output": "dist",
+      "buildResources": "icons"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "offline.html",
+      "icons/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icons/icon.png",
+      "signAndEditExecutable": false,
+      "artifactName": "LedgerWatch-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "LedgerWatch"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "icons/icon.png",
+      "category": "public.app-category.finance"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "icons/icon.png",
+      "category": "Finance"
+    }
+  }
+}

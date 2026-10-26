@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ethers } from "ethers";
-import QRCode from "qrcode";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Check, Copy, ExternalLink, RefreshCw, Wallet } from "lucide-react";
+import { ExternalLink, RefreshCw, Wallet } from "lucide-react";
 import { Button, Card, SkeletonLines } from "../../components/ui";
-import TokenLogo from "../../components/TokenLogo";
 import { getProvider, ERC20_ABI, rpcErrorReason } from "../wallet/provider";
-import { coinIdForSymbol, stableUsdPrice } from "../wallet/usdValue";
+import { coinIdForSymbol, fetchUsdPrices, stableUsdPrice } from "../wallet/usdValue";
 import { fetchTxs } from "../wallet/walletApi";
-import { usd, signedUsd, price as fmtPrice } from "./format";
 import { tokensForChain, CASH_CHOICES, cashTokenFor, cashChoiceOf } from "./tradeability";
+import useDisplayCurrency from "../currency/useDisplayCurrency";
+import CurrencyPicker from "../currency/CurrencyPicker";
+import LiveBalanceView from "./LiveBalanceView";
 
 export default function LivePortfolioPanel({
   chain,
@@ -24,6 +24,7 @@ export default function LivePortfolioPanel({
   onCashSymbol,
   customTokens = [],
 }) {
+  const money = useDisplayCurrency();
   const [rows, setRows] = useState(null);
   const [txs, setTxs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -31,28 +32,51 @@ export default function LivePortfolioPanel({
   const [txError, setTxError] = useState(null);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
-  const [qr, setQr] = useState("");
-  const [qrFailed, setQrFailed] = useState(false);
+  const [quoted, setQuoted] = useState({});
+  const runRef = useRef(0);
 
   const load = useCallback(async () => {
     if (!chain || !address) return;
+    const run = ++runRef.current;
+    const current = () => run === runRef.current;
     setLoading(true);
     setLoadError(null);
     try {
       let history = [];
       try {
         history = await fetchTxs(chain.chainId);
+        if (!current()) return;
         setTxError(null);
       } catch (histErr) {
         history = [];
+        if (!current()) return;
         setTxError(
           histErr?.response?.data?.error || histErr?.message || "the server did not answer"
         );
       }
       setTxs(history);
 
-      const provider = getProvider(chain.chainId);
+      const provider = getProvider(chain.chainId, { batched: true });
       const tokens = tokensForChain(chain, customTokens);
+
+      const nativeRow = await provider
+        .getBalance(address)
+        .then((wei) => ({
+          symbol: chain.nativeSymbol,
+          address: null,
+          decimals: 18,
+          native: true,
+          qty: Number(ethers.formatEther(wei)),
+        }))
+        .catch((nativeErr) => ({
+          symbol: chain.nativeSymbol,
+          address: null,
+          decimals: 18,
+          native: true,
+          qty: null,
+          unknown: true,
+          reason: rpcErrorReason(nativeErr),
+        }));
 
       const balances = await Promise.all(
         tokens.map(async (t) => {
@@ -65,17 +89,20 @@ export default function LivePortfolioPanel({
           }
         })
       );
-      setRows(balances.filter((b) => b.unknown || b.qty > 0));
+      if (!current()) return;
+      const all = [nativeRow, ...balances];
+      setRows(all);
       if (onRows) onRows(balances);
-      if (balances.length > 0 && balances.every((b) => b.unknown)) {
-        setLoadError(balances[0].reason || "balances could not be read on this network");
+      if (all.every((b) => b.unknown)) {
+        setLoadError(all.find((b) => b.reason)?.reason || "balances could not be read on this network");
       }
     } catch (err) {
+      if (!current()) return;
       setRows(null);
       if (onRows) onRows(null);
       setLoadError(rpcErrorReason(err) || "balances could not be read");
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chain, address, reloadKey, customTokens]);
@@ -86,20 +113,45 @@ export default function LivePortfolioPanel({
 
   useEffect(() => {
     if (onRows) onRows(null);
+    setRows(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chain?.chainId, address]);
 
+  const marketPrice = useCallback(
+    (symbol) => {
+      const stable = stableUsdPrice(symbol);
+      if (stable != null) return stable;
+      const coinId =
+        coinIdForSymbol(symbol) || coinIdBySymbol?.[String(symbol).toUpperCase()] || null;
+      const m = coinId ? markets[coinId] : null;
+      return m && typeof m.current_price === "number" ? m.current_price : null;
+    },
+    [markets, coinIdBySymbol]
+  );
+
   useEffect(() => {
-    let active = true;
-    if (!address) return;
-    setQrFailed(false);
-    QRCode.toDataURL(address, { width: 180, margin: 1, color: { dark: "#0A1428", light: "#FFFFFF" } })
-      .then((u) => active && setQr(u))
-      .catch(() => active && setQrFailed(true));
+    let live = true;
+    const wanted = (rows || [])
+      .filter((r) => !r.unknown && Number(r.qty) > 0 && marketPrice(r.symbol) == null)
+      .map((r) => r.symbol);
+    if (!wanted.length) return undefined;
+    fetchUsdPrices(wanted).then((got) => {
+      if (live) setQuoted((prev) => ({ ...prev, ...got }));
+    });
     return () => {
-      active = false;
+      live = false;
     };
-  }, [address]);
+  }, [rows, marketPrice]);
+
+  const priceFor = useCallback(
+    (symbol) => {
+      const p = marketPrice(symbol);
+      if (p != null) return p;
+      const q = quoted[String(symbol).toUpperCase()];
+      return Number.isFinite(q) ? q : null;
+    },
+    [marketPrice, quoted]
+  );
 
   async function copyAddress() {
     try {
@@ -141,24 +193,6 @@ export default function LivePortfolioPanel({
     }
     return acc;
   }, [swaps]);
-
-  const priceFor = (symbol) => {
-    const stable = stableUsdPrice(symbol);
-    if (stable != null) return stable;
-
-    const coinId =
-      coinIdForSymbol(symbol) || coinIdBySymbol?.[String(symbol).toUpperCase()] || null;
-    const m = coinId ? markets[coinId] : null;
-    return m && typeof m.current_price === "number" ? m.current_price : null;
-  };
-
-  const totalValue = (rows || []).reduce((sum, r) => {
-    if (r.unknown) return sum;
-    const p = priceFor(r.symbol);
-    return sum + (p ? r.qty * p : 0);
-  }, 0);
-
-  const unreadCount = (rows || []).filter((r) => r.unknown).length;
 
   const explorerTx = (h) => (chain?.explorer ? `${chain.explorer}/tx/${h}` : null);
 
@@ -216,7 +250,8 @@ export default function LivePortfolioPanel({
             paper portfolio, and never added to it.
           </p>
         </div>
-        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+        <div className="row live-head-tools">
+          <CurrencyPicker compact />
           {onCashSymbol && (
             <div className="seg" role="group" aria-label="Trade with" style={{ maxWidth: 180 }}>
               {CASH_CHOICES.map((choice) => {
@@ -238,122 +273,28 @@ export default function LivePortfolioPanel({
             </div>
           )}
           <Button variant="ghost" icon title="Refresh" onClick={load}>
-            <RefreshCw size={15} />
+            <RefreshCw size={15} className={loading ? "spin" : undefined} />
           </Button>
         </div>
       </div>
 
-      {loading && !rows ? (
+      {loading && !rows && !loadError ? (
         <SkeletonLines count={3} />
-      ) : loadError ? (
-        <div className="live-read-error">
-          <AlertTriangle size={16} />
-          <div>
-            <p className="net-scope-lead">Balances on {chain.name} could not be read</p>
-            <p className="net-scope-body">
-              {loadError}. This is a connection problem rather than a zero balance, so your funds are
-              unaffected. Nothing simulated is shown in live mode, so nothing is shown here.
-            </p>
-            <Button variant="secondary" size="sm" onClick={load}>
-              <RefreshCw size={14} /> Try again
-            </Button>
-          </div>
-        </div>
-      ) : !rows || rows.length === 0 ? (
-        <div className="live-zero-state">
-          <p className="net-scope-lead">This wallet holds nothing on {chain.name} yet</p>
-          <p className="net-scope-body">
-            Balance is zero, and that was read successfully rather than failing. Deposit a stablecoin{" "}
-            <strong>on {chain.name}</strong> before trading. Funds sent on any other network will
-            not appear here.
-          </p>
-
-          <div className="live-deposit">
-            {qr && <img src={qr} alt="Wallet address QR code" className="live-qr" />}
-            {!qr && qrFailed && <p className="error-text">The QR code could not be drawn. Copy the address instead.</p>}
-            <div className="grow">
-              <span className="overline">Your address on {chain.name}</span>
-              <code className="wallet-address">{address}</code>
-              <Button variant="secondary" size="sm" onClick={copyAddress}>
-                {copied ? <Check size={14} /> : <Copy size={14} />}
-                {copied ? "Copied" : "Copy address"}
-              </Button>
-              {copyFailed && <p className="error-text">Your browser blocked copying. Select the address and copy it by hand.</p>}
-            </div>
-          </div>
-        </div>
       ) : (
-        <>
-          <div className="live-total">
-            <span className="overline">Held value</span>
-            <span className="num figure-xl">{usd(totalValue)}</span>
-            {unreadCount > 0 && (
-              <span className="muted caption">
-                Excludes {unreadCount} holding{unreadCount === 1 ? "" : "s"} that could not be read
-                so the real total is higher.
-              </span>
-            )}
-          </div>
-
-          <div className="table-wrap">
-          <table className="table compact">
-            <thead>
-              <tr>
-                <th>Asset</th>
-                <th className="ta-right">Held</th>
-                <th className="ta-right">Price</th>
-                <th className="ta-right">Value</th>
-                <th className="ta-right">Cost basis</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const price = priceFor(r.symbol);
-                const value = price && !r.unknown ? r.qty * price : null;
-                const b = basis[r.symbol];
-                const cost = !r.unknown && b && b.qty > 0 ? (b.cost / b.qty) * r.qty : null;
-                const pl = value != null && cost != null ? value - cost : null;
-                return (
-                  <tr key={r.address}>
-                    <td>
-                      <span className="cell-lead">
-                        <TokenLogo symbol={r.symbol} size={22} unknown={r.unknown} />
-                        {r.symbol}
-                      </span>
-                    </td>
-                    <td className="ta-right num">
-                      {r.unknown ? (
-                        <span className="muted caption">could not be read</span>
-                      ) : (
-                        r.qty.toLocaleString(undefined, { maximumFractionDigits: 6 })
-                      )}
-                    </td>
-                    <td className="ta-right num">{price ? fmtPrice(price) : "No price"}</td>
-                    <td className="ta-right num">{value != null ? usd(value) : "Not counted"}</td>
-                    <td className="ta-right num">
-                      {cost != null ? (
-                        <>
-                          {usd(cost)}
-                          {pl != null && (
-                            <span className={pl >= 0 ? "value-pos" : "value-neg"}>
-                              {" "}
-                              {signedUsd(pl)}
-                            </span>
-                          )}
-                        </>
-                      ) : txError ? (
-                        <span className="muted caption">history not read</span>
-                      ) : (
-                        <span className="muted caption">not bought here</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          </div>
-        </>
+        <LiveBalanceView
+          chain={chain}
+          address={address}
+          rows={rows || []}
+          loadError={loadError}
+          priceFor={priceFor}
+          basis={basis}
+          txError={txError}
+          money={money}
+          onRetry={load}
+          onCopy={copyAddress}
+          copied={copied}
+          copyFailed={copyFailed}
+        />
       )}
 
       {txError && (
@@ -372,8 +313,8 @@ export default function LivePortfolioPanel({
               <li key={s._id} className="row space-between crypto-tx-row">
                 <div>
                   <div className="num mono-strong">
-                    {s.side === "buy" ? "Bought" : "Sold"} {Number(s.amountOut).toFixed(6)}{" "}
-                    {s.tokenOutSymbol}
+                    {s.side === "buy" ? "Bought" : s.side === "sell" ? "Sold" : "Swapped for"}{" "}
+                    {Number(s.amountOut).toFixed(6)} {s.tokenOutSymbol}
                   </div>
                   <div className="muted caption">
                     for {s.value} {s.symbol}

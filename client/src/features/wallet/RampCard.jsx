@@ -92,6 +92,12 @@ export default function RampCard({ address }) {
         <p className="muted small" style={{ margin: 0 }}>{status.reason}</p>
       ) : (
         <div className="stack-sm">
+          {status.problem && (
+            <div className="against-note">
+              <TriangleAlert size={15} />
+              <span>{status.problem}</span>
+            </div>
+          )}
           <form className="stack-sm" onSubmit={prepare}>
             <div className="row wrap" style={{ gap: 8 }}>
               <Field label="I want to">

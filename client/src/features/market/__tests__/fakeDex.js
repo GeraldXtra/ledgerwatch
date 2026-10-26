@@ -37,15 +37,20 @@ const router = new ethers.Interface([
   "function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)",
   "function exactInput((bytes path,address recipient,uint256 amountIn,uint256 amountOutMinimum)) payable returns (uint256 amountOut)",
   "function multicall(uint256 deadline, bytes[] data) payable returns (bytes[] results)",
+  "function unwrapWETH9(uint256 amountMinimum, address recipient) payable",
 ]);
+
+export const ADDRESS_THIS = "0x0000000000000000000000000000000000000002";
 
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 const word = (n) => ethers.toBeHex(n, 32);
 
 const TOKENS_PER_USDC = 10n ** 12n * 4n;
 
-function poolOut(tokenIn, amountIn) {
-  return same(tokenIn, USDC) ? amountIn * TOKENS_PER_USDC : amountIn / TOKENS_PER_USDC;
+function poolOut(tokenIn, tokenOut, amountIn) {
+  if (same(tokenIn, USDC)) return amountIn * TOKENS_PER_USDC;
+  if (same(tokenOut, USDC)) return amountIn / TOKENS_PER_USDC;
+  return amountIn;
 }
 
 export function fakeDex({
@@ -69,14 +74,17 @@ export function fakeDex({
     if (parsed.name === "quoteExactInput") return revert("no route");
     const p = parsed.args[0];
     if (Number(p.fee) !== 500) return revert("no pool");
-    const out = poolOut(p.tokenIn, p.amountIn);
+    const out = poolOut(p.tokenIn, p.tokenOut, p.amountIn);
     return { result: ethers.AbiCoder.defaultAbiCoder().encode(["uint256", "uint160", "uint32", "uint256"], [out, 0n, 1, 100000n]) };
   }
+
+  const unwrapped = [];
 
   function runSimulation(calls) {
     const balances = new Map([[USDC.toLowerCase(), cashBalance]]);
     const get = (t) => balances.get(String(t).toLowerCase()) || 0n;
     const set = (t, v) => balances.set(String(t).toLowerCase(), v);
+    const failed = (message) => ({ status: "0x0", returnData: "0x", gasUsed: "0x1", error: { code: 3, message: `execution reverted: ${message}` } });
     return calls.map((c) => {
       const sel = String(c.data).slice(0, 10);
       if (sel === erc20.getFunction("approve").selector) {
@@ -86,19 +94,25 @@ export function fakeDex({
       if (sel === erc20.getFunction("balanceOf").selector) return { status: "0x1", returnData: word(get(c.to)), gasUsed: "0x1", logs: [] };
       if (same(c.to, ROUTER)) {
         const outer = router.decodeFunctionData("multicall", c.data);
-        const inner = router.parseTransaction({ data: outer[1][0] });
-        const p = inner.args[0];
-        const tokenIn = inner.name === "exactInputSingle" ? p.tokenIn : ethers.getAddress(ethers.dataSlice(p.path, 0, 20));
-        const amountIn = p.amountIn;
-        if (get(tokenIn) < amountIn) return { status: "0x0", returnData: "0x", gasUsed: "0x1", error: { code: 3, message: "execution reverted: STF" } };
-        if (!same(tokenIn, USDC) && !sellable) {
-          return { status: "0x0", returnData: "0x", gasUsed: "0x1", error: { code: 3, message: "execution reverted: TRANSFER_FROM_FAILED" } };
+        if (c.value) set(WETH, get(WETH) + BigInt(c.value));
+        for (const data of outer[1]) {
+          const inner = router.parseTransaction({ data });
+          if (inner.name === "unwrapWETH9") {
+            unwrapped.push({ amountMinimum: inner.args[0], recipient: inner.args[1] });
+            continue;
+          }
+          const p = inner.args[0];
+          const single = inner.name === "exactInputSingle";
+          const tokenIn = single ? p.tokenIn : ethers.getAddress(ethers.dataSlice(p.path, 0, 20));
+          const tokenOut = single ? p.tokenOut : ethers.getAddress(ethers.dataSlice(p.path, ethers.dataLength(p.path) - 20));
+          const amountIn = p.amountIn;
+          if (get(tokenIn) < amountIn) return failed("STF");
+          if (!same(tokenIn, USDC) && !same(tokenIn, WETH) && !sellable) return failed("TRANSFER_FROM_FAILED");
+          const gross = poolOut(tokenIn, tokenOut, amountIn);
+          const delivered = same(tokenOut, USDC) || same(tokenOut, WETH) ? gross : gross - (gross * transferFeeBps) / 10000n;
+          set(tokenIn, get(tokenIn) - amountIn);
+          if (!same(p.recipient, ADDRESS_THIS)) set(tokenOut, get(tokenOut) + delivered);
         }
-        const tokenOut = same(tokenIn, USDC) ? (inner.name === "exactInputSingle" ? p.tokenOut : ethers.getAddress(ethers.dataSlice(p.path, ethers.dataLength(p.path) - 20))) : USDC;
-        const gross = poolOut(tokenIn, amountIn);
-        const delivered = same(tokenOut, USDC) ? gross : gross - (gross * transferFeeBps) / 10000n;
-        set(tokenIn, get(tokenIn) - amountIn);
-        set(tokenOut, get(tokenOut) + delivered);
         return { status: "0x1", returnData: "0x", gasUsed: "0x1", logs: [] };
       }
       return { status: "0x0", returnData: "0x", gasUsed: "0x1", error: { code: -32015, message: "unknown call" } };
@@ -174,5 +188,5 @@ export function fakeDex({
     };
   };
   const provider = new ethers.JsonRpcProvider(req, CHAIN_ID, { staticNetwork: true, batchMaxCount: 1 });
-  return { provider, events, simulations, interfaces: { erc20, router } };
+  return { provider, events, simulations, unwrapped, interfaces: { erc20, router } };
 }

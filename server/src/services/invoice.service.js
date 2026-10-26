@@ -28,32 +28,68 @@ function formatInvoiceNumber(n) {
   return `INV-${String(n).padStart(4, "0")}`;
 }
 
+const NUMBER_ATTEMPTS = 4;
+
+function invoiceNumberValue(invoiceNumber) {
+  const match = /^INV-(\d+)$/.exec(String(invoiceNumber || ""));
+  return match ? Number(match[1]) : 0;
+}
+
 async function nextInvoiceNumber(userId) {
   const owner = await scopedRepo(userId).self.update({ $inc: { invoiceSeq: 1 } }).select("invoiceSeq").lean();
   if (!owner) throw new Error("The account that owns this invoice no longer exists");
   return formatInvoiceNumber(owner.invoiceSeq);
 }
 
+async function highestInvoiceNumber(userId) {
+  const numbers = await scopedRepo(userId).debts.distinct("invoiceNumber", { invoiceNumber: { $type: "string" } });
+  return numbers.reduce((highest, n) => Math.max(highest, invoiceNumberValue(n)), 0);
+}
+
+async function realignInvoiceSeq(userId) {
+  const highest = await highestInvoiceNumber(userId);
+  await scopedRepo(userId).self.updateOne({ $max: { invoiceSeq: highest } });
+  return highest;
+}
+
+function isInvoiceNumberClash(err) {
+  if (!err || err.code !== 11000) return false;
+  if (err.keyPattern) return Object.prototype.hasOwnProperty.call(err.keyPattern, "invoiceNumber");
+  return /invoiceNumber/.test(String(err.message || ""));
+}
+
+async function withInvoiceNumber(userId, write) {
+  for (let attempt = 0; attempt < NUMBER_ATTEMPTS; attempt++) {
+    const number = await nextInvoiceNumber(userId);
+    try {
+      return await write(number);
+    } catch (err) {
+      if (!isInvoiceNumberClash(err)) throw err;
+      const highest = await realignInvoiceSeq(userId);
+      console.warn(
+        `[invoices] ${number} was already taken in account ${userId}; the counter was behind the numbers in use ` +
+          `and has been moved up to ${formatInvoiceNumber(highest)}.`
+      );
+    }
+  }
+  throw new Error("This invoice could not be given a number");
+}
+
 async function ensureInvoiceNumber(debt) {
   if (debt.invoiceNumber) return debt.invoiceNumber;
   const debts = scopedRepo(debt.userId).debts;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const number = await nextInvoiceNumber(debt.userId);
-    try {
-      const res = await debts.updateOne({ _id: debt._id, invoiceNumber: null }, { $set: { invoiceNumber: number } });
-      if (res.modifiedCount) {
-        debt.invoiceNumber = number;
-        return number;
-      }
-    } catch (err) {
-      if (!err || err.code !== 11000) throw err;
-      continue;
-    }
-    const fresh = await debts.findById(debt._id).select("invoiceNumber").lean();
-    if (fresh && fresh.invoiceNumber) {
-      debt.invoiceNumber = fresh.invoiceNumber;
-      return fresh.invoiceNumber;
-    }
+  const assigned = await withInvoiceNumber(debt.userId, async (number) => {
+    const res = await debts.updateOne({ _id: debt._id, invoiceNumber: null }, { $set: { invoiceNumber: number } });
+    return res.modifiedCount ? number : null;
+  });
+  if (assigned) {
+    debt.invoiceNumber = assigned;
+    return assigned;
+  }
+  const fresh = await debts.findById(debt._id).select("invoiceNumber").lean();
+  if (fresh && fresh.invoiceNumber) {
+    debt.invoiceNumber = fresh.invoiceNumber;
+    return fresh.invoiceNumber;
   }
   throw new Error("This invoice could not be given a number");
 }
@@ -296,7 +332,11 @@ function invoiceFileName(view) {
 
 module.exports = {
   formatInvoiceNumber,
+  invoiceNumberValue,
   nextInvoiceNumber,
+  highestInvoiceNumber,
+  realignInvoiceSeq,
+  withInvoiceNumber,
   ensureInvoiceNumber,
   ensurePublicToken,
   rotatePublicToken,

@@ -1,5 +1,6 @@
 const { z, text, numberish, integerish, emptyOr, chainId } = require("./fields");
 const { NOTIFY_PREF_KEYS } = require("../utils/notifyPrefs");
+const { DISPLAY_CURRENCIES } = require("../utils/displayCurrency");
 
 const email = text(254);
 const password = text(256);
@@ -69,6 +70,7 @@ module.exports = {
       autoSend: autoSend.optional(),
       notifyPrefs: notifyPrefs.optional(),
       crypto: crypto.optional(),
+      displayCurrency: z.enum(DISPLAY_CURRENCIES).optional(),
     }),
   },
   avatar: { body: z.object({ dataUrl: text(3 * 1024 * 1024).optional() }) },

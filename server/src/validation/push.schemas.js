@@ -12,4 +12,5 @@ module.exports = {
   resubscribe: { body: z.object({ oldEndpoint: text(2048).optional(), subscription: subscription.optional() }) },
   subscribe: { body: z.object({ subscription: subscription.optional(), replaces: text(2048).nullable().optional() }) },
   unsubscribe: { body: z.object({ endpoint: text(2048).optional() }) },
+  test: { body: z.object({ endpoint: text(2048).optional() }) },
 };

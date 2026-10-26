@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { DISPLAY_CURRENCIES } = require("../utils/displayCurrency");
 
 const bankDetailsSchema = new mongoose.Schema(
   {
@@ -111,6 +112,8 @@ const userSchema = new mongoose.Schema({
   },
 
   tradingMode: { type: String, enum: ["paper", "live"], default: "paper" },
+
+  displayCurrency: { type: String, enum: DISPLAY_CURRENCIES, default: "USD" },
 
   tradingLimits: {
     perTrade: { type: Number, default: null },

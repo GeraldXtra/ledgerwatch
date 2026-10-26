@@ -24,6 +24,7 @@ const walletTxSchema = new mongoose.Schema({
   route: { type: String, default: null },
   priceImpactPct: { type: Number, default: null },
   side: { type: String, enum: ["buy", "sell"], default: null },
+  cashValue: { type: Number, default: null },
   alertId: { type: mongoose.Schema.Types.ObjectId, ref: "Alert", default: null },
 
   amountOutActual: { type: String, default: null },

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Mail, MessageCircle, Send, TriangleAlert, X } from "lucide-react";
 import http from "../../api/http";
 import { Button, Modal, PageHeader, SkeletonLines, StatusPill, useToast } from "../../components/ui";
+import { channelName, deliveryNotes } from "./reminderDelivery";
 
 function formatDateTime(value) {
   const d = new Date(value);
@@ -18,7 +19,7 @@ const DELIVERY_LABEL = {
 
 function DeliveryChip({ delivery }) {
   const status = delivery.status || "queued";
-  const channel = delivery.channel === "email" ? "Email" : "WhatsApp";
+  const channel = channelName(delivery.channel);
   const title = delivery.error || (delivery.providerId ? `Provider ref: ${delivery.providerId}` : "");
   return (
     <span className={`delivery-chip delivery-${status}`} title={title}>
@@ -84,6 +85,7 @@ export default function ReminderPanel({ debt, result, onClose, inline = false })
       const sent = deliveries.filter((d) => d.status === "sent");
       const skipped = deliveries.filter((d) => d.status === "skipped");
       const failed = deliveries.filter((d) => d.status === "failed");
+      const queued = deliveries.filter((d) => d.status === "queued");
 
       if (sent.length) {
         toast(`Sent via ${sent.map((d) => d.channel).join(" & ")}.`, { type: "success" });
@@ -97,14 +99,15 @@ export default function ReminderPanel({ debt, result, onClose, inline = false })
           toast(`${d.channel}: ${d.error || "could not be sent"}`, { type: "error", duration: 9000 })
         );
       }
-      if (!sent.length && !failed.length && skipped.length) {
-        toast(
-          `Not configured on the server. ${skipped
-            .map((d) => d.channel)
-            .join(" & ")} skipped. Use "Open in WhatsApp" to send by hand.`,
-          { type: "info" }
-        );
-      }
+      skipped.forEach((d) =>
+        toast(`${channelName(d.channel)} not sent: ${d.error || "it was skipped"}`, { type: "info", duration: 9000 })
+      );
+      queued.forEach((d) =>
+        toast(`${channelName(d.channel)} not sent yet: ${d.error || "it is waiting to be sent"}`, {
+          type: "info",
+          duration: 9000,
+        })
+      );
       await loadReminders();
     } catch (err) {
       const served = err?.response?.data?.error;
@@ -237,6 +240,11 @@ export default function ReminderPanel({ debt, result, onClose, inline = false })
                     ))}
                   </div>
                 )}
+                {deliveryNotes(r.deliveries).map((note, i) => (
+                  <p key={`note-${i}`} className="muted small" style={{ margin: 0 }}>
+                    {note}
+                  </p>
+                ))}
               </li>
             ))}
           </ul>

@@ -162,7 +162,7 @@ function rawRegistry(mainnetEnabled) {
       key: "base",
       name: "Base",
       chainId: 8453,
-      rpcs: rpcList("https://mainnet.base.org", "https://base.drpc.org"),
+      rpcs: rpcList("https://base-rpc.publicnode.com", "https://mainnet.base.org", "https://base.drpc.org"),
       logSpan: 2000,
       explorer: "https://basescan.org",
       nativeSymbol: "ETH",

@@ -9,7 +9,7 @@ const { runPricePass } = require("./market.service");
 const { reportProblem } = require("./opsAlert.service");
 const { runPaymentWatchPass } = require("./paymentWatch.service");
 const { notifyUser, signActionToken } = require("./push.service");
-const { emailConfigured } = require("./notify.service");
+const { emailConfigured, emailConfigStatus, whatsappConfigStatus } = require("./notify.service");
 
 const DEFAULT_INTERVAL_MS = 60000;
 
@@ -33,6 +33,31 @@ const state = {
 
 let intervalHandle = null;
 
+const CHANNEL_NAMES = { email: "Email", whatsapp: "WhatsApp", reminder: "Reminder" };
+
+function isCadenceSkip(delivery) {
+  return delivery.status === "skipped" && /cadence window/i.test(String(delivery.error || ""));
+}
+
+function autoSendOutcome(deliveries) {
+  const list = deliveries || [];
+  const delivered = list.some((d) => d.status === "sent") || (list.length > 0 && list.every(isCadenceSkip));
+  const notSent = list.filter((d) => d.status !== "sent" && !isCadenceSkip(d));
+  return { delivered, notSent };
+}
+
+function notSentReason(d) {
+  if (d.channel === "whatsapp" && d.reason === "awaiting-send") {
+    return "this server cannot send WhatsApp messages by itself, so open the reminder and send it with one tap.";
+  }
+  return d.error || d.reason || "it was not sent";
+}
+
+function notSentText(notSent) {
+  const lines = notSent.map((d) => `${CHANNEL_NAMES[d.channel] || d.channel}: ${notSentReason(d)}`);
+  return `It was not sent automatically. ${lines.join(" ")}`.slice(0, 240);
+}
+
 async function doReminderPass({ userId } = {}) {
   const now = Date.now();
   const query = {
@@ -53,7 +78,9 @@ async function doReminderPass({ userId } = {}) {
     emailChannelOff: 0,
     noEmailAddress: 0,
     emailNotConfigured: 0,
+    notDelivered: 0,
   };
+  let reminderFailures = 0;
 
   const notDueQuery = { status: { $in: ["pending", "partially_paid"] }, dueDate: { $gt: new Date(now) } };
   if (userId) notDueQuery.userId = userId;
@@ -88,6 +115,7 @@ async function doReminderPass({ userId } = {}) {
 
       const autoSend = owner.autoSend || {};
       let autoDispatched = false;
+      let notSent = [];
       if (!autoSend.enabled) {
         skips.autoSendOff++;
       } else {
@@ -100,10 +128,22 @@ async function doReminderPass({ userId } = {}) {
         if (autoSend.email && debt.debtorEmail) channels.push("email");
         if (channels.length) {
           try {
-            await dispatchReminder(result.reminder, debt, owner, { channels });
-            autoDispatched = true;
+            const deliveries = await dispatchReminder(result.reminder, debt, owner, { channels });
+            const outcome = autoSendOutcome(deliveries);
+            autoDispatched = outcome.delivered;
+            notSent = outcome.notSent;
+            if (!outcome.delivered) skips.notDelivered++;
+            for (const d of deliveries.filter((x) => x.status === "failed")) {
+              reportProblem({
+                area: "reminders",
+                message: `An automatic ${d.channel} reminder could not be sent: ${d.error || d.reason || "no reason given"}`,
+                severity: "error",
+              });
+            }
           } catch (err) {
             console.error(`Automation: auto-send failed for debt ${debt._id}:`, err.message);
+            notSent = [{ channel: "reminder", error: err.message }];
+            skips.notDelivered++;
           }
         }
       }
@@ -119,8 +159,8 @@ async function doReminderPass({ userId } = {}) {
           actions.push({ action: "dismiss", title: "Dismiss" });
 
           await notifyUser(owner._id, {
-            title: `Reminder ready — ${debt.debtorName}`,
-            body: result.messageText.slice(0, 140),
+            title: notSent.length ? `Reminder not sent to ${debt.debtorName}` : `Reminder ready — ${debt.debtorName}`,
+            body: notSent.length ? notSentText(notSent) : result.messageText.slice(0, 140),
             tag: `reminder-${debt._id}`,
             type: "reminder",
             url: "/app",
@@ -133,6 +173,15 @@ async function doReminderPass({ userId } = {}) {
       }
     } catch (err) {
       console.error(`Automation: failed to remind debt ${debt._id}:`, err.message);
+      reminderFailures++;
+      if (!(err && err.status && err.status < 500)) {
+        reportProblem({
+          area: "reminders",
+          message: `A reminder could not be generated: ${err.message}`,
+          detail: err.stack,
+          severity: "error",
+        });
+      }
     }
   }
 
@@ -154,8 +203,14 @@ async function doReminderPass({ userId } = {}) {
       `[reminders] nothing to do: all ${debtsChecked} overdue debt(s) were reminded too recently for their cadence.`
     );
   }
+  if (skips.notDelivered || reminderFailures) {
+    console.warn(
+      `[reminders] ${skips.notDelivered} automatic reminder(s) reached nobody, so their owners were notified with the reason; ` +
+        `${reminderFailures} reminder(s) could not be generated.`
+    );
+  }
 
-  return { generated, debtsChecked, skips };
+  return { generated, debtsChecked, skips, failed: reminderFailures };
 }
 
 async function runAllPasses({ userId } = {}) {
@@ -234,6 +289,8 @@ async function runAllPasses({ userId } = {}) {
     return {
       generated: reminders.generated,
       debtsChecked: reminders.debtsChecked,
+      remindersNotDelivered: (reminders.skips && reminders.skips.notDelivered) || 0,
+      remindersFailed: reminders.failed || 0,
       alertsCreated: prices.alertsCreated,
       watchesChecked: prices.watchesChecked,
       watchesDeferred: prices.watchesDeferred,
@@ -294,7 +351,22 @@ function getStatus() {
     lastWalletTxsSettled: state.lastWalletTxsSettled,
     lastInboundAnnounced: state.lastInboundAnnounced,
     lastPassMs: state.lastPassMs,
+    reminderChannels: reminderChannels(),
   };
 }
 
-module.exports = { runAllPasses, startAutomation, getStatus };
+function reminderChannels() {
+  const email = emailConfigStatus();
+  const whatsapp = whatsappConfigStatus();
+  return {
+    email: { automatic: Boolean(email.configured), reason: email.reason || null },
+    whatsapp: {
+      provider: whatsapp.provider,
+      automatic: Boolean(whatsapp.automatic),
+      template: Boolean(whatsapp.template),
+      reason: whatsapp.reason || null,
+    },
+  };
+}
+
+module.exports = { runAllPasses, startAutomation, getStatus, reminderChannels, autoSendOutcome };

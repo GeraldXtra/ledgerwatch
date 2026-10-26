@@ -12,8 +12,13 @@ function clean(v) {
   return s && TEXT_RE.test(s) ? s : null;
 }
 
-function status(req, res) {
-  return res.json(ramp.rampStatus());
+async function status(req, res) {
+  try {
+    return res.json(await ramp.rampStatusChecked());
+  } catch (err) {
+    console.error("ramp status error:", err.message);
+    return res.json({ ...ramp.rampStatus(), keysAccepted: null, problem: `Whether Transak accepts this server could not be checked: ${err.message}` });
+  }
 }
 
 async function session(req, res) {

@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
-import { BellOff, BellRing, Send, TriangleAlert } from "lucide-react";
+import { BellOff, BellRing, RefreshCw, Send, TriangleAlert } from "lucide-react";
 import { Button, useToast } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import {
+  deviceKind,
   disablePush,
   enablePush,
   getPushState,
-  sendTestNotification,
+  renewPush,
+  runPushTest,
 } from "../../api/push";
+import { blockedAdvice, enableFailureText, syncFailureText } from "./pushReport";
+import PushTestResult from "./PushTestResult";
+import ReminderChannels from "../receivables/ReminderChannels";
 
 const CATEGORIES = [
   {
@@ -61,6 +66,7 @@ export default function NotificationsSection() {
 
   const [push, setPush] = useState(null);
   const [pushError, setPushError] = useState("");
+  const [testRun, setTestRun] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
@@ -119,18 +125,19 @@ export default function NotificationsSection() {
     setMsg("");
     try {
       const res = await enablePush();
+      setTestRun(null);
       setMsg(
         res.ok
           ? "Notifications enabled on this device. Send a test below to confirm."
           : res.reason === "denied"
-          ? "Your browser has blocked notifications for this site. See how to re-enable them below."
+          ? "Notifications are blocked for this site on this device. See how to allow them below."
           : res.reason === "dismissed"
           ? "The permission prompt was closed without choosing. Press enable again to retry."
           : res.reason === "not-configured"
           ? `Push is not configured on the server. ${res.detail || ""}`.trim()
           : res.reason === "unsupported"
           ? res.detail || "This browser cannot receive push notifications."
-          : `Could not enable notifications. ${res.detail || ""} In-app alerts still work.`.trim()
+          : `${enableFailureText(res)} In-app alerts still work.`
       );
     } catch (err) {
       setMsg(
@@ -167,13 +174,43 @@ export default function NotificationsSection() {
   async function test() {
     setBusy(true);
     setMsg("");
+    setTestRun({ phase: "sending" });
     try {
-      await sendTestNotification();
-      setMsg("Test sent. It appears in your notification area in a few seconds.");
+      const run = await runPushTest();
+      const testId = run.report && run.report.testId;
+      const waiting = Boolean(run.report.thisDevice && run.report.thisDevice.delivered);
+      setTestRun({ phase: "sent", sync: run.sync, report: run.report, renewed: run.renewed, receipt: waiting ? "waiting" : null });
+      setBusy(false);
+      refresh();
+      const receipt = await run.receipt;
+      if (receipt) {
+        setTestRun((current) =>
+          current && current.report && current.report.testId === testId ? { ...current, receipt } : current
+        );
+      }
     } catch (err) {
-      setMsg(err?.response?.data?.error || "Could not send a test notification.");
+      setTestRun({
+        phase: "failed",
+        error: err?.response?.data?.error || err.message || "the server did not answer",
+      });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function registerAgain() {
+    setBusy(true);
+    setMsg("");
+    try {
+      const res = await renewPush();
+      setMsg(
+        res.ok
+          ? "This device was registered again with a fresh subscription. Send a test to confirm."
+          : `${syncFailureText(res)} In-app alerts still work.`
+      );
+    } finally {
+      setBusy(false);
+      refresh();
     }
   }
 
@@ -210,14 +247,41 @@ export default function NotificationsSection() {
           </div>
         )}
 
+        {push && push.supported && push.subscribed && (
+          <div className="row space-between perm-row">
+            <span className="muted small">This device on the server</span>
+            <span
+              className={`pill ${
+                push.registered && push.keyMatches !== false
+                  ? "paid"
+                  : push.registered === false || push.keyMatches === false
+                  ? "overdue"
+                  : "pending"
+              }`}
+            >
+              {push.keyMatches === false
+                ? "Old server key"
+                : push.registered
+                ? "Registered"
+                : push.registered === false
+                ? "Not registered"
+                : "Could not check"}
+            </span>
+          </div>
+        )}
+
         {push && push.permission === "denied" && (
           <div className="against-note" style={{ marginTop: 10 }}>
             <TriangleAlert size={15} />
             <span>
-              Chrome will not ask again once blocked, so this has to be changed by hand: click the
-              icon at the left of the address bar, choose <strong>Site settings</strong>, set{" "}
-              <strong>Notifications</strong> to <strong>Allow</strong>, then reload this page and
-              press enable again.
+              {blockedAdvice(push.device || deviceKind()) || (
+                <>
+                  Chrome will not ask again once blocked, so this has to be changed by hand: click the
+                  icon at the left of the address bar, choose <strong>Site settings</strong>, set{" "}
+                  <strong>Notifications</strong> to <strong>Allow</strong>, then reload this page and
+                  press enable again.
+                </>
+              )}
             </span>
           </div>
         )}
@@ -241,7 +305,8 @@ export default function NotificationsSection() {
           </p>
         ) : push && !push.configured ? (
           <p className="muted small" style={{ marginTop: 8 }}>
-            Push is not configured on the server. In-app alerts still work everywhere.
+            Push is not configured on the server{push.problem ? `: ${push.problem}` : ""}. In-app
+            alerts still work everywhere.
           </p>
         ) : (
           <>
@@ -265,6 +330,11 @@ export default function NotificationsSection() {
                   <Send size={14} /> Send test notification
                 </Button>
               )}
+              {push && push.subscribed && (push.registered === false || push.keyMatches === false) && (
+                <Button disabled={busy} onClick={registerAgain}>
+                  <RefreshCw size={14} /> Register this device again
+                </Button>
+              )}
             </div>
           </>
         )}
@@ -274,6 +344,8 @@ export default function NotificationsSection() {
             {msg}
           </p>
         )}
+
+        <PushTestResult run={testRun} device={(push && push.device) || null} />
 
         <div style={{ marginTop: 16 }}>
           <div className="overline">Notify me about</div>
@@ -359,6 +431,10 @@ export default function NotificationsSection() {
             </span>
           </span>
         </label>
+
+        {autoSend.enabled && (
+          <ReminderChannels wantEmail={autoSend.email} wantWhatsapp={autoSend.whatsapp} />
+        )}
 
         {autoSend.enabled && autoSend.email && (
           <p className="muted small settings-note">

@@ -6,8 +6,10 @@ const erc20 = new ethers.Interface(ERC20_ALLOWANCE_ABI);
 
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
-function call(from, to, data) {
-  return { from, to, data };
+function call(from, to, data, value) {
+  const c = { from, to, data };
+  if (value && value > 0n) c.value = ethers.toQuantity(value);
+  return c;
 }
 
 function revertDetail(result) {
@@ -51,7 +53,7 @@ export async function simulateTrade({
 
   if (needsApproval) push("approve", call(from, tokenIn.address, erc20.encodeFunctionData("approve", [router, amountIn])));
   push("outBefore", call(from, tokenOut.address, erc20.encodeFunctionData("balanceOf", [from])));
-  push("swap", call(from, swapTx.to, swapTx.data));
+  push("swap", call(from, swapTx.to, swapTx.data, swapTx.value));
   push("outAfter", call(from, tokenOut.address, erc20.encodeFunctionData("balanceOf", [from])));
 
   const sellAmount = sellBack && amountOutMinimum > 0n ? amountOutMinimum : null;

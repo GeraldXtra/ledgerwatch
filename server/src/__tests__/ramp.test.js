@@ -132,6 +132,84 @@ describe("buying and selling with naira", () => {
   });
 });
 
+describe("LW-155 — a refusal from the provider's gateway says what to fix", () => {
+  function gateway({ sessionStatus = 401, sessionBody = { error: "invalid_api_key" }, refresh = { ok: true } } = {}) {
+    calls = [];
+    vi.stubGlobal("fetch", async (url, init) => {
+      calls.push({ url: String(url), headers: init.headers, body: JSON.parse(init.body) });
+      if (String(url).includes("refresh-token")) {
+        if (!refresh.ok) {
+          return {
+            ok: false,
+            status: 400,
+            headers: new Headers(),
+            json: async () => ({ error: { statusCode: 400, name: "Bad Request", message: 'Invalid API key. Please double check your API key and your "environment" name.' } }),
+          };
+        }
+        return { ok: true, status: 200, headers: new Headers(), json: async () => ({ data: { accessToken: `${ACCESS}-${calls.length}`, expiresAt: Math.floor(Date.now() / 1000) + 7 * 86400 } }) };
+      }
+      return { ok: false, status: sessionStatus, headers: new Headers({ "x-deny-reason": "invalid_api_key" }), json: async () => sessionBody };
+    });
+  }
+
+  it("names the IP allowlist and the domain when the gateway answers 401 invalid_api_key, after one token refresh", async () => {
+    process.env.TRANSAK_ENV = "production";
+    gateway();
+    const res = mockRes();
+    await controller.session({ user: await aUser(), body: { mode: "BUY", cryptoCurrencyCode: "USDT" } }, res);
+    expect(res.statusCode).toBe(502);
+    expect(res.body.error).toMatch(/invalid_api_key/);
+    expect(res.body.error).toMatch(/backend IP addresses/);
+    expect(res.body.error).toMatch(/www\.useledgerwatch\.co/);
+    expect(res.body.error).toMatch(/keys themselves were accepted/);
+    const sessions = calls.filter((c) => c.url.endsWith("/api/v2/auth/session"));
+    const refreshes = calls.filter((c) => c.url.includes("refresh-token"));
+    expect(refreshes).toHaveLength(2);
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0].headers["x-api-key"]).toBe("pk_test_key");
+    expect(sessions[1].headers["access-token"]).not.toBe(sessions[0].headers["access-token"]);
+    expect(sessions[0].url).toBe("https://api-gateway.transak.com/api/v2/auth/session");
+  });
+
+  it("reads a refusal whose body carries the code as a bare string", async () => {
+    gateway({ sessionStatus: 403, sessionBody: { error: "domain_not_whitelisted" } });
+    const res = mockRes();
+    await controller.session({ user: await aUser(), body: { mode: "SELL" } }, res);
+    expect(res.statusCode).toBe(502);
+    expect(res.body.error).toMatch(/domain_not_whitelisted/);
+    expect(res.body.error).not.toMatch(/HTTP 403/);
+  });
+
+  it("the status tells the owner that the keys were refused for this environment, with the fix", async () => {
+    gateway({ refresh: { ok: false } });
+    const res = mockRes();
+    await controller.status({}, res);
+    expect(res.body).toMatchObject({ configured: true, environment: "staging", keysAccepted: false, referrerDomain: "www.useledgerwatch.co" });
+    expect(res.body.problem).toMatch(/Invalid API key/);
+    expect(res.body.problem).toMatch(/TRANSAK_ENV/);
+  });
+
+  it("the status carries the last gateway refusal and the webhook address, and clears it after a success", async () => {
+    process.env.SERVER_URL = "https://ledgerwatch.example";
+    gateway();
+    const user = await aUser();
+    await controller.session({ user, body: { mode: "BUY" } }, mockRes());
+    let res = mockRes();
+    await controller.status({}, res);
+    expect(res.body.keysAccepted).toBe(true);
+    expect(res.body.webhookUrl).toBe("https://ledgerwatch.example/api/ramp/webhook");
+    expect(res.body.problem).toMatch(/backend IP addresses/);
+    expect(res.body.lastSessionProblem).toMatchObject({ status: 401, said: "invalid_api_key" });
+
+    transak();
+    await controller.session({ user, body: { mode: "BUY" } }, mockRes());
+    res = mockRes();
+    await controller.status({}, res);
+    expect(res.body.problem).toBeNull();
+    expect(res.body.lastSessionProblem).toBeNull();
+  });
+});
+
 describe("order updates from the provider", () => {
   async function opened(user) {
     transak();

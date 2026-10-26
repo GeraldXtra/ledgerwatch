@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">LedgerWatch</string>
+    <string name="title_activity_main">LedgerWatch</string>
+    <string name="package_name">co.useledgerwatch.app</string>
+    <string name="custom_url_scheme">co.useledgerwatch.app</string>
+</resources>

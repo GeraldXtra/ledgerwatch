@@ -54,6 +54,7 @@ module.exports = {
     query: z.object({ days: z.enum(["1", "7", "30", "90"]).optional() }),
   },
   prices: { query: z.object({ ids: coinIds.optional() }) },
+  fiatRates: {},
   markets: { query: z.object({ ids: coinIds.optional(), mode: mode.optional() }) },
   logos: { query: z.object({ ids: coinIds.optional(), symbols: coinIds.optional() }) },
 };

@@ -1,4 +1,5 @@
-const { getPrices } = require("../services/coingecko.service");
+const { getPrices, getFiatRates } = require("../services/coingecko.service");
+const { DISPLAY_CURRENCIES } = require("../utils/displayCurrency");
 
 async function get(req, res) {
   try {
@@ -20,4 +21,22 @@ async function get(req, res) {
   }
 }
 
-module.exports = { get };
+async function fiat(req, res) {
+  const { rates, stale, updatedAt, available } = await getFiatRates();
+  const offered = {};
+  const missing = [];
+  for (const code of DISPLAY_CURRENCIES) {
+    if (Number.isFinite(rates[code]) && rates[code] > 0) offered[code] = rates[code];
+    else missing.push(code);
+  }
+  return res.json({
+    base: "USD",
+    rates: offered,
+    missing,
+    stale,
+    available,
+    updatedAt: updatedAt ? new Date(updatedAt).toISOString() : null,
+  });
+}
+
+module.exports = { get, fiat };

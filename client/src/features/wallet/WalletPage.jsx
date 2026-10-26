@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
 import {
   ArrowDownToLine,
+  ArrowLeftRight,
   ArrowUpRight,
   Check,
   Copy,
@@ -15,8 +16,9 @@ import {
   Wallet as WalletIcon,
   X,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Button, Card, SkeletonLines, ToastProvider, useToast, PageHeader } from "../../components/ui";
+import useDisplayCurrency from "../currency/useDisplayCurrency";
 import { DetailPane } from "../../components/ui/Modal";
 import { useAuth } from "../../context/AuthContext";
 import { getProvider, ERC20_ABI, rpcErrorReason } from "./provider";
@@ -61,6 +63,7 @@ import AddTokenModal from "./AddTokenModal";
 import SendForm from "./SendForm";
 import ReceivePanel from "./ReceivePanel";
 import CollectedPanel from "./CollectedPanel";
+import SwapPanel from "./swap/SwapPanel";
 import TxHistory from "./TxHistory";
 
 function shorten(a) {
@@ -69,14 +72,6 @@ function shorten(a) {
 
 function stillCurrent(run) {
   return !run || run.live !== false;
-}
-
-function usd(n) {
-  return Number(n).toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  });
 }
 
 const BITCOIN_CHAINS = [
@@ -177,6 +172,14 @@ const NON_EVM_KINDS = new Set(["bitcoin", "utxo", "tron", "solana", "ton"]);
 
 function WalletInner() {
   const { user, applyUser } = useAuth();
+  const money = useDisplayCurrency();
+  const [params, setParams] = useSearchParams();
+  const [openRequest] = useState(() => {
+    const open = params.get("open");
+    if (open !== "receive" && open !== "swap") return null;
+    const wanted = Number(params.get("chain"));
+    return { open, chainId: Number.isInteger(wanted) && wanted > 0 ? wanted : null };
+  });
   const [chains, setChains] = useState([]);
   const [chainId, setChainId] = useState(null);
   const [enableMainnet, setEnableMainnet] = useState(false);
@@ -242,10 +245,29 @@ function WalletInner() {
           ...usable,
           ...NON_EVM_CHAINS.filter((c) => c.testnet || d.enableMainnet),
         ];
-        if (selectable.length) setChainId((prev) => prev || recallChain(selectable, d.defaultChainId));
+        const asked =
+          openRequest && openRequest.chainId && usable.some((c) => c.chainId === openRequest.chainId)
+            ? openRequest.chainId
+            : null;
+        if (asked) setChainId(asked);
+        else if (selectable.length) setChainId((prev) => prev || recallChain(selectable, d.defaultChainId));
+        if (openRequest) setPanel(openRequest.open);
       })
       .catch(() => setChains([]));
-  }, []);
+  }, [openRequest]);
+
+  useEffect(() => {
+    if (!openRequest) return;
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("open");
+        next.delete("chain");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [openRequest, setParams]);
 
   const chainTokens = useMemo(() => {
     if (!chain) return [];
@@ -259,8 +281,35 @@ function WalletInner() {
     if (!address || !chain) return;
     setBalLoading(true);
     try {
-      const provider = getProvider(chain.chainId);
-      const native = await provider.getBalance(address);
+      const provider = getProvider(chain.chainId, { batched: true });
+      const [native, ...tokenRows] = await Promise.all([
+        provider.getBalance(address),
+        ...chainTokens.map(async (t) => {
+          try {
+            const c = new ethers.Contract(t.address, ERC20_ABI, provider);
+            const bal = await c.balanceOf(address);
+            return {
+              symbol: t.symbol,
+              amount: ethers.formatUnits(bal, t.decimals),
+              native: false,
+              custom: Boolean(t.custom),
+              verified: !t.custom,
+              address: t.address,
+            };
+          } catch (tokenErr) {
+            return {
+              symbol: t.symbol,
+              amount: null,
+              unknown: true,
+              reason: rpcErrorReason(tokenErr),
+              native: false,
+              custom: Boolean(t.custom),
+              verified: !t.custom,
+              address: t.address,
+            };
+          }
+        }),
+      ]);
       const rows = [
         {
           symbol: chain.nativeSymbol,
@@ -268,32 +317,8 @@ function WalletInner() {
           native: true,
           verified: true,
         },
+        ...tokenRows,
       ];
-      for (const t of chainTokens) {
-        try {
-          const c = new ethers.Contract(t.address, ERC20_ABI, provider);
-          const bal = await c.balanceOf(address);
-          rows.push({
-            symbol: t.symbol,
-            amount: ethers.formatUnits(bal, t.decimals),
-            native: false,
-            custom: Boolean(t.custom),
-            verified: !t.custom,
-            address: t.address,
-          });
-        } catch (tokenErr) {
-          rows.push({
-            symbol: t.symbol,
-            amount: null,
-            unknown: true,
-            reason: rpcErrorReason(tokenErr),
-            native: false,
-            custom: Boolean(t.custom),
-            verified: !t.custom,
-            address: t.address,
-          });
-        }
-      }
       if (!stillCurrent(run)) return;
       setBalances(rows);
       setBalError(null);
@@ -673,7 +698,13 @@ function WalletInner() {
   }
 
   const panelTitle =
-    panel === "send" ? "Send" : panel === "receive" ? "Receive" : "Collected on invoices";
+    panel === "send"
+      ? "Send"
+      : panel === "receive"
+        ? "Receive"
+        : panel === "swap"
+          ? "Swap"
+          : "Collected on invoices";
 
   return (
     <>
@@ -702,6 +733,9 @@ function WalletInner() {
               </button>
               <Button onClick={() => openPanel("collected")} disabled={!chain}>
                 <Inbox size={16} /> Collected
+              </Button>
+              <Button onClick={() => openPanel("swap")} disabled={!chain}>
+                <ArrowLeftRight size={16} /> Swap
               </Button>
               <Button onClick={() => openPanel("send")} disabled={!chain}>
                 <ArrowUpRight size={16} /> Send
@@ -772,10 +806,11 @@ function WalletInner() {
           <div className="mm-hero">
               {balances ? (
                 <>
-                  <span className="mm-fiat">{usd(worth.total)}</span>
+                  <span className="mm-fiat">{money.format(worth.total)}</span>
                   <span className="mm-sub">
                     {chain ? `Held on ${chain.name}` : "Select a network"}
                   </span>
+                  {money.note && <span className="mm-caveat">{money.note}</span>}
 
                   {!worth.complete && (
                     <span className="mm-caveat">
@@ -946,7 +981,7 @@ function WalletInner() {
                           </span>
                           <span className="mm-row-right">
                             <span className="mm-row-fiat">
-                              {b.unknown ? "Unknown" : value != null ? usd(value) : "No price"}
+                              {b.unknown ? "Unknown" : value != null ? money.format(value) : "No price"}
                             </span>
                             <span className="mm-row-qty">
                               {b.unknown
@@ -1043,6 +1078,21 @@ function WalletInner() {
             )}
             {panel === "receive" && chain && (
               <ReceivePanel key={chain.chainId} address={address} chain={chain} />
+            )}
+            {panel === "swap" && chain && (
+              <SwapPanel
+                key={chain.chainId}
+                chain={chain}
+                address={address}
+                tokens={chainTokens}
+                balances={balances}
+                usdPrices={usdPrices}
+                limitOverrides={user?.tradingLimits}
+                onSwapped={() => {
+                  loadTxs();
+                  loadBalances();
+                }}
+              />
             )}
             {panel === "collected" && chain && (
               <CollectedPanel

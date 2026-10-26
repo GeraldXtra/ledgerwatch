@@ -102,7 +102,7 @@ describe("LW-022 — the server enforces the live trading caps before a swap is 
 
   it("refuses a swap it cannot value in dollars", async () => {
     const user = aUser();
-    const res = await record(user, { symbol: "WETH", tokenOutSymbol: "CBBTC", value: "1", amountOut: "0.03" });
+    const res = await record(user, { side: null, symbol: "ZZZ", tokenOutSymbol: "YYY", value: "1", amountOut: "0.03" });
     expect(res.statusCode).toBe(409);
     expect(res.body.code).toBe("unpriced_swap");
   });

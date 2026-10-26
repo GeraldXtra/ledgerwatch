@@ -189,9 +189,10 @@ function accountedOnChain(pa) {
   return unitsToNumber(accountedUnits(pa), pa.tokenDecimals);
 }
 
-async function expireDueAddresses({ userId } = {}) {
+async function expireDueAddresses({ userId, debtId } = {}) {
   const query = { status: "active", expiresAt: { $lte: new Date() } };
   if (userId) query.userId = userId;
+  if (debtId) query.debtId = debtId;
   try {
     const res = await PaymentAddress.updateMany(query, {
       $set: { status: "expired", expiredAt: new Date() },

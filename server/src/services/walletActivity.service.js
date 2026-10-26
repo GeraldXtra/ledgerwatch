@@ -44,6 +44,41 @@ async function eventForTx(tx) {
   const txRow = { label: "Transaction", value: short(tx.hash), href: explorer || undefined, mono: true };
   const tag = `tx-${tx._id}`;
 
+  if (tx.kind === "swap" && !tx.side) {
+    const gave = amount(tx.value, tx.symbol);
+    const got = amount(tx.amountOut, tx.tokenOutSymbol);
+    if (!ok) {
+      return {
+        category: "trades",
+        tag,
+        url: "/app/wallet",
+        symbol: tx.symbol,
+        title: `Swap failed on ${network}`,
+        body: `Your swap of ${gave} for ${tx.tokenOutSymbol || "another asset"} did not go through. Your ${tx.symbol} stayed in your wallet; only the network fee was spent.`,
+      };
+    }
+    return {
+      category: "trades",
+      tag,
+      url: "/app/wallet",
+      symbol: tx.tokenOutSymbol,
+      title: `Swapped ${gave} for ${got}`,
+      body: `On ${network}. The ${tx.tokenOutSymbol} is in your wallet.`,
+      email: {
+        subject: `You swapped ${gave} for ${got}`,
+        intro: `Your swap on ${network} has confirmed, and the ${tx.tokenOutSymbol} is in your wallet.`,
+        tone: "pos",
+        hero: { label: "You received", value: got, sub: `for ${gave}` },
+        rows: [
+          { label: "Network", value: network },
+          { label: "Route", value: tx.route || undefined },
+          { label: "Minimum received", value: tx.minAmountOut ? amount(tx.minAmountOut, tx.tokenOutSymbol) : undefined },
+          txRow,
+        ],
+      },
+    };
+  }
+
   if (tx.kind === "swap") {
     const gave = amount(tx.value, tx.symbol);
     const got = amount(tx.amountOut, tx.tokenOutSymbol);

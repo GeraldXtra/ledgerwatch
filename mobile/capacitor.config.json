@@ -1,0 +1,22 @@
+{
+  "appId": "co.useledgerwatch.app",
+  "appName": "LedgerWatch",
+  "webDir": "www",
+  "server": {
+    "url": "https://www.useledgerwatch.co/app",
+    "androidScheme": "https",
+    "cleartext": false,
+    "allowNavigation": [
+      "www.useledgerwatch.co",
+      "useledgerwatch.co",
+      "ledgerwatch-dmd3.onrender.com",
+      "challenges.cloudflare.com"
+    ]
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#F7F7F7",
+    "appendUserAgent": "LedgerWatchApp/1.0.0",
+    "webContentsDebuggingEnabled": false
+  }
+}

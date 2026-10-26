@@ -12,7 +12,12 @@ const {
   quoteForInvoice,
   stablecoinsFor,
 } = require("../services/paymentAddress.service");
-const { tokenBalanceUnits, confirmedUnsweptUnits, TOLERANCE } = require("../services/paymentWatch.service");
+const {
+  tokenBalanceUnits,
+  confirmedUnsweptUnits,
+  expireDueAddresses,
+  TOLERANCE,
+} = require("../services/paymentWatch.service");
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const HASH_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -131,6 +136,7 @@ async function list(req, res) {
     if (debtId === false) return res.status(400).json({ error: "That is not a valid invoice id" });
     if (debtId) query.debtId = debtId;
 
+    await expireDueAddresses({ userId: req.user._id, ...(debtId ? { debtId } : {}) });
     const page = await repo.paymentAddresses.find(query).sort({ createdAt: -1 }).limit(PAGE_SIZE);
     const total = await repo.paymentAddresses.countDocuments(query);
 

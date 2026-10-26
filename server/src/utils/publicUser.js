@@ -1,4 +1,5 @@
 const { notifyPrefsOf } = require("./notifyPrefs");
+const { displayCurrencyOf } = require("./displayCurrency");
 
 function publicUser(user) {
   if (!user) return null;
@@ -17,6 +18,7 @@ function publicUser(user) {
     tradingLimits: u.tradingLimits || {},
     authProvider: u.authProvider === "google" ? "google" : "password",
     tradingMode: u.tradingMode || "paper",
+    displayCurrency: displayCurrencyOf(u.displayCurrency),
     customTokens: u.customTokens || [],
     twoFactorEnabled: Boolean(u.twoFactor && u.twoFactor.enabled),
     pendingEmail: pendingEmailOf(u.emailChange),

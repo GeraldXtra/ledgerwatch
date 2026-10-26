@@ -2,13 +2,16 @@ import { ethers } from "ethers";
 import { getToken } from "../../api/http";
 import { API_BASE } from "../../api/base";
 
-export function getProvider(chainId) {
+const READ_BATCH = 12;
+
+export function getProvider(chainId, { batched = false } = {}) {
   const req = new ethers.FetchRequest(`${API_BASE}/api/wallet/rpc/${chainId}`);
   const token = getToken();
   if (token) req.setHeader("Authorization", `Bearer ${token}`);
   return new ethers.JsonRpcProvider(req, Number(chainId), {
     staticNetwork: true,
-    batchMaxCount: 1,
+    batchMaxCount: batched ? READ_BATCH : 1,
+    batchStallTime: batched ? 20 : 0,
   });
 }
 
