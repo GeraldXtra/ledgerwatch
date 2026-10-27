@@ -6,6 +6,8 @@ import http from "../api/http";
 import { Button, Field, Input } from "../components/ui";
 import LogoMark from "../components/LogoMark";
 import Turnstile, { turnstileEnabled, unloadTurnstile } from "../components/Turnstile";
+import { inNativeApp, onAppUrlOpen } from "../api/nativeApp";
+import { appReturnLink, parseSignInHash, signInHashOf, wantsAppReturn } from "./signInReturn";
 
 const OAUTH_NONCE_KEY = "ledgerwatch.oauth.nonce";
 
@@ -85,6 +87,7 @@ export default function AuthPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [secondStep, setSecondStep] = useState(null);
   const [secondCode, setSecondCode] = useState("");
+  const [appReturn, setAppReturn] = useState("");
 
   const isRegister = mode === "register";
   const isForgot = mode === "forgot";
@@ -93,37 +96,47 @@ export default function AuthPage() {
   useEffect(() => () => unloadTurnstile(), []);
 
   useEffect(() => {
+    const consume = (hash) => {
+      const parsed = parseSignInHash(hash);
+      if (!parsed) return;
+      if (parsed.error) {
+        setError(parsed.error);
+        return;
+      }
+      const expected = readOauthNonce();
+      clearOauthNonce();
+      if (!expected || parsed.nonce !== expected) {
+        setError(
+          inNativeApp()
+            ? "That sign in did not start in this app, so it was not used. Press Continue with Google here to sign in."
+            : "That sign in did not start in this browser, so it was not used. Press Continue with Google here to sign in."
+        );
+        return;
+      }
+      if (parsed.challenge) {
+        setSecondStep({ challenge: parsed.challenge });
+        return;
+      }
+      setBusy(true);
+      loginWithToken(parsed.token)
+        .catch(() =>
+          setError("Google signed you in, but the account could not be loaded. Please try again.")
+        )
+        .finally(() => setBusy(false));
+    };
+
     const hash = window.location.hash.replace(/^#/, "");
-    if (!hash) return;
-    const params = new URLSearchParams(hash);
-    const token = params.get("token");
-    const challenge = params.get("challenge");
-    const oauthError = params.get("error");
-    if (!token && !challenge && !oauthError) return;
-    window.history.replaceState(null, "", window.location.pathname + window.location.search);
-    if (oauthError) {
-      setError(oauthError);
-      return;
+    if (parseSignInHash(hash)) {
+      if (wantsAppReturn(window.location.search) && !inNativeApp()) {
+        const link = appReturnLink(hash);
+        setAppReturn(link);
+        window.location.replace(link);
+      } else {
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        consume(hash);
+      }
     }
-    const expected = readOauthNonce();
-    const given = params.get("n") || "";
-    clearOauthNonce();
-    if (!expected || given !== expected) {
-      setError(
-        "That sign in did not start in this browser, so it was not used. Press Continue with Google here to sign in."
-      );
-      return;
-    }
-    if (challenge) {
-      setSecondStep({ challenge });
-      return;
-    }
-    setBusy(true);
-    loginWithToken(token)
-      .catch(() =>
-        setError("Google signed you in, but the account could not be loaded. Please try again.")
-      )
-      .finally(() => setBusy(false));
+    return onAppUrlOpen((url) => consume(signInHashOf(url)));
   }, [loginWithToken]);
 
   const update = (k) => (e) => {
@@ -356,6 +369,31 @@ export default function AuthPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (appReturn) {
+    return (
+      <div className="gate">
+        <main className="gate-main">
+          <div className="gate-form">
+            <Link to="/" className="lw-brand gate-brand-sm" aria-label="LedgerWatch home">
+              <LogoMark size={34} />
+              <span className="lw-brand-name">
+                Ledger<em>Watch</em>
+              </span>
+            </Link>
+            <h1>Back to the app</h1>
+            <p className="sub">Google has signed you in. Open the LedgerWatch app to continue.</p>
+            <a className="btn btn-primary" href={appReturn} style={{ display: "flex", justifyContent: "center" }}>
+              Open LedgerWatch
+            </a>
+            <p className="gate-foot">
+              If the app does not open, start it yourself and sign in with your email and password.
+            </p>
+          </div>
+        </main>
+      </div>
+    );
   }
 
   return (
@@ -736,7 +774,7 @@ export default function AuthPage() {
                 onClick={() => {
                   const n = mintOauthNonce();
                   window.location.assign(
-                    `${http.defaults.baseURL}/api/auth/google?n=${encodeURIComponent(n)}`
+                    `${http.defaults.baseURL}/api/auth/google?n=${encodeURIComponent(n)}${inNativeApp() ? "&app=1" : ""}`
                   );
                 }}
               >

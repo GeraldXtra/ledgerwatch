@@ -87,9 +87,10 @@ describe("WhatsApp reminders through the Cloud API", () => {
     vi.spyOn(axios, "post").mockRejectedValue({ response: { data: { error: { code: 131047, message: "Re-engagement message" } } } });
     const res = await notify.sendWhatsApp("08031234567", "free text", TEMPLATE);
     expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/set WHATSAPP_CLOUD_TEMPLATE/);
+    expect(res.error).toMatch(/approved message template/);
+    expect(res.error).not.toMatch(/WHATSAPP_CLOUD_TEMPLATE/);
     expect(notify.whatsappConfigStatus()).toMatchObject({ provider: "cloud", automatic: true, template: false });
-    expect(notify.whatsappConfigStatus().reason).toMatch(/WHATSAPP_CLOUD_TEMPLATE/);
+    expect(notify.whatsappConfigStatus().reason).toMatch(/message template is approved/);
   });
 
   it("explains a template Meta does not recognise", async () => {

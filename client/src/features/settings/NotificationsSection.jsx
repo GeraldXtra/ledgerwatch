@@ -134,7 +134,7 @@ export default function NotificationsSection() {
           : res.reason === "dismissed"
           ? "The permission prompt was closed without choosing. Press enable again to retry."
           : res.reason === "not-configured"
-          ? `Push is not configured on the server. ${res.detail || ""}`.trim()
+          ? `Notifications are not set up yet. ${res.detail || ""}`.trim()
           : res.reason === "unsupported"
           ? res.detail || "This browser cannot receive push notifications."
           : `${enableFailureText(res)} In-app alerts still work.`
@@ -305,7 +305,7 @@ export default function NotificationsSection() {
           </p>
         ) : push && !push.configured ? (
           <p className="muted small" style={{ marginTop: 8 }}>
-            Push is not configured on the server{push.problem ? `: ${push.problem}` : ""}. In-app
+            Notifications are not set up yet{push.problem ? `: ${push.problem}` : ""}. In-app
             alerts still work everywhere.
           </p>
         ) : (
@@ -380,11 +380,6 @@ export default function NotificationsSection() {
             </span>
           </label>
         </div>
-
-        <p className="settings-note">
-          Desktop notifications need the browser running. It can be minimised, but not fully
-          quit. On Android install the app first; on iOS 16.4+ add it to your home screen.
-        </p>
       </div>
 
       <form className="settings-section stack" onSubmit={saveSending}>
@@ -414,7 +409,7 @@ export default function NotificationsSection() {
           />
           <span>
             <span className="toggle-title">WhatsApp</span>
-            <span className="muted small">Requires a Twilio number configured on the server.</span>
+            <span className="muted small">To the phone number on the invoice.</span>
           </span>
         </label>
         <label className={`toggle-row${autoSend.enabled ? "" : " is-disabled"}`}>
@@ -434,19 +429,6 @@ export default function NotificationsSection() {
 
         {autoSend.enabled && (
           <ReminderChannels wantEmail={autoSend.email} wantWhatsapp={autoSend.whatsapp} />
-        )}
-
-        {autoSend.enabled && autoSend.email && (
-          <p className="muted small settings-note">
-            <strong>About spam folders.</strong> Reminders sent from a personal Gmail address
-            frequently land in spam, and this is not something the app can fix from its side.
-            Mail providers check whether the sending domain authorised the message; a
-            gmail.com sender relayed on your behalf does not match, so it is treated with
-            suspicion however well the email is put together. LedgerWatch already does the
-            rest, a proper plain text alternative, unsubscribe headers, light inline images
-            and no tracking. Reliable inbox delivery needs a domain you own with SPF, DKIM and
-            DMARC records; the README lists the exact records.
-          </p>
         )}
 
         {error && <p className="error-text">{error}</p>}

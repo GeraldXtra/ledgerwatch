@@ -145,6 +145,7 @@ describe("LW-153 — an automatic reminder that reached nobody is not counted as
     expect(res.status).toBe(200);
     expect(res.body.reminderChannels.email).toMatchObject({ automatic: true, reason: null });
     expect(res.body.reminderChannels.whatsapp).toMatchObject({ provider: "link", automatic: false });
-    expect(res.body.reminderChannels.whatsapp.reason).toMatch(/WHATSAPP_PROVIDER=cloud/);
+    expect(res.body.reminderChannels.whatsapp.reason).toMatch(/one tap/);
+    expect(JSON.stringify(res.body.reminderChannels)).not.toMatch(/[A-Z]{2,}_[A-Z_]{2,}/);
   });
 });

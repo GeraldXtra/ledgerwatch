@@ -28,36 +28,37 @@ function sign(payload) {
 
 const NONCE_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
-function makeState(clientNonce) {
+function makeState(clientNonce, app) {
   const n = NONCE_RE.test(String(clientNonce || "")) ? String(clientNonce) : "";
-  const payload = `${Date.now()}.${crypto.randomBytes(12).toString("hex")}.${n}`;
+  const payload = `${Date.now()}.${crypto.randomBytes(12).toString("hex")}.${n}.${app ? "app" : "web"}`;
   return `${payload}.${sign(payload)}`;
 }
 
 function verifyState(state) {
   const raw = String(state || "");
   const at = raw.lastIndexOf(".");
-  if (at <= 0) return { ok: false, nonce: "" };
+  if (at <= 0) return { ok: false, nonce: "", app: false };
   const payload = raw.slice(0, at);
   const given = raw.slice(at + 1);
   const expected = sign(payload);
-  if (given.length !== expected.length) return { ok: false, nonce: "" };
+  if (given.length !== expected.length) return { ok: false, nonce: "", app: false };
   if (!crypto.timingSafeEqual(Buffer.from(given, "utf8"), Buffer.from(expected, "utf8"))) {
-    return { ok: false, nonce: "" };
+    return { ok: false, nonce: "", app: false };
   }
   const parts = payload.split(".");
   const ts = Number(parts[0]);
   const nonce = NONCE_RE.test(parts[2] || "") ? parts[2] : "";
-  return { ok: Number.isFinite(ts) && Date.now() - ts <= STATE_TTL_MS, nonce };
+  const app = parts[3] === "app";
+  return { ok: Number.isFinite(ts) && Date.now() - ts <= STATE_TTL_MS, nonce, app };
 }
 
-function authorizationUrl(clientNonce) {
+function authorizationUrl(clientNonce, { app = false } = {}) {
   const params = new URLSearchParams({
     client_id: String(process.env.GOOGLE_CLIENT_ID).trim(),
     redirect_uri: redirectUri(),
     response_type: "code",
     scope: "openid email profile",
-    state: makeState(clientNonce),
+    state: makeState(clientNonce, app),
     prompt: "select_account",
     access_type: "online",
   });
