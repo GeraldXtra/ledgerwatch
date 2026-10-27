@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CircleCheck, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 import http from "../../api/http";
 import { channelStatusLines } from "./reminderDelivery";
 
@@ -40,8 +40,8 @@ export default function ReminderChannels({ wantEmail, wantWhatsapp }) {
   return (
     <div className="stack-sm">
       {lines.map((line) => (
-        <p key={line.channel} className={line.ok ? "muted small" : "settings-note"} style={line.ok ? { margin: 0 } : undefined}>
-          {line.ok ? <CircleCheck size={13} /> : <TriangleAlert size={15} />} {line.text}
+        <p key={line.channel} className="settings-note">
+          <TriangleAlert size={15} /> {line.text}
         </p>
       ))}
     </div>

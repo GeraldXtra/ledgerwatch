@@ -242,10 +242,12 @@ async function sendViaCloud(toPhone, body, template) {
     const meta = err?.response?.data?.error;
     const code = meta?.code;
     let message = meta?.message || err.message;
+    let hint = "";
     if (code === 131047 || code === 131026) {
       message =
         "WhatsApp will not deliver free text to this number because they have not messaged you in the last 24 hours. " +
-        "Reminders to them need an approved message template: set WHATSAPP_CLOUD_TEMPLATE to its name.";
+        "Reminders to them need an approved message template, which is not set up yet.";
+      hint = " Set WHATSAPP_CLOUD_TEMPLATE to the approved template's name.";
     } else if (code === 132001 || code === 132000) {
       message =
         `WhatsApp could not use the template "${approved && approved.name}" (${meta?.message || "not found"}). ` +
@@ -253,7 +255,7 @@ async function sendViaCloud(toPhone, body, template) {
     } else if (code === 190) {
       message = "The WhatsApp Cloud token has expired or been revoked. Generate a new one in Meta Business settings.";
     }
-    console.error(`[whatsapp] cloud send failed (code=${code || "?"}): ${message}`);
+    console.error(`[whatsapp] cloud send failed (code=${code || "?"}): ${message}${hint}`);
     return { ok: false, reason: "send-failed", error: message, provider: "cloud" };
   }
 }
@@ -304,6 +306,13 @@ async function sendWhatsApp(toPhone, body, template = null) {
   };
 }
 
+const WHATSAPP_NOT_SET_UP =
+  "Automatic WhatsApp reminders are not fully set up, so they wait for you to send them with one tap from the invoice.";
+const WHATSAPP_NO_TEMPLATE =
+  "WhatsApp reminders are sent automatically, but reach only clients who have messaged you in the last 24 hours until a message template is approved.";
+const WHATSAPP_ONE_TAP =
+  "WhatsApp reminders are prepared for you to send with one tap from the invoice. Automatic WhatsApp sending is not switched on.";
+
 function whatsappConfigStatus() {
   const provider = whatsappProvider();
   if (provider === "cloud") {
@@ -314,11 +323,7 @@ function whatsappConfigStatus() {
       automatic: missing.length === 0,
       template,
       missing,
-      reason: missing.length
-        ? `WhatsApp Cloud API is missing: ${missing.join(", ")}.`
-        : template
-          ? null
-          : "Reminders reach only people who have messaged you in the last 24 hours until WHATSAPP_CLOUD_TEMPLATE names an approved template.",
+      reason: missing.length ? WHATSAPP_NOT_SET_UP : template ? null : WHATSAPP_NO_TEMPLATE,
     };
   }
   if (provider === "twilio") {
@@ -331,20 +336,14 @@ function whatsappConfigStatus() {
       automatic: missing.length === 0,
       template,
       missing,
-      reason: missing.length
-        ? `Twilio WhatsApp is missing: ${missing.join(", ")}.`
-        : template
-          ? null
-          : "Reminders reach only people who have messaged you in the last 24 hours until TWILIO_WHATSAPP_CONTENT_SID names an approved template.",
+      reason: missing.length ? WHATSAPP_NOT_SET_UP : template ? null : WHATSAPP_NO_TEMPLATE,
     };
   }
   return {
     provider: "link",
     automatic: false,
     missing: [],
-    reason:
-      "WhatsApp reminders are prepared for you to send with one tap. This is free and needs no account. " +
-      "For unattended sending, set up the WhatsApp Cloud API and set WHATSAPP_PROVIDER=cloud.",
+    reason: WHATSAPP_ONE_TAP,
   };
 }
 
@@ -389,7 +388,7 @@ async function sendEmail(to, subject, html, opts = {}) {
       ok: false,
       skipped: true,
       reason: "not-configured",
-      error: emailConfigStatus().reason || "Email is not configured on the server.",
+      error: "Email sending is not set up, so this could not be emailed.",
     };
   }
   if (!to) {

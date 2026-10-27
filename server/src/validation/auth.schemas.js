@@ -47,7 +47,7 @@ module.exports = {
   resetPassword: {
     body: z.object({ email: email.optional(), code: code.optional(), newPassword: password.optional() }),
   },
-  googleStart: { query: z.object({ n: text(200).optional() }) },
+  googleStart: { query: z.object({ n: text(200).optional(), app: text(4).optional() }) },
   googleCallback: {
     query: z.object({
       code: text(2048).optional(),

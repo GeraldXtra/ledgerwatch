@@ -6,43 +6,46 @@ const signToken = require("../utils/token");
 const google = require("../services/googleAuth.service");
 const tf = require("../services/twoFactor.service");
 
-function bounce(res, params) {
+function bounce(res, params, app = false) {
   const hash = new URLSearchParams(params).toString();
-  return res.redirect(`${google.clientBase()}/login#${hash}`);
+  return res.redirect(`${google.clientBase()}/login${app ? "?return=app" : ""}#${hash}`);
 }
 
 async function googleStart(req, res) {
+  const app = String(req.query.app || "") === "1";
   if (!google.googleConfigured()) {
-    return bounce(res, { error: "Sign in with Google is not switched on for this server." });
+    return bounce(res, { error: "Sign in with Google is not switched on here." }, app);
   }
   if (!google.serverBase()) {
-    return bounce(res, {
-      error: "SERVER_URL is not set on the server, so Google has nowhere to send you back to.",
-    });
+    return bounce(res, { error: "Sign in with Google is not set up here, so Google has nowhere to send you back to." }, app);
   }
   const n = String(req.query.n || "");
-  return res.redirect(google.authorizationUrl(google.NONCE_RE.test(n) ? n : ""));
+  return res.redirect(google.authorizationUrl(google.NONCE_RE.test(n) ? n : "", { app }));
 }
 
 async function googleCallback(req, res) {
+  let app = false;
   try {
     const { code, state, error } = req.query;
-    if (error) return bounce(res, { error: "Google sign in was cancelled." });
     const verified = google.verifyState(state);
+    app = Boolean(verified.app);
+    if (error) return bounce(res, { error: "Google sign in was cancelled." }, app);
     if (!verified.ok) {
-      return bounce(res, { error: "That sign in link has expired. Please start again." });
+      return bounce(res, { error: "That sign in link has expired. Please start again." }, app);
     }
-    if (!code) return bounce(res, { error: "Google did not return a sign in code." });
+    if (!code) return bounce(res, { error: "Google did not return a sign in code." }, app);
 
     const tokens = await google.exchangeCode(String(code));
     if (!tokens || !tokens.access_token) {
-      return bounce(res, { error: "Google did not complete the sign in. Please try again." });
+      return bounce(res, { error: "Google did not complete the sign in. Please try again." }, app);
     }
     const profile = await google.fetchProfile(tokens.access_token);
     if (!profile || !profile.sub || !profile.email || profile.email_verified !== true) {
-      return bounce(res, {
-        error: "Google has not verified that email address, so it cannot be used to sign in here.",
-      });
+      return bounce(
+        res,
+        { error: "Google has not verified that email address, so it cannot be used to sign in here." },
+        app
+      );
     }
 
     const email = String(profile.email).toLowerCase().trim();
@@ -89,14 +92,14 @@ async function googleCallback(req, res) {
       if (changed) await user.save();
     }
 
-    if (!user) return bounce(res, { error: "Could not sign you in. Please try again." });
+    if (!user) return bounce(res, { error: "Could not sign you in. Please try again." }, app);
     if (user.twoFactor && user.twoFactor.enabled) {
-      return bounce(res, { challenge: tf.issueChallenge(user), n: verified.nonce });
+      return bounce(res, { challenge: tf.issueChallenge(user), n: verified.nonce }, app);
     }
-    return bounce(res, { token: signToken(user._id, user.tokenVersion), n: verified.nonce });
+    return bounce(res, { token: signToken(user._id, user.tokenVersion), n: verified.nonce }, app);
   } catch (err) {
     console.error("google callback error:", err.message);
-    return bounce(res, { error: "Google sign in failed. Please try again." });
+    return bounce(res, { error: "Google sign in failed. Please try again." }, app);
   }
 }
 

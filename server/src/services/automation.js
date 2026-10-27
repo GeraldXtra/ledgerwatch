@@ -355,11 +355,13 @@ function getStatus() {
   };
 }
 
+const EMAIL_NOT_SET_UP = "Email reminders cannot be sent automatically: email sending is not set up.";
+
 function reminderChannels() {
   const email = emailConfigStatus();
   const whatsapp = whatsappConfigStatus();
   return {
-    email: { automatic: Boolean(email.configured), reason: email.reason || null },
+    email: { automatic: Boolean(email.configured), reason: email.configured ? null : EMAIL_NOT_SET_UP },
     whatsapp: {
       provider: whatsapp.provider,
       automatic: Boolean(whatsapp.automatic),

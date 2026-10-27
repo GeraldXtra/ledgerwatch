@@ -12,29 +12,17 @@ export function channelStatusLines(channels, { wantEmail = false, wantWhatsapp =
   const lines = [];
   const email = channels && channels.email;
   const whatsapp = channels && channels.whatsapp;
-  if (wantEmail && email) {
-    lines.push(
-      email.automatic
-        ? { channel: "email", ok: true, text: "Email: this server sends reminder emails by itself." }
-        : {
-            channel: "email",
-            ok: false,
-            text: `Email reminders cannot be sent automatically: ${email.reason || "email is not set up on the server."}`,
-          }
-    );
+  if (wantEmail && email && !email.automatic) {
+    lines.push({
+      channel: "email",
+      text: email.reason || "Email reminders cannot be sent automatically: email sending is not set up.",
+    });
   }
-  if (wantWhatsapp && whatsapp) {
-    if (whatsapp.automatic && !whatsapp.reason) {
-      lines.push({ channel: "whatsapp", ok: true, text: "WhatsApp: this server sends reminder messages by itself." });
-    } else {
-      lines.push({
-        channel: "whatsapp",
-        ok: false,
-        text: whatsapp.automatic
-          ? `WhatsApp reminders are sent automatically, with a limit: ${whatsapp.reason}`
-          : `WhatsApp reminders cannot be sent automatically: ${whatsapp.reason || "no WhatsApp provider is set up on the server."}`,
-      });
-    }
+  if (wantWhatsapp && whatsapp && (!whatsapp.automatic || whatsapp.reason)) {
+    lines.push({
+      channel: "whatsapp",
+      text: whatsapp.reason || "WhatsApp reminders cannot be sent automatically: WhatsApp sending is not set up.",
+    });
   }
   return lines;
 }
